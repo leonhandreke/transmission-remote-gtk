@@ -23,6 +23,6 @@
 
 #define TRG_TYPE_CELL_RENDERER_FILE_ICON trg_cell_renderer_file_icon_get_type()
 G_DECLARE_FINAL_TYPE(TrgCellRendererFileIcon, trg_cell_renderer_file_icon, TRG,
-                     CELL_RENDERER_FILE_ICON, GtkCellRendererPixbuf)
+                     CELL_RENDERER_FILE_ICON, GtkCellRenderer)
 
 GtkCellRenderer *trg_cell_renderer_file_icon_new(void);

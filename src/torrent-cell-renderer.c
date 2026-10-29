@@ -57,12 +57,12 @@ enum {
 
 #define DEFAULT_BAR_HEIGHT 12
 #define SMALL_SCALE        0.9
-#define COMPACT_ICON_SIZE  GTK_ICON_SIZE_MENU
-#define FULL_ICON_SIZE     GTK_ICON_SIZE_DND
+#define COMPACT_ICON_SIZE  GTK_ICON_SIZE_NORMAL
+#define FULL_ICON_SIZE     GTK_ICON_SIZE_LARGE
 
 #define FOREGROUND_COLOR_KEY "foreground-rgba"
 typedef GdkRGBA GtrColor;
-typedef cairo_t GtrDrawable;
+typedef GtkSnapshot GtrDrawable;
 typedef GtkRequisition GtrRequisition;
 
 /***
@@ -324,7 +324,7 @@ static void getStatusString(GString *gstr, TorrentCellRenderer *r)
 ****
 ***/
 
-static GdkPixbuf *get_icon(TorrentCellRenderer *r, GtkIconSize icon_size, GtkWidget *for_widget)
+static GIcon *get_icon(TorrentCellRenderer *r)
 {
     const char *mime_type;
 
@@ -340,7 +340,7 @@ static GdkPixbuf *get_icon(TorrentCellRenderer *r, GtkIconSize icon_size, GtkWid
         mime_type = FILE_MIME_TYPE;
 
     // return NULL;
-    return gtr_get_mime_type_icon(mime_type, icon_size, for_widget);
+    return gtr_get_mime_type_icon(mime_type);
 }
 
 /***
@@ -361,17 +361,17 @@ static void get_size_compact(TorrentCellRenderer *cell, GtkWidget *widget, gint 
     GtkRequisition icon_size;
     GtkRequisition name_size;
     GtkRequisition stat_size;
-    GdkPixbuf *icon;
+    GIcon *icon;
 
     GString *gstr_stat = cell->gstr1;
 
-    icon = get_icon(cell, COMPACT_ICON_SIZE, widget);
+    icon = get_icon(cell);
     g_string_truncate(gstr_stat, 0);
     getShortStatusString(gstr_stat, cell);
     gtk_cell_renderer_get_padding(GTK_CELL_RENDERER(cell), &xpad, &ypad);
 
     /* get the idealized cell dimensions */
-    g_object_set(cell->icon_renderer, "pixbuf", icon, NULL);
+    g_object_set(cell->icon_renderer, "gicon", icon, "icon-size", COMPACT_ICON_SIZE, NULL);
     gtr_cell_renderer_get_preferred_size(cell->icon_renderer, widget, NULL, &icon_size);
     g_object_set(cell->text_renderer, "text", torrent_get_name(cell->json), "ellipsize",
                  PANGO_ELLIPSIZE_NONE, "scale", 1.0, NULL);
@@ -401,12 +401,12 @@ static void get_size_full(TorrentCellRenderer *cell, GtkWidget *widget, gint *wi
     GtkRequisition name_size;
     GtkRequisition stat_size;
     GtkRequisition prog_size;
-    GdkPixbuf *icon;
+    GIcon *icon;
 
     GString *gstr_prog = cell->gstr1;
     GString *gstr_stat = cell->gstr2;
 
-    icon = get_icon(cell, FULL_ICON_SIZE, widget);
+    icon = get_icon(cell);
 
     g_string_truncate(gstr_stat, 0);
     getStatusString(gstr_stat, cell);
@@ -415,7 +415,7 @@ static void get_size_full(TorrentCellRenderer *cell, GtkWidget *widget, gint *wi
     gtk_cell_renderer_get_padding(GTK_CELL_RENDERER(cell), &xpad, &ypad);
 
     /* get the idealized cell dimensions */
-    g_object_set(cell->icon_renderer, "pixbuf", icon, NULL);
+    g_object_set(cell->icon_renderer, "gicon", icon, "icon-size", FULL_ICON_SIZE, NULL);
     gtr_cell_renderer_get_preferred_size(cell->icon_renderer, widget, NULL, &icon_size);
     g_object_set(cell->text_renderer, "text", torrent_get_name(cell->json), "weight",
                  PANGO_WEIGHT_BOLD, "scale", 1.0, "ellipsize", PANGO_ELLIPSIZE_NONE, NULL);
@@ -441,49 +441,58 @@ static void get_size_full(TorrentCellRenderer *cell, GtkWidget *widget, gint *wi
     g_object_unref(icon);
 }
 
-static void torrent_cell_renderer_get_size(GtkCellRenderer *cell, GtkWidget *widget,
-                                           const GdkRectangle *cell_area, gint *x_offset,
-                                           gint *y_offset, gint *width, gint *height)
+static void torrent_cell_renderer_get_size(GtkCellRenderer *cell, GtkWidget *widget, gint *width,
+                                           gint *height)
 {
     TorrentCellRenderer *self = TORRENT_CELL_RENDERER(cell);
 
     if (self) {
-        int w, h;
-
         if (self->compact)
-            get_size_compact(TORRENT_CELL_RENDERER(cell), widget, &w, &h);
+            get_size_compact(TORRENT_CELL_RENDERER(cell), widget, width, height);
         else
-            get_size_full(TORRENT_CELL_RENDERER(cell), widget, &w, &h);
-
-        if (width)
-            *width = w;
-
-        if (height)
-            *height = h;
-
-        if (x_offset)
-            *x_offset = cell_area ? cell_area->x : 0;
-
-        if (y_offset) {
-            int xpad, ypad;
-            gtk_cell_renderer_get_padding(cell, &xpad, &ypad);
-            *y_offset = cell_area ? (int)((cell_area->height - (ypad * 2 + h)) / 2.0) : 0;
-        }
+            get_size_full(TORRENT_CELL_RENDERER(cell), widget, width, height);
     }
+}
+
+static void torrent_cell_renderer_get_preferred_width(GtkCellRenderer *cell, GtkWidget *widget,
+                                                      gint *minimum, gint *natural)
+{
+    gint w = 0;
+
+    torrent_cell_renderer_get_size(cell, widget, &w, NULL);
+
+    if (minimum)
+        *minimum = w;
+    if (natural)
+        *natural = w;
+}
+
+static void torrent_cell_renderer_get_preferred_height(GtkCellRenderer *cell, GtkWidget *widget,
+                                                       gint *minimum, gint *natural)
+{
+    gint h = 0;
+
+    torrent_cell_renderer_get_size(cell, widget, NULL, &h);
+
+    if (minimum)
+        *minimum = h;
+    if (natural)
+        *natural = h;
 }
 
 static void get_text_color(TorrentCellRenderer *r, GtkWidget *widget, GtrColor *setme)
 {
-    static const GdkRGBA red = { 1.0, 0, 0, 0 };
+    static const GdkRGBA red = { 1.0, 0, 0, 1.0 };
 
-    if (r->error)
+    if (r->error) {
         *setme = red;
-    else if (r->flags & TORRENT_FLAG_PAUSED)
-        gtk_style_context_get_color(gtk_widget_get_style_context(widget),
-                                    GTK_STATE_FLAG_INSENSITIVE, setme);
-    else
-        gtk_style_context_get_color(gtk_widget_get_style_context(widget), GTK_STATE_FLAG_NORMAL,
-                                    setme);
+    } else {
+        /* GTK 4 has no per-state colour lookup, so dim the normal colour
+         * for paused torrents like an insensitive label. */
+        gtk_widget_get_color(widget, setme);
+        if (r->flags & TORRENT_FLAG_PAUSED)
+            setme->alpha *= 0.55;
+    }
 }
 
 static double get_percent_done(TorrentCellRenderer *r, gboolean *seed)
@@ -510,7 +519,7 @@ static void gtr_cell_renderer_render(GtkCellRenderer *renderer, GtrDrawable *dra
                                      GtkWidget *widget, const GdkRectangle *area,
                                      GtkCellRendererState flags)
 {
-    gtk_cell_renderer_render(renderer, drawable, widget, area, area, flags);
+    gtk_cell_renderer_snapshot(renderer, drawable, widget, area, area, flags);
 }
 
 static void torrent_cell_renderer_render(GtkCellRenderer *cell, GtrDrawable *window,
@@ -643,8 +652,9 @@ static void torrent_cell_renderer_class_init(TorrentCellRendererClass *klass)
     GObjectClass *gobject_class = G_OBJECT_CLASS(klass);
     GtkCellRendererClass *cell_class = GTK_CELL_RENDERER_CLASS(klass);
 
-    cell_class->render = torrent_cell_renderer_render;
-    cell_class->get_size = torrent_cell_renderer_get_size;
+    cell_class->snapshot = torrent_cell_renderer_render;
+    cell_class->get_preferred_width = torrent_cell_renderer_get_preferred_width;
+    cell_class->get_preferred_height = torrent_cell_renderer_get_preferred_height;
     gobject_class->set_property = torrent_cell_renderer_set_property;
     gobject_class->get_property = torrent_cell_renderer_get_property;
     gobject_class->dispose = torrent_cell_renderer_dispose;
@@ -784,7 +794,7 @@ static void render_compact(TorrentCellRenderer *cell, GtrDrawable *window, GtkWi
     GdkRectangle stat_area;
     GdkRectangle prog_area;
     GdkRectangle fill_area;
-    GdkPixbuf *icon;
+    GIcon *icon;
     GtrColor text_color;
     gboolean seed;
 
@@ -795,7 +805,7 @@ static void render_compact(TorrentCellRenderer *cell, GtrDrawable *window, GtkWi
     const gboolean sensitive = active || cell->error;
     GString *gstr_stat = cell->gstr1;
 
-    icon = get_icon(cell, COMPACT_ICON_SIZE, widget);
+    icon = get_icon(cell);
 
     g_string_truncate(gstr_stat, 0);
     getShortStatusString(gstr_stat, cell);
@@ -809,7 +819,7 @@ static void render_compact(TorrentCellRenderer *cell, GtrDrawable *window, GtkWi
     fill_area.height -= ypad * 2;
     icon_area = name_area = stat_area = prog_area = fill_area;
 
-    g_object_set(cell->icon_renderer, "pixbuf", icon, NULL);
+    g_object_set(cell->icon_renderer, "gicon", icon, "icon-size", COMPACT_ICON_SIZE, NULL);
     gtr_cell_renderer_get_preferred_size(cell->icon_renderer, widget, NULL, &size);
     icon_area.width = size.width;
     g_object_set(cell->text_renderer, "text", torrent_get_name(cell->json), "ellipsize",
@@ -832,7 +842,8 @@ static void render_compact(TorrentCellRenderer *cell, GtrDrawable *window, GtkWi
     *** RENDER
     **/
 
-    g_object_set(cell->icon_renderer, "pixbuf", icon, "sensitive", sensitive, NULL);
+    g_object_set(cell->icon_renderer, "gicon", icon, "icon-size", COMPACT_ICON_SIZE, "sensitive",
+                 sensitive, NULL);
     gtr_cell_renderer_render(cell->icon_renderer, window, widget, &icon_area, flags);
     g_object_set(cell->progress_renderer, "value", (gint)percentDone, "text", NULL, "sensitive",
                  sensitive, NULL);
@@ -860,7 +871,7 @@ static void render_full(TorrentCellRenderer *cell, GtrDrawable *window, GtkWidge
     GdkRectangle stat_area;
     GdkRectangle prog_area;
     GdkRectangle prct_area;
-    GdkPixbuf *icon;
+    GIcon *icon;
     GtrColor text_color;
     gboolean seed;
 
@@ -872,7 +883,7 @@ static void render_full(TorrentCellRenderer *cell, GtrDrawable *window, GtkWidge
     GString *gstr_prog = cell->gstr1;
     GString *gstr_stat = cell->gstr2;
 
-    icon = get_icon(cell, FULL_ICON_SIZE, widget);
+    icon = get_icon(cell);
     g_string_truncate(gstr_prog, 0);
     getProgressString(gstr_prog, cell);
     g_string_truncate(gstr_stat, 0);
@@ -881,7 +892,7 @@ static void render_full(TorrentCellRenderer *cell, GtrDrawable *window, GtkWidge
     get_text_color(cell, widget, &text_color);
 
     /* get the idealized cell dimensions */
-    g_object_set(cell->icon_renderer, "pixbuf", icon, NULL);
+    g_object_set(cell->icon_renderer, "gicon", icon, "icon-size", FULL_ICON_SIZE, NULL);
     gtr_cell_renderer_get_preferred_size(cell->icon_renderer, widget, NULL, &size);
     icon_area.width = size.width;
     icon_area.height = size.height;
@@ -939,7 +950,8 @@ static void render_full(TorrentCellRenderer *cell, GtrDrawable *window, GtkWidge
     *** RENDER
     **/
 
-    g_object_set(cell->icon_renderer, "pixbuf", icon, "sensitive", sensitive, NULL);
+    g_object_set(cell->icon_renderer, "gicon", icon, "icon-size", FULL_ICON_SIZE, "sensitive",
+                 sensitive, NULL);
     gtr_cell_renderer_render(cell->icon_renderer, window, widget, &icon_area, flags);
     g_object_set(cell->text_renderer, "text", torrent_get_name(cell->json), "scale", 1.0,
                  FOREGROUND_COLOR_KEY, &text_color, "ellipsize", PANGO_ELLIPSIZE_END, "weight",

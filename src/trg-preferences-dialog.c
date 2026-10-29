@@ -143,7 +143,7 @@ static void trg_preferences_response_cb(GtkDialog *dlg, gint res_id, gpointer da
         trg_pref_widget_desc_free((trg_pref_widget_desc *)li->data);
     g_list_free(self->widgets);
 
-    gtk_widget_destroy(GTK_WIDGET(dlg));
+    gtk_window_destroy(GTK_WINDOW(dlg));
     instance = NULL;
 }
 
@@ -168,10 +168,10 @@ static void entry_refresh(TrgPrefs *prefs, void *wdp)
     gchar *value = trg_prefs_get_string(prefs, wd->key, wd->flags);
 
     if (value) {
-        gtk_entry_set_text(GTK_ENTRY(wd->widget), value);
+        gtk_editable_set_text(GTK_EDITABLE(wd->widget), value);
         g_free(value);
     } else {
-        gtk_entry_set_text(GTK_ENTRY(wd->widget), "");
+        gtk_editable_set_text(GTK_EDITABLE(wd->widget), "");
     }
 }
 
@@ -179,7 +179,8 @@ static void entry_save(TrgPrefs *prefs, void *wdp)
 {
     trg_pref_widget_desc *wd = (trg_pref_widget_desc *)wdp;
 
-    trg_prefs_set_string(prefs, wd->key, gtk_entry_get_text(GTK_ENTRY(wd->widget)), wd->flags);
+    trg_prefs_set_string(prefs, wd->key, gtk_editable_get_text(GTK_EDITABLE(wd->widget)),
+                         wd->flags);
 }
 
 static GtkWidget *trgp_entry_new(TrgPreferencesDialog *self, gchar *key, int flags)
@@ -201,23 +202,23 @@ static void check_refresh(TrgPrefs *prefs, void *wdp)
     trg_pref_widget_desc *wd = (trg_pref_widget_desc *)wdp;
     gboolean value = trg_prefs_get_bool(prefs, wd->key, wd->flags);
 
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(wd->widget), value);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(wd->widget), value);
 }
 
 static void check_save(TrgPrefs *prefs, void *wdp)
 {
     trg_pref_widget_desc *wd = (trg_pref_widget_desc *)wdp;
-    trg_prefs_set_bool(prefs, wd->key, gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(wd->widget)),
+    trg_prefs_set_bool(prefs, wd->key, gtk_check_button_get_active(GTK_CHECK_BUTTON(wd->widget)),
                        wd->flags);
 }
 
-static void trgp_toggle_dependent(GtkToggleButton *b, gpointer data)
+static void trgp_toggle_dependent(GtkCheckButton *b, gpointer data)
 {
-    gtk_widget_set_sensitive(GTK_WIDGET(data), gtk_toggle_button_get_active(b));
+    gtk_widget_set_sensitive(GTK_WIDGET(data), gtk_check_button_get_active(b));
 }
 
 static GtkWidget *trgp_check_new(TrgPreferencesDialog *dlg, const char *mnemonic, gchar *key,
-                                 int flags, GtkToggleButton *dependency)
+                                 int flags, GtkCheckButton *dependency)
 {
     GtkWidget *w = gtk_check_button_new_with_mnemonic(mnemonic);
 
@@ -228,7 +229,7 @@ static GtkWidget *trgp_check_new(TrgPreferencesDialog *dlg, const char *mnemonic
 
     if (dependency) {
         g_signal_connect(dependency, "toggled", G_CALLBACK(trgp_toggle_dependent), w);
-        gtk_widget_set_sensitive(w, gtk_toggle_button_get_active(dependency));
+        gtk_widget_set_sensitive(w, gtk_check_button_get_active(dependency));
     }
 
     dlg->widgets = g_list_append(dlg->widgets, wd);
@@ -253,7 +254,7 @@ static void spin_save(TrgPrefs *prefs, void *wdp)
 }
 
 static GtkWidget *trgp_spin_new(TrgPreferencesDialog *dlg, gchar *key, int low, int high, int step,
-                                int flags, GtkToggleButton *dependency)
+                                int flags, GtkCheckButton *dependency)
 {
     GtkWidget *w = gtk_spin_button_new_with_range(low, high, step);
     trg_pref_widget_desc *wd = trg_pref_widget_desc_new(w, key, flags);
@@ -265,7 +266,7 @@ static GtkWidget *trgp_spin_new(TrgPreferencesDialog *dlg, gchar *key, int low, 
 
     if (dependency) {
         g_signal_connect(dependency, "toggled", G_CALLBACK(trgp_toggle_dependent), w);
-        gtk_widget_set_sensitive(w, gtk_toggle_button_get_active(dependency));
+        gtk_widget_set_sensitive(w, gtk_check_button_get_active(dependency));
     }
 
     spin_refresh(dlg->prefs, wd);
@@ -274,52 +275,44 @@ static GtkWidget *trgp_spin_new(TrgPreferencesDialog *dlg, gchar *key, int low, 
     return w;
 }
 
-static void toggle_filter_trackers(GtkToggleButton *w, gpointer win)
+static void toggle_filter_trackers(GtkCheckButton *w, gpointer win)
 {
     TrgStateSelector *selector = trg_main_window_get_state_selector(TRG_MAIN_WINDOW(win));
-    trg_state_selector_set_show_trackers(selector, gtk_toggle_button_get_active(w));
+    trg_state_selector_set_show_trackers(selector, gtk_check_button_get_active(w));
 }
 
-static void toggle_directories_first(GtkToggleButton *w, gpointer win)
+static void toggle_directories_first(GtkCheckButton *w, gpointer win)
 {
     TrgStateSelector *selector = trg_main_window_get_state_selector(TRG_MAIN_WINDOW(win));
-    trg_state_selector_set_directories_first(selector, gtk_toggle_button_get_active(w));
+    trg_state_selector_set_directories_first(selector, gtk_check_button_get_active(w));
 }
 
-static void toggle_tray_icon(GtkToggleButton *w, gpointer win)
-{
-    if (gtk_toggle_button_get_active(w))
-        trg_main_window_add_tray(TRG_MAIN_WINDOW(win));
-    else
-        trg_main_window_remove_tray(TRG_MAIN_WINDOW(win));
-}
-
-static void menu_bar_toggle_filter_dirs(GtkToggleButton *w, gpointer win)
+static void menu_bar_toggle_filter_dirs(GtkCheckButton *w, gpointer win)
 {
     TrgStateSelector *selector = trg_main_window_get_state_selector(TRG_MAIN_WINDOW(win));
-    trg_state_selector_set_show_dirs(selector, gtk_toggle_button_get_active(w));
+    trg_state_selector_set_show_dirs(selector, gtk_check_button_get_active(w));
 }
 
-static void view_states_toggled_cb(GtkToggleButton *w, gpointer data)
+static void view_states_toggled_cb(GtkCheckButton *w, gpointer data)
 {
     GtkWidget *scroll = gtk_widget_get_parent(
         GTK_WIDGET(trg_main_window_get_state_selector(TRG_MAIN_WINDOW(data))));
-    trg_widget_set_visible(scroll, gtk_toggle_button_get_active(w));
+    trg_widget_set_visible(scroll, gtk_check_button_get_active(w));
 }
 
-static void notebook_toggled_cb(GtkToggleButton *b, gpointer data)
+static void notebook_toggled_cb(GtkCheckButton *b, gpointer data)
 {
-    trg_main_window_notebook_set_visible(TRG_MAIN_WINDOW(data), gtk_toggle_button_get_active(b));
+    trg_main_window_notebook_set_visible(TRG_MAIN_WINDOW(data), gtk_check_button_get_active(b));
 }
 
 static void trgp_double_special_dependent(GtkWidget *widget, gpointer data)
 {
-    TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(gtk_widget_get_toplevel(widget));
+    TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(gtk_widget_get_root(widget));
     gtk_widget_set_sensitive(
         GTK_WIDGET(data),
-        gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))
+        gtk_check_button_get_active(GTK_CHECK_BUTTON(widget))
             && gtk_widget_get_sensitive(self->fullUpdateCheck)
-            && gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(self->fullUpdateCheck)));
+            && gtk_check_button_get_active(GTK_CHECK_BUTTON(self->fullUpdateCheck)));
 }
 
 static GtkWidget *trg_prefs_generalPage(TrgPreferencesDialog *dlg)
@@ -337,9 +330,9 @@ static GtkWidget *trg_prefs_generalPage(TrgPreferencesDialog *dlg)
 
     dlg->fullUpdateCheck = trgp_check_new(dlg, _("Full update every (?) updates"),
                                           TRG_PREFS_ACTIVEONLY_FULLSYNC_ENABLED, TRG_PREFS_PROFILE,
-                                          GTK_TOGGLE_BUTTON(activeOnly));
+                                          GTK_CHECK_BUTTON(activeOnly));
     w = trgp_spin_new(dlg, TRG_PREFS_ACTIVEONLY_FULLSYNC_EVERY, 2, INT_MAX, 1, TRG_PREFS_PROFILE,
-                      GTK_TOGGLE_BUTTON(dlg->fullUpdateCheck));
+                      GTK_CHECK_BUTTON(dlg->fullUpdateCheck));
     g_signal_connect(activeOnly, "toggled", G_CALLBACK(trgp_double_special_dependent), w);
 
     hig_workarea_add_row_w(t, &row, dlg->fullUpdateCheck, w, NULL);
@@ -446,13 +439,14 @@ static void name_changed_cb(GtkWidget *w, gpointer data)
     model = gtk_combo_box_get_model(combo);
 
     if (gtk_combo_box_get_active_iter(combo, &iter)) {
-        gtk_list_store_set(GTK_LIST_STORE(model), &iter, 1, gtk_entry_get_text(GTK_ENTRY(w)), -1);
+        gtk_list_store_set(GTK_LIST_STORE(model), &iter, 1, gtk_editable_get_text(GTK_EDITABLE(w)),
+                           -1);
     }
 }
 
 static void del_profile_cb(GtkWidget *w, gpointer data)
 {
-    GtkWidget *win = gtk_widget_get_toplevel(w);
+    GtkWidget *win = GTK_WIDGET(gtk_widget_get_root(w));
     TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(win);
     TrgPrefs *prefs = self->prefs;
     GtkComboBox *combo = GTK_COMBO_BOX(data);
@@ -471,7 +465,7 @@ static void del_profile_cb(GtkWidget *w, gpointer data)
 
 static void add_profile_cb(GtkWidget *w, gpointer data)
 {
-    GtkWidget *win = gtk_widget_get_toplevel(w);
+    GtkWidget *win = GTK_WIDGET(gtk_widget_get_root(w));
     TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(win);
     GtkComboBox *combo = GTK_COMBO_BOX(data);
     GtkTreeModel *profileModel = gtk_combo_box_get_model(combo);
@@ -527,17 +521,17 @@ static GtkWidget *trg_prefs_viewPage(TrgPreferencesDialog *dlg)
     hig_workarea_add_wide_control(t, &row, w);
 
     w = trgp_check_new(dlg, _("Directory filters"), TRG_PREFS_KEY_FILTER_DIRS, TRG_PREFS_GLOBAL,
-                       GTK_TOGGLE_BUTTON(dep));
+                       GTK_CHECK_BUTTON(dep));
     g_signal_connect(G_OBJECT(w), "toggled", G_CALLBACK(menu_bar_toggle_filter_dirs), dlg->win);
     hig_workarea_add_wide_control(t, &row, w);
 
     w = trgp_check_new(dlg, _("Tracker filters"), TRG_PREFS_KEY_FILTER_TRACKERS, TRG_PREFS_GLOBAL,
-                       GTK_TOGGLE_BUTTON(dep));
+                       GTK_CHECK_BUTTON(dep));
     g_signal_connect(G_OBJECT(w), "toggled", G_CALLBACK(toggle_filter_trackers), dlg->win);
     hig_workarea_add_wide_control(t, &row, w);
 
     w = trgp_check_new(dlg, _("Directories first"), TRG_PREFS_KEY_DIRECTORIES_FIRST,
-                       TRG_PREFS_GLOBAL, GTK_TOGGLE_BUTTON(dep));
+                       TRG_PREFS_GLOBAL, GTK_CHECK_BUTTON(dep));
     g_signal_connect(G_OBJECT(w), "toggled", G_CALLBACK(toggle_directories_first), dlg->win);
     hig_workarea_add_wide_control(t, &row, w);
 
@@ -550,17 +544,17 @@ static GtkWidget *trg_prefs_viewPage(TrgPreferencesDialog *dlg)
 
     tray = trgp_check_new(dlg, _("Show in system tray"), TRG_PREFS_KEY_SYSTEM_TRAY,
                           TRG_PREFS_GLOBAL, NULL);
-    g_signal_connect(G_OBJECT(tray), "toggled", G_CALLBACK(toggle_tray_icon), dlg->win);
 
-    if (!HAVE_LIBAPPINDICATOR) {
-        gtk_widget_set_sensitive(tray, FALSE);
-        gtk_widget_set_tooltip_text(tray, _("System tray not supported."));
-    }
+    /* There is no system tray support in the GTK 4 build */
+    gtk_widget_set_sensitive(tray, FALSE);
+    gtk_widget_set_tooltip_text(tray, _("System tray not supported."));
 
     hig_workarea_add_wide_control(t, &row, tray);
 
     w = trgp_check_new(dlg, _("Minimize to tray"), TRG_PREFS_KEY_MINIMIZE_TO_TRAY, TRG_PREFS_GLOBAL,
-                       GTK_TOGGLE_BUTTON(tray));
+                       NULL);
+    gtk_widget_set_sensitive(w, FALSE);
+    gtk_widget_set_tooltip_text(w, _("System tray not supported."));
     hig_workarea_add_wide_control(t, &row, w);
 
     hig_workarea_add_section_title(t, &row, _("Notifications"));
@@ -600,13 +594,17 @@ static GtkWidget *trg_prefs_serverPage(TrgPreferencesDialog *dlg)
     profileButtonsHbox = trg_hbox_new(FALSE, 0);
     w = gtk_button_new_with_label(_("New"));
     g_signal_connect(w, "clicked", G_CALLBACK(add_profile_cb), dlg->profileComboBox);
-    gtk_box_pack_start(GTK_BOX(profileButtonsHbox), w, FALSE, FALSE, 4);
+    gtk_widget_set_margin_start(w, 4);
+    gtk_widget_set_margin_end(w, 4);
+    gtk_box_append(GTK_BOX(profileButtonsHbox), w);
 
     dlg->profileDelButton = gtk_button_new_with_label(_("Delete"));
     g_signal_connect(dlg->profileDelButton, "clicked", G_CALLBACK(del_profile_cb),
                      dlg->profileComboBox);
     gtk_widget_set_sensitive(dlg->profileDelButton, FALSE);
-    gtk_box_pack_start(GTK_BOX(profileButtonsHbox), dlg->profileDelButton, FALSE, FALSE, 4);
+    gtk_widget_set_margin_start(dlg->profileDelButton, 4);
+    gtk_widget_set_margin_end(dlg->profileDelButton, 4);
+    gtk_box_append(GTK_BOX(profileButtonsHbox), dlg->profileDelButton);
 
     trg_prefs_profile_combo_populate(dlg, GTK_COMBO_BOX(dlg->profileComboBox), prefs);
     g_signal_connect(G_OBJECT(dlg->profileComboBox), "changed", G_CALLBACK(profile_changed_cb),
@@ -644,7 +642,7 @@ static GtkWidget *trg_prefs_serverPage(TrgPreferencesDialog *dlg)
     w = trgp_check_new(dlg, _("SSL"), TRG_PREFS_KEY_SSL, TRG_PREFS_PROFILE, NULL);
     hig_workarea_add_wide_control(t, &row, w);
     w = trgp_check_new(dlg, _("Validate SSL Certificate"), TRG_PREFS_KEY_SSL_VALIDATE,
-                       TRG_PREFS_PROFILE, GTK_TOGGLE_BUTTON(w));
+                       TRG_PREFS_PROFILE, GTK_CHECK_BUTTON(w));
     hig_workarea_add_wide_control(t, &row, w);
 
     w = trgp_spin_new(dlg, TRG_PREFS_KEY_TIMEOUT, 1, 3600, 1, TRG_PREFS_PROFILE, NULL);
@@ -669,15 +667,19 @@ static GtkWidget *trg_prefs_serverPage(TrgPreferencesDialog *dlg)
 
     frame = gtk_frame_new(NULL);
     frameHbox = trg_hbox_new(FALSE, 2);
-    gtk_box_pack_start(GTK_BOX(frameHbox), profileLabel, FALSE, FALSE, 2);
-    gtk_box_pack_start(GTK_BOX(frameHbox), dlg->profileComboBox, FALSE, FALSE, 4);
+    gtk_widget_set_margin_start(profileLabel, 2);
+    gtk_widget_set_margin_end(profileLabel, 2);
+    gtk_box_append(GTK_BOX(frameHbox), profileLabel);
+    gtk_widget_set_margin_start(dlg->profileComboBox, 4);
+    gtk_widget_set_margin_end(dlg->profileComboBox, 4);
+    gtk_box_append(GTK_BOX(frameHbox), dlg->profileComboBox);
     gtk_frame_set_label_widget(GTK_FRAME(frame), frameHbox);
-    gtk_container_set_border_width(GTK_CONTAINER(frame), 5);
-    gtk_container_add(GTK_CONTAINER(frame), t);
-    scrolled_window = gtk_scrolled_window_new(NULL, NULL);
+    trg_widget_set_margins(frame, 5);
+    gtk_frame_set_child(GTK_FRAME(frame), t);
+    scrolled_window = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_window), GTK_POLICY_NEVER,
                                    GTK_POLICY_AUTOMATIC);
-    gtk_container_add(GTK_CONTAINER(scrolled_window), frame);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_window), frame);
 
     return scrolled_window;
 }
@@ -702,7 +704,7 @@ static GObject *trg_preferences_dialog_constructor(GType type, guint n_construct
     gtk_dialog_set_default_response(GTK_DIALOG(object), GTK_RESPONSE_OK);
 
     gtk_window_set_title(GTK_WINDOW(object), _("Local Preferences"));
-    gtk_container_set_border_width(GTK_CONTAINER(object), GUI_PAD);
+    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(object)), GUI_PAD);
 
     g_signal_connect(G_OBJECT(object), "response", G_CALLBACK(trg_preferences_response_cb), NULL);
 
@@ -724,9 +726,10 @@ static GObject *trg_preferences_dialog_constructor(GType type, guint n_construct
                              trg_prefs_dirsPage(TRG_PREFERENCES_DIALOG(object)),
                              gtk_label_new(_("Directories")));
 
-    gtk_container_set_border_width(GTK_CONTAINER(notebook), GUI_PAD);
+    trg_widget_set_margins(notebook, GUI_PAD);
 
-    gtk_box_pack_start(GTK_BOX(contentvbox), notebook, TRUE, TRUE, 0);
+    gtk_widget_set_vexpand(notebook, TRUE);
+    gtk_box_append(GTK_BOX(contentvbox), notebook);
 
     return object;
 }

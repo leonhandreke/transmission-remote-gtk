@@ -19,7 +19,10 @@ GtkWidget *hig_workarea_create(void)
 {
     GtkWidget *grid = gtk_grid_new();
 
-    gtk_container_set_border_width(GTK_CONTAINER(grid), GUI_PAD_BIG);
+    gtk_widget_set_margin_start(grid, GUI_PAD_BIG);
+    gtk_widget_set_margin_end(grid, GUI_PAD_BIG);
+    gtk_widget_set_margin_top(grid, GUI_PAD_BIG);
+    gtk_widget_set_margin_bottom(grid, GUI_PAD_BIG);
     gtk_grid_set_row_spacing(GTK_GRID(grid), GUI_PAD);
     gtk_grid_set_column_spacing(GTK_GRID(grid), GUI_PAD_BIG);
 
@@ -65,7 +68,7 @@ GtkWidget *hig_workarea_add_wide_checkbutton(GtkWidget *t, guint *row, const cha
 {
     GtkWidget *w = gtk_check_button_new_with_mnemonic(mnemonic_string);
 
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(w), is_active);
+    gtk_check_button_set_active(GTK_CHECK_BUTTON(w), is_active);
     hig_workarea_add_wide_control(t, row, w);
     return w;
 }
@@ -88,7 +91,8 @@ static void hig_workarea_add_tall_control(GtkWidget *t, guint row, GtkWidget *co
         gtk_label_set_xalign(GTK_LABEL(control), 0.0f);
         gtk_label_set_yalign(GTK_LABEL(control), 0.5f);
     }
-    g_object_set(control, "expand", TRUE, NULL);
+    gtk_widget_set_hexpand(control, TRUE);
+    gtk_widget_set_vexpand(control, TRUE);
     gtk_grid_attach(GTK_GRID(t), control, 1, row, 1, 1);
 }
 
@@ -127,8 +131,10 @@ GtkWidget *hig_workarea_add_tall_row(GtkWidget *table, guint *row, const char *m
     GtkWidget *l = gtk_label_new_with_mnemonic(mnemonic_string);
     GtkWidget *h = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     GtkWidget *v = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_pack_start(GTK_BOX(h), l, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(v), h, FALSE, FALSE, GUI_PAD_SMALL);
+    gtk_box_append(GTK_BOX(h), l);
+    gtk_widget_set_margin_top(h, GUI_PAD_SMALL);
+    gtk_widget_set_margin_bottom(h, GUI_PAD_SMALL);
+    gtk_box_append(GTK_BOX(v), h);
 
     hig_workarea_add_label_w(table, *row, v);
     hig_workarea_add_tall_control(table, *row, control);

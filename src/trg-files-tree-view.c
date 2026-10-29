@@ -44,8 +44,14 @@ struct _TrgFilesTreeView {
 
 G_DEFINE_TYPE(TrgFilesTreeView, trg_files_tree_view, TRG_TYPE_TREE_VIEW)
 
+static gboolean view_onPopupMenu(GtkWidget *treeview, GVariant *args, gpointer userdata);
+
 static void trg_files_tree_view_class_init(TrgFilesTreeViewClass *klass)
 {
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+
+    gtk_widget_class_add_binding(widget_class, GDK_KEY_F10, GDK_SHIFT_MASK, view_onPopupMenu, NULL);
+    gtk_widget_class_add_binding(widget_class, GDK_KEY_Menu, 0, view_onPopupMenu, NULL);
 }
 
 static gboolean send_updated_file_prefs_foreachfunc(GtkTreeModel *model,
@@ -118,7 +124,7 @@ static void send_updated_file_prefs(TrgFilesTreeView *tv)
 static void rename_file(GtkWidget *w G_GNUC_UNUSED, gpointer data)
 {
     TrgFilesTreeView *tv = TRG_FILES_TREE_VIEW(data);
-    gtk_widget_show_all(GTK_WIDGET(trg_file_rename_dialog_new(tv->win, tv->client, tv)));
+    gtk_window_present(GTK_WINDOW(trg_file_rename_dialog_new(tv->win, tv->client, tv)));
 }
 
 static void set_low(GtkWidget *w G_GNUC_UNUSED, gpointer data)
@@ -151,17 +157,32 @@ static void set_wanted(GtkWidget *w G_GNUC_UNUSED, gpointer data)
     send_updated_file_prefs(TRG_FILES_TREE_VIEW(data));
 }
 
-static gboolean view_onButtonPressed(GtkWidget *treeview, GdkEventButton *event, gpointer userdata)
+static void view_onButtonPressed(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
+                                 gpointer userdata)
 {
-    gboolean handled = trg_files_tree_view_onViewButtonPressed(
-        treeview, event, -1, FILESCOL_WANTED, G_CALLBACK(rename_file), G_CALLBACK(set_low),
-        G_CALLBACK(set_normal), G_CALLBACK(set_high), G_CALLBACK(set_wanted),
-        G_CALLBACK(set_unwanted), userdata);
+    GtkWidget *treeview = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    gboolean handled;
 
-    if (handled)
+    if (n_press != 1)
+        return;
+
+    handled = trg_files_tree_view_onViewButtonPressed(
+        treeview, gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)),
+        gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture)), x, y, -1,
+        FILESCOL_WANTED, G_CALLBACK(rename_file), G_CALLBACK(set_low), G_CALLBACK(set_normal),
+        G_CALLBACK(set_high), G_CALLBACK(set_wanted), G_CALLBACK(set_unwanted), userdata);
+
+    if (handled) {
+        gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
         send_updated_file_prefs(TRG_FILES_TREE_VIEW(treeview));
+    }
+}
 
-    return handled;
+static gboolean view_onPopupMenu(GtkWidget *treeview, GVariant *args, gpointer userdata)
+{
+    return trg_files_tree_view_viewOnPopupMenu(
+        treeview, G_CALLBACK(rename_file), G_CALLBACK(set_low), G_CALLBACK(set_normal),
+        G_CALLBACK(set_high), G_CALLBACK(set_wanted), G_CALLBACK(set_unwanted), userdata);
 }
 
 static gboolean search_func(GtkTreeModel *model, gint column, const gchar *key, GtkTreeIter *iter,
@@ -184,6 +205,7 @@ static void trg_files_tree_view_init(TrgFilesTreeView *self)
 {
     TrgTreeView *ttv = TRG_TREE_VIEW(self);
     trg_column_description *desc;
+    GtkGesture *gesture;
 
     desc = trg_tree_view_reg_column(ttv, TRG_COLTYPE_FILEICONTEXT, FILESCOL_NAME, _("Name"), "name",
                                     0);
@@ -202,8 +224,11 @@ static void trg_files_tree_view_init(TrgFilesTreeView *self)
                                         (GtkTreeViewSearchEqualFunc)search_func,
                                         gtk_tree_view_get_model(GTK_TREE_VIEW(self)), NULL);
 
-    g_signal_connect(self, "button-press-event", G_CALLBACK(view_onButtonPressed), NULL);
-    g_signal_connect(self, "popup-menu", G_CALLBACK(trg_files_tree_view_viewOnPopupMenu), NULL);
+    gesture = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), 0);
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(gesture), GTK_PHASE_CAPTURE);
+    g_signal_connect(gesture, "pressed", G_CALLBACK(view_onButtonPressed), NULL);
+    gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(gesture));
 }
 
 TrgFilesTreeView *trg_files_tree_view_new(TrgFilesModel *model, TrgMainWindow *win,

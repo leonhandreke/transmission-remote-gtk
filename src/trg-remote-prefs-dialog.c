@@ -105,7 +105,7 @@ static void trg_remote_prefs_response_cb(TrgRemotePrefsDialog *dlg, gint res_id,
 
     trg_json_widget_desc_list_free(dlg->widgets);
 
-    gtk_widget_destroy(GTK_WIDGET(dlg));
+    gtk_window_destroy(GTK_WINDOW(dlg));
     instance = NULL;
 }
 
@@ -145,13 +145,11 @@ static void trg_remote_prefs_dialog_set_property(GObject *object, guint property
 
 static void trg_remote_prefs_double_special_dependent(GtkWidget *widget, gpointer data)
 {
-    TrgRemotePrefsDialog *self
-        = TRG_REMOTE_PREFS_DIALOG(gtk_widget_get_toplevel(GTK_WIDGET(widget)));
+    TrgRemotePrefsDialog *self = TRG_REMOTE_PREFS_DIALOG(gtk_widget_get_root(GTK_WIDGET(widget)));
 
-    gtk_widget_set_sensitive(
-        GTK_WIDGET(data),
-        gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(self->alt_time_check))
-            || gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(self->alt_check)));
+    gtk_widget_set_sensitive(GTK_WIDGET(data),
+                             gtk_check_button_get_active(GTK_CHECK_BUTTON(self->alt_time_check))
+                                 || gtk_check_button_get_active(GTK_CHECK_BUTTON(self->alt_check)));
 }
 
 static void trg_rprefs_time_widget_savefunc(GtkWidget *w, JsonObject *obj, gchar *key)
@@ -172,7 +170,7 @@ static gboolean on_output(GtkSpinButton *spin, gpointer data)
     adj = gtk_spin_button_get_adjustment(spin);
     value = (int)gtk_adjustment_get_value(adj);
     text = g_strdup_printf("%02d", value);
-    gtk_entry_set_text(GTK_ENTRY(spin), text);
+    gtk_editable_set_text(GTK_EDITABLE(spin), text);
     g_free(text);
 
     return TRUE;
@@ -181,7 +179,7 @@ static gboolean on_output(GtkSpinButton *spin, gpointer data)
 static GtkWidget *trg_rprefs_timer_widget_spin_new(gint max, GtkWidget *alt_time_check)
 {
     GtkWidget *w = gtk_spin_button_new_with_range(0, max, 1);
-    gtk_widget_set_sensitive(w, gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(alt_time_check)));
+    gtk_widget_set_sensitive(w, gtk_check_button_get_active(GTK_CHECK_BUTTON(alt_time_check)));
     g_signal_connect(G_OBJECT(alt_time_check), "toggled",
                      G_CALLBACK(toggle_active_arg_is_sensitive), w);
     g_signal_connect(G_OBJECT(w), "output", G_CALLBACK(on_output), NULL);
@@ -208,9 +206,13 @@ static GtkWidget *trg_rprefs_time_widget_new(GList **wl, JsonObject *obj, const 
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(hourSpin), floor((gdouble)value / 60.0));
     gtk_spin_button_set_value(GTK_SPIN_BUTTON(minutesSpin), (gdouble)(value % 60));
 
-    gtk_box_pack_start(GTK_BOX(hbox), hourSpin, TRUE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(hbox), colonLabel, TRUE, FALSE, 2);
-    gtk_box_pack_start(GTK_BOX(hbox), minutesSpin, TRUE, FALSE, 0);
+    /* These expanded in GTK 3, but within a box that didn't, which doesn't
+     * work the same way in GTK 4 where hexpand propagates up. */
+    gtk_box_append(GTK_BOX(hbox), hourSpin);
+    gtk_widget_set_margin_start(colonLabel, 2);
+    gtk_widget_set_margin_end(colonLabel, 2);
+    gtk_box_append(GTK_BOX(hbox), colonLabel);
+    gtk_box_append(GTK_BOX(hbox), minutesSpin);
 
     *wl = g_list_append(*wl, wd);
 
@@ -225,9 +227,13 @@ static GtkWidget *trg_rprefs_time_begin_end_new(GList **wl, JsonObject *obj,
         = trg_rprefs_time_widget_new(wl, obj, SGET_ALT_SPEED_TIME_BEGIN, alt_time_check);
     GtkWidget *end = trg_rprefs_time_widget_new(wl, obj, SGET_ALT_SPEED_TIME_END, alt_time_check);
 
-    gtk_box_pack_start(GTK_BOX(hbox), begin, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(hbox), gtk_label_new("-"), FALSE, FALSE, 10);
-    gtk_box_pack_start(GTK_BOX(hbox), end, FALSE, FALSE, 0);
+    GtkWidget *dash = gtk_label_new("-");
+
+    gtk_box_append(GTK_BOX(hbox), begin);
+    gtk_widget_set_margin_start(dash, 10);
+    gtk_widget_set_margin_end(dash, 10);
+    gtk_box_append(GTK_BOX(hbox), dash);
+    gtk_box_append(GTK_BOX(hbox), end);
 
     return hbox;
 }
@@ -236,10 +242,9 @@ static GtkWidget *trg_rprefs_alt_speed_spin_new(GList **wl, JsonObject *obj, con
                                                 GtkWidget *alt_check, GtkWidget *alt_time_check)
 {
     GtkWidget *w = trg_json_widget_spin_int_new(wl, obj, key, NULL, 0, INT_MAX, 5);
-    gtk_widget_set_sensitive(
-        w,
-        gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(alt_check))
-            || gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(alt_time_check)));
+    gtk_widget_set_sensitive(w,
+                             gtk_check_button_get_active(GTK_CHECK_BUTTON(alt_check))
+                                 || gtk_check_button_get_active(GTK_CHECK_BUTTON(alt_time_check)));
     g_signal_connect(G_OBJECT(alt_time_check), "toggled",
                      G_CALLBACK(trg_remote_prefs_double_special_dependent), w);
     g_signal_connect(G_OBJECT(alt_check), "toggled",
@@ -253,7 +258,7 @@ static void trg_rprefs_alt_days_savefunc(GtkWidget *grid, JsonObject *obj, gchar
 
     for (gint i = 0, x = 1; i < 7; i++, x <<= 1) {
         GtkWidget *w = gtk_grid_get_child_at(GTK_GRID(grid), i, 0);
-        if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(w)))
+        if (gtk_check_button_get_active(GTK_CHECK_BUTTON(w)))
             days += x;
     }
 
@@ -284,11 +289,11 @@ static GtkWidget *trg_rprefs_alt_days(GList **wl, JsonObject *Obj, const gchar *
 #else
         GtkWidget *w = gtk_check_button_new_with_label(abdays_fallback[i]);
 #endif
-        gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(w), (days & x) == x);
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(w), (days & x) == x);
         gtk_grid_attach(GTK_GRID(grid), w, i, 0, 1, 1);
     }
 
-    gtk_widget_set_sensitive(grid, gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(alt_time_check)));
+    gtk_widget_set_sensitive(grid, gtk_check_button_get_active(GTK_CHECK_BUTTON(alt_time_check)));
 
     trg_json_widget_desc *wd = g_new0(trg_json_widget_desc, 1);
     wd->key = g_strdup(key);
@@ -447,7 +452,7 @@ static gboolean on_blocklist_updated(gpointer data)
             gchar *labelText
                 = g_strdup_printf(_("Blocklist (%" G_GINT64_FORMAT " entries)"),
                                   json_object_get_int_member(args, SGET_BLOCKLIST_SIZE));
-            gtk_button_set_label(GTK_BUTTON(self->blocklist_check), labelText);
+            gtk_check_button_set_label(GTK_CHECK_BUTTON(self->blocklist_check), labelText);
             g_free(labelText);
         } else {
             trg_client_error_dialog(GTK_WINDOW(response->cb_data), response);
@@ -614,7 +619,7 @@ static GObject *trg_remote_prefs_dialog_constructor(GType type, guint n_construc
     gtk_dialog_add_button(GTK_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
     gtk_dialog_add_button(GTK_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
 
-    gtk_container_set_border_width(GTK_CONTAINER(object), GUI_PAD);
+    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(object)), GUI_PAD);
 
     gtk_dialog_set_default_response(GTK_DIALOG(object), GTK_RESPONSE_OK);
 
@@ -638,9 +643,10 @@ static GObject *trg_remote_prefs_dialog_constructor(GType type, guint n_construc
                              trg_rprefs_limitsPage(TRG_REMOTE_PREFS_DIALOG(object), session),
                              gtk_label_new(_("Limits")));
 
-    gtk_container_set_border_width(GTK_CONTAINER(notebook), GUI_PAD);
+    trg_widget_set_margins(notebook, GUI_PAD);
 
-    gtk_box_pack_start(GTK_BOX(contentvbox), notebook, TRUE, TRUE, 0);
+    gtk_widget_set_vexpand(notebook, TRUE);
+    gtk_box_append(GTK_BOX(contentvbox), notebook);
 
     return object;
 }

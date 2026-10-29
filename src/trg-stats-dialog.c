@@ -98,7 +98,7 @@ static void trg_stats_response_cb(GtkDialog *dlg, gint res_id, gpointer data G_G
 {
     TrgStatsDialog *trg_dlg = TRG_STATS_DIALOG(dlg);
     g_clear_handle_id(&trg_dlg->update_stats_timer_tag, g_source_remove);
-    gtk_widget_destroy(GTK_WIDGET(dlg));
+    gtk_window_destroy(GTK_WINDOW(dlg));
     instance = NULL;
 }
 
@@ -271,7 +271,7 @@ static GObject *trg_stats_dialog_constructor(GType type, guint n_construct_prope
     gtk_window_set_destroy_with_parent(GTK_WINDOW(obj), TRUE);
     gtk_dialog_add_button(GTK_DIALOG(obj), _("_Close"), GTK_RESPONSE_CLOSE);
 
-    gtk_container_set_border_width(GTK_CONTAINER(obj), GUI_PAD);
+    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(obj)), GUI_PAD);
 
     gtk_dialog_set_default_response(GTK_DIALOG(obj), GTK_RESPONSE_CLOSE);
 
@@ -296,8 +296,9 @@ static GObject *trg_stats_dialog_constructor(GType type, guint n_construct_prope
 
     gtk_tree_view_set_model(GTK_TREE_VIEW(tv), GTK_TREE_MODEL(dlg->model));
 
-    gtk_container_set_border_width(GTK_CONTAINER(tv), GUI_PAD);
-    gtk_box_pack_start(GTK_BOX(gtk_bin_get_child(GTK_BIN(obj))), tv, TRUE, TRUE, 0);
+    trg_widget_set_margins(tv, GUI_PAD);
+    gtk_widget_set_vexpand(tv, TRUE);
+    gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(obj))), tv);
 
     dispatch_rpc_async(dlg->client, session_stats(), on_stats_reply, obj);
 

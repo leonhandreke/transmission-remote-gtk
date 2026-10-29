@@ -31,14 +31,18 @@ enum {
     PROP_FILE_NAME
 };
 
-struct _TrgCellRendererFileIcon {
-    GtkCellRendererPixbuf parent;
+/* GtkCellRendererPixbuf can't be subclassed in GTK 4, so this renderer wraps
+ * one and forwards sizing and drawing to it. */
 
+struct _TrgCellRendererFileIcon {
+    GtkCellRenderer parent;
+
+    GtkCellRenderer *pixbuf_renderer;
     gint64 file_id;
     gchar *text;
 };
 
-G_DEFINE_TYPE(TrgCellRendererFileIcon, trg_cell_renderer_file_icon, GTK_TYPE_CELL_RENDERER_PIXBUF)
+G_DEFINE_TYPE(TrgCellRendererFileIcon, trg_cell_renderer_file_icon, GTK_TYPE_CELL_RENDERER)
 
 static void trg_cell_renderer_file_icon_get_property(GObject *object, guint property_id,
                                                      GValue *value, GParamSpec *pspec)
@@ -59,7 +63,7 @@ static void trg_cell_renderer_file_icon_refresh(TrgCellRendererFileIcon *fi)
     if (fi->file_id == -2) {
         return;
     } else if (fi->file_id == -1) {
-        g_object_set(fi, "icon-name", "folder", NULL);
+        g_object_set(fi->pixbuf_renderer, "icon-name", "folder", NULL);
     } else if (fi->text) {
 #ifndef G_OS_WIN32
         gboolean uncertain;
@@ -72,13 +76,13 @@ static void trg_cell_renderer_file_icon_refresh(TrgCellRendererFileIcon *fi)
         g_free(mimetype);
 
         if (icon) {
-            g_object_set(fi, "gicon", icon, NULL);
+            g_object_set(fi->pixbuf_renderer, "gicon", icon, NULL);
             g_object_unref(icon);
         } else {
-            g_object_set(fi, "icon-name", "file", NULL);
+            g_object_set(fi->pixbuf_renderer, "icon-name", "file", NULL);
         }
 #else
-        g_object_set(fi, "icon-name", "file", NULL);
+        g_object_set(fi->pixbuf_renderer, "icon-name", "file", NULL);
 #endif
     }
 }
@@ -104,13 +108,46 @@ static void trg_cell_renderer_file_icon_set_property(GObject *object, guint prop
 static void trg_cell_renderer_file_icon_dispose(GObject *object)
 {
     TrgCellRendererFileIcon *self = TRG_CELL_RENDERER_FILE_ICON(object);
-    g_free(self->text);
+    g_clear_pointer(&self->text, g_free);
+    g_clear_object(&self->pixbuf_renderer);
     G_OBJECT_CLASS(trg_cell_renderer_file_icon_parent_class)->dispose(object);
+}
+
+static void trg_cell_renderer_file_icon_get_preferred_width(GtkCellRenderer *cell,
+                                                            GtkWidget *widget, int *minimum,
+                                                            int *natural)
+{
+    TrgCellRendererFileIcon *self = TRG_CELL_RENDERER_FILE_ICON(cell);
+    gtk_cell_renderer_get_preferred_width(self->pixbuf_renderer, widget, minimum, natural);
+}
+
+static void trg_cell_renderer_file_icon_get_preferred_height(GtkCellRenderer *cell,
+                                                             GtkWidget *widget, int *minimum,
+                                                             int *natural)
+{
+    TrgCellRendererFileIcon *self = TRG_CELL_RENDERER_FILE_ICON(cell);
+    gtk_cell_renderer_get_preferred_height(self->pixbuf_renderer, widget, minimum, natural);
+}
+
+static void trg_cell_renderer_file_icon_snapshot(GtkCellRenderer *cell, GtkSnapshot *snapshot,
+                                                 GtkWidget *widget,
+                                                 const GdkRectangle *background_area,
+                                                 const GdkRectangle *cell_area,
+                                                 GtkCellRendererState flags)
+{
+    TrgCellRendererFileIcon *self = TRG_CELL_RENDERER_FILE_ICON(cell);
+    gtk_cell_renderer_snapshot(self->pixbuf_renderer, snapshot, widget, background_area, cell_area,
+                               flags);
 }
 
 static void trg_cell_renderer_file_icon_class_init(TrgCellRendererFileIconClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkCellRendererClass *cell_class = GTK_CELL_RENDERER_CLASS(klass);
+
+    cell_class->get_preferred_width = trg_cell_renderer_file_icon_get_preferred_width;
+    cell_class->get_preferred_height = trg_cell_renderer_file_icon_get_preferred_height;
+    cell_class->snapshot = trg_cell_renderer_file_icon_snapshot;
 
     object_class->get_property = trg_cell_renderer_file_icon_get_property;
     object_class->set_property = trg_cell_renderer_file_icon_set_property;
@@ -131,6 +168,7 @@ static void trg_cell_renderer_file_icon_class_init(TrgCellRendererFileIconClass 
 
 static void trg_cell_renderer_file_icon_init(TrgCellRendererFileIcon *self)
 {
+    self->pixbuf_renderer = g_object_ref_sink(gtk_cell_renderer_pixbuf_new());
 }
 
 GtkCellRenderer *trg_cell_renderer_file_icon_new(void)

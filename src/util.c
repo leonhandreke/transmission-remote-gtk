@@ -289,11 +289,11 @@ GtkWidget *gtr_combo_box_new_enum(const char *text_1, ...)
 
 GtkWidget *my_scrolledwin_new(GtkWidget *child)
 {
-    GtkWidget *scrolled_win = gtk_scrolled_window_new(NULL, NULL);
+    GtkWidget *scrolled_win = gtk_scrolled_window_new();
     gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled_win), GTK_POLICY_AUTOMATIC,
                                    GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_shadow_type(GTK_SCROLLED_WINDOW(scrolled_win), GTK_SHADOW_ETCHED_IN);
-    gtk_container_add(GTK_CONTAINER(scrolled_win), child);
+    gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(scrolled_win), TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled_win), child);
     return scrolled_win;
 }
 
@@ -302,10 +302,7 @@ GtkWidget *my_scrolledwin_new(GtkWidget *child)
 
 void trg_widget_set_visible(GtkWidget *w, gboolean visible)
 {
-    if (visible)
-        gtk_widget_show(w);
-    else
-        gtk_widget_hide(w);
+    gtk_widget_set_visible(w, visible);
 }
 
 void trg_client_error_dialog(GtkWindow *parent, trg_response *response)
@@ -314,13 +311,176 @@ void trg_client_error_dialog(GtkWindow *parent, trg_response *response)
     trg_error_dialog(parent, msg);
 }
 
-void trg_error_dialog(GtkWindow *parent, gchar *msg)
+GtkWidget *trg_error_dialog(GtkWindow *parent, gchar *msg)
 {
     GtkWidget *dialog = gtk_message_dialog_new(parent, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR,
                                                GTK_BUTTONS_OK, "%s", msg);
     gtk_window_set_title(GTK_WINDOW(dialog), _("Error"));
-    gtk_dialog_run(GTK_DIALOG(dialog));
-    gtk_widget_destroy(dialog);
+    g_signal_connect(dialog, "response", G_CALLBACK(gtk_window_destroy), NULL);
+    gtk_window_present(GTK_WINDOW(dialog));
+
+    /* Doesn't block like gtk_dialog_run() did, callers can connect to
+     * "response" to continue after it's dismissed. */
+    return dialog;
+}
+
+/* Context menus: GTK 4 has no "button-press-event" or "popup-menu" signals,
+ * so use a click gesture for the secondary button and a shortcut for the
+ * keyboard (Shift+F10 and the Menu key). x and y are -1 when the menu was
+ * requested from the keyboard. */
+
+typedef struct {
+    TrgContextMenuFunc func;
+    gpointer data;
+} trg_context_menu_handler;
+
+static void context_menu_pressed_cb(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
+                                    trg_context_menu_handler *handler)
+{
+    GtkWidget *widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+
+    if (n_press != 1)
+        return;
+
+    if (handler->func(widget, x, y, handler->data))
+        gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+}
+
+static gboolean context_menu_shortcut_cb(GtkWidget *widget, GVariant *args, gpointer user_data)
+{
+    trg_context_menu_handler *handler = user_data;
+
+    return handler->func(widget, -1, -1, handler->data);
+}
+
+void trg_widget_add_context_menu(GtkWidget *widget, TrgContextMenuFunc func, gpointer data)
+{
+    trg_context_menu_handler *handler = g_new0(trg_context_menu_handler, 1);
+    GtkGesture *gesture = gtk_gesture_click_new();
+    GtkEventController *shortcuts = gtk_shortcut_controller_new();
+
+    handler->func = func;
+    handler->data = data;
+    g_object_set_data_full(G_OBJECT(widget), "trg-context-menu-handler", handler, g_free);
+
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(gesture), GTK_PHASE_CAPTURE);
+    g_signal_connect(gesture, "pressed", G_CALLBACK(context_menu_pressed_cb), handler);
+    gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(gesture));
+
+    gtk_shortcut_controller_add_shortcut(
+        GTK_SHORTCUT_CONTROLLER(shortcuts),
+        gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Shift>F10|Menu"),
+                         gtk_callback_action_new(context_menu_shortcut_cb, handler, NULL)));
+    /* capture, so a GtkTreeView's own key handling can't swallow it */
+    gtk_event_controller_set_propagation_phase(shortcuts, GTK_PHASE_CAPTURE);
+    gtk_widget_add_controller(widget, shortcuts);
+}
+
+static gboolean popover_unparent_idle(gpointer data)
+{
+    GtkWidget *popover = GTK_WIDGET(data);
+
+    if (gtk_widget_get_parent(popover))
+        gtk_widget_unparent(popover);
+
+    g_object_unref(popover);
+
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean popover_present_tick(GtkWidget *popover, GdkFrameClock *clock, gpointer data)
+{
+    guint *frames = data;
+
+    if (gtk_widget_get_parent(popover) && gtk_widget_get_visible(popover))
+        gtk_popover_present(GTK_POPOVER(popover));
+
+    return ++*frames < 3 ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+}
+
+static void popover_closed_cb(GtkPopover *popover, gpointer data)
+{
+    /* Defer, the activated item's action is dispatched after "closed". */
+    g_idle_add(popover_unparent_idle, g_object_ref(popover));
+}
+
+/* Pops up a context menu for model on parent, at x/y (-1 for the whole
+ * widget). actions (if not NULL) are inserted with prefix for the items. */
+void trg_popover_menu_popup(GtkWidget *parent, GMenuModel *model, gdouble x, gdouble y,
+                            const gchar *prefix, GActionGroup *actions)
+{
+    /* nested submenus, like GTK 3 menus, rather than sliding ones */
+    GtkWidget *popover = gtk_popover_menu_new_from_model_full(model, GTK_POPOVER_MENU_NESTED);
+    GtkWidget *anchor = parent;
+    GdkRectangle rect;
+    gboolean have_rect = FALSE;
+
+    if (actions)
+        gtk_widget_insert_action_group(popover, prefix, actions);
+
+    /* A GtkTreeView keeps the CSS nodes of its header buttons under a
+     * "header" node, so adding another child to it upsets GTK. Attach the
+     * popover to its parent (the scrolled window) instead. */
+    if (GTK_IS_TREE_VIEW(parent) && gtk_widget_get_parent(parent)) {
+        graphene_rect_t bounds;
+        GtkTreePath *path = NULL;
+
+        anchor = gtk_widget_get_parent(parent);
+
+        /* From the keyboard, point at the cursor row if there is one. */
+        if (x < 0 || y < 0)
+            gtk_tree_view_get_cursor(GTK_TREE_VIEW(parent), &path, NULL);
+        if (path) {
+            GdkRectangle area;
+            gint wx, wy;
+
+            gtk_tree_view_get_background_area(GTK_TREE_VIEW(parent), path, NULL, &area);
+            gtk_tree_view_convert_bin_window_to_widget_coords(GTK_TREE_VIEW(parent), area.x,
+                                                              area.y + area.height / 2, &wx, &wy);
+            x = MAX(wx, 0) + 20;
+            y = wy;
+            gtk_tree_path_free(path);
+        }
+
+        if (x >= 0 && y >= 0) {
+            graphene_point_t p;
+            if (gtk_widget_compute_point(parent, anchor, &GRAPHENE_POINT_INIT((float)x, (float)y),
+                                         &p)) {
+                x = p.x;
+                y = p.y;
+            }
+        } else if (gtk_widget_compute_bounds(parent, anchor, &bounds)) {
+            rect.x = (gint)bounds.origin.x;
+            rect.y = (gint)bounds.origin.y;
+            rect.width = (gint)bounds.size.width;
+            rect.height = (gint)bounds.size.height;
+            have_rect = TRUE;
+        }
+    }
+
+    gtk_widget_set_parent(popover, anchor);
+    gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
+    gtk_widget_set_halign(popover, GTK_ALIGN_START);
+
+    if (x >= 0 && y >= 0) {
+        rect.x = (gint)x;
+        rect.y = (gint)y;
+        rect.width = rect.height = 1;
+        have_rect = TRUE;
+    }
+
+    if (have_rect)
+        gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+
+    g_signal_connect(popover, "closed", G_CALLBACK(popover_closed_cb), NULL);
+    gtk_popover_popup(GTK_POPOVER(popover));
+
+    /* Widgets like GtkTreeView don't present popovers they don't know about
+     * in their size_allocate, so the menu would keep the size it had before
+     * its items were fully set up (eg. accelerator labels). Re-present it
+     * for the first few frames. */
+    gtk_widget_add_tick_callback(popover, popover_present_tick, g_new0(guint, 1), g_free);
 }
 
 gchar *make_error_message(JsonObject *response, gint status, gchar *err_msg)
@@ -520,6 +680,34 @@ char *tr_strlsize(char *buf, guint64 bytes, size_t buflen)
         tr_formatter_size_B(buf, bytes, buflen);
 
     return buf;
+}
+
+/* Replacement for GtkContainer:border-width */
+void trg_widget_set_margins(GtkWidget *w, gint margin)
+{
+    gtk_widget_set_margin_start(w, margin);
+    gtk_widget_set_margin_end(w, margin);
+    gtk_widget_set_margin_top(w, margin);
+    gtk_widget_set_margin_bottom(w, margin);
+}
+
+/* Remove the mnemonic underscores from a label, for places in GTK 4 that
+ * don't support mnemonics. */
+gchar *trg_strip_mnemonic(const gchar *label)
+{
+    GString *str = g_string_new(NULL);
+    const gchar *p;
+
+    for (p = label; *p; p++) {
+        if (*p == '_') {
+            if (p[1] != '_')
+                continue;
+            p++;
+        }
+        g_string_append_c(str, *p);
+    }
+
+    return g_string_free(str, FALSE);
 }
 
 GtkWidget *trg_hbox_new(gboolean homogeneous, gint spacing)

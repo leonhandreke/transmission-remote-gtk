@@ -29,7 +29,7 @@ typedef struct {
     void (*saveFunc)(GtkWidget *widget, JsonObject *obj, gchar *key);
 } trg_json_widget_desc;
 
-void toggle_active_arg_is_sensitive(GtkToggleButton *b, gpointer data);
+void toggle_active_arg_is_sensitive(GtkCheckButton *b, gpointer data);
 
 GtkWidget *trg_json_widget_check_new(GList **wl, JsonObject *obj, const gchar *key,
                                      const gchar *label, GtkWidget *toggleDep);

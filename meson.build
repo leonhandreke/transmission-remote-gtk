@@ -4,7 +4,7 @@ project(
   license: 'GPL2+',
   version: '1.7.1',
   meson_version: '>= 0.60.0',
-  default_options: ['b_pie=true', 'c_std=gnu99', 'warning_level=2', 'buildtype=debugoptimized'],
+  default_options: ['b_pie=true', 'c_std=gnu11', 'warning_level=2', 'buildtype=debugoptimized'],
 )
 
 project_name = meson.project_name()
@@ -27,7 +27,7 @@ glib_min_def = '-DGLIB_VERSION_MIN_REQUIRED=@0@'.format(glib_min)
 add_project_arguments(glib_min_def, language: 'c')
 
 # required dependencies
-gtk_dep = dependency('gtk+-3.0', version: '>= 3.22')
+gtk_dep = dependency('gtk4', version: '>= 4.10')
 gio_dep = dependency('gio-2.0', version: glib_version_str)
 glib_dep = dependency('glib-2.0', version: glib_version_str)
 json_dep = dependency('json-glib-1.0', version: '>= 1.2.8')
@@ -37,13 +37,10 @@ gthread_dep = dependency('gthread-2.0', version: glib_version_str)
 trg_deps = [gtk_dep, glib_dep, gio_dep, json_dep, libsoup_dep, gthread_dep]
 
 # optional dependencies
-libappindicator_dep = dependency(
-  'ayatana-appindicator3-0.1',
-  'appindicator3-0.1',
-  required: get_option('libappindicator'),
-)
-
-trg_deps += [libappindicator_dep]
+# libappindicator only exists for GTK 3 and cannot be used together with GTK 4.
+if get_option('libappindicator').enabled()
+  error('libappindicator (system tray) support is not available with GTK 4')
+endif
 
 # compiler
 cc = meson.get_compiler('c')
@@ -78,13 +75,6 @@ conf_data.set('G_DISABLE_CAST_CHECKS', not debug)
 
 # compile time features
 conf_data.set10('ENABLE_NL_LANGINFO', nl_langinfo)
-
-conf_data.set10('HAVE_LIBAPPINDICATOR', libappindicator_dep.found())
-conf_data.set10(
-  'HAVE_LIBAYATANA_APPINDICATOR',
-  libappindicator_dep.found()
-  and libappindicator_dep.name() == 'ayatana-appindicator3-0.1',
-)
 
 # compiler/linker flags
 flags = [

@@ -26,13 +26,13 @@
 #include "trg-torrent-tree-view.h"
 
 #define TRG_TYPE_MENU_BAR trg_menu_bar_get_type()
-G_DECLARE_FINAL_TYPE(TrgMenuBar, trg_menu_bar, TRG, MENU_BAR, GtkMenuBar)
+G_DECLARE_FINAL_TYPE(TrgMenuBar, trg_menu_bar, TRG, MENU_BAR, GObject)
 
-TrgMenuBar *trg_menu_bar_new(TrgMainWindow *win, TrgPrefs *prefs, TrgTorrentTreeView *ttv,
-                             GtkAccelGroup *accel_group);
-GtkWidget *trg_menu_bar_item_new(GtkMenuShell *shell, const gchar *text, gboolean sensitive);
+TrgMenuBar *trg_menu_bar_new(TrgMainWindow *win, TrgPrefs *prefs, TrgTorrentTreeView *ttv);
+GMenuModel *trg_menu_bar_get_model(TrgMenuBar *mb);
+void trg_menu_bar_set_accels(GtkApplication *app);
 
 void trg_menu_bar_torrent_actions_sensitive(TrgMenuBar *mb, gboolean sensitive);
 void trg_menu_bar_connected_change(TrgMenuBar *mb, gboolean connected);
 void trg_menu_bar_set_supports_queues(TrgMenuBar *mb, gboolean supportsQueues);
-GtkWidget *trg_menu_bar_file_connect_menu_new(TrgMainWindow *win, TrgPrefs *p);
+GMenu *trg_menu_bar_file_connect_menu_new(TrgMainWindow *win, TrgPrefs *p);

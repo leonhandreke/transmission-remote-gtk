@@ -78,5 +78,10 @@ void trg_tree_view_set_prefs(TrgTreeView *tv, TrgPrefs *prefs);
 void trg_tree_view_persist(TrgTreeView *tv, guint flags);
 void trg_tree_view_remove_all_columns(TrgTreeView *tv);
 void trg_tree_view_restore_sort(TrgTreeView *tv, guint flags);
-GtkWidget *trg_tree_view_sort_menu(TrgTreeView *tv, const gchar *label);
+#define TRG_TREE_VIEW_SORT_TYPE_ACTION   "sort-type"
+#define TRG_TREE_VIEW_SORT_COLUMN_ACTION "sort-column"
+
+/* Creates the stateful sort actions in map (a window, so "win." actions) and
+ * returns a menu using them. */
+GMenu *trg_tree_view_sort_menu(TrgTreeView *tv, GActionMap *map);
 gboolean trg_tree_view_is_column_showing(TrgTreeView *tv, gint index);

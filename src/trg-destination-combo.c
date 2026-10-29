@@ -131,13 +131,13 @@ void trg_destination_combo_save_selection(TrgDestinationCombo *combo_box)
 
 static inline GtkEntry *trg_destination_combo_get_entry(TrgDestinationCombo *combo)
 {
-    return GTK_ENTRY(gtk_bin_get_child(GTK_BIN(combo)));
+    return GTK_ENTRY(gtk_combo_box_get_child(GTK_COMBO_BOX(combo)));
 }
 
 gboolean trg_destination_combo_has_text(TrgDestinationCombo *combo)
 {
-    const gchar *text
-        = gtk_entry_get_text(trg_destination_combo_get_entry(TRG_DESTINATION_COMBO(combo)));
+    const gchar *text = gtk_editable_get_text(
+        GTK_EDITABLE(trg_destination_combo_get_entry(TRG_DESTINATION_COMBO(combo))));
     return strlen(text) > 0;
 }
 
@@ -199,7 +199,7 @@ gchar *trg_destination_combo_get_dir(TrgDestinationCombo *combo)
         }
     }
 
-    return g_strdup(gtk_entry_get_text(trg_destination_combo_get_entry(combo)));
+    return g_strdup(gtk_editable_get_text(GTK_EDITABLE(trg_destination_combo_get_entry(combo))));
 }
 
 static void load_directory_model(TrgDestinationCombo *self)

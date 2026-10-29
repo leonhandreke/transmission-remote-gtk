@@ -25,9 +25,6 @@
 #include "trg-prefs.h"
 
 #define TRG_TYPE_TOOLBAR trg_toolbar_get_type()
-G_DECLARE_FINAL_TYPE(TrgToolbar, trg_toolbar, TRG, TOOLBAR, GtkToolbar)
+G_DECLARE_FINAL_TYPE(TrgToolbar, trg_toolbar, TRG, TOOLBAR, GtkBox)
 
 TrgToolbar *trg_toolbar_new(TrgMainWindow *win, TrgPrefs *prefs);
-
-void trg_toolbar_torrent_actions_sensitive(TrgToolbar *mb, gboolean sensitive);
-void trg_toolbar_connected_change(TrgToolbar *tb, gboolean connected);

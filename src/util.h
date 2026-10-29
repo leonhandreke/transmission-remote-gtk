@@ -51,7 +51,7 @@ void g_str_slist_free(GSList *list);
 GRegex *trg_uri_host_regex_new(void);
 gchar *trg_gregex_get_first(GRegex *rx, const gchar *uri);
 gchar *make_error_message(JsonObject *response, int status, gchar *err_msg);
-void trg_error_dialog(GtkWindow *parent, gchar *msg);
+GtkWidget *trg_error_dialog(GtkWindow *parent, gchar *msg);
 void trg_client_error_dialog(GtkWindow *parent, trg_response *response);
 gchar *add_links_to_text(const gchar *original);
 
@@ -77,12 +77,20 @@ void rm_trailing_slashes(gchar *str);
 void trg_widget_set_visible(GtkWidget *w, gboolean visible);
 gchar *trg_base64encode(const gchar *filename, GError **error);
 GtkWidget *my_scrolledwin_new(GtkWidget *child);
+
+/* Returns TRUE if a menu was shown (the click is then consumed). */
+typedef gboolean (*TrgContextMenuFunc)(GtkWidget *widget, gdouble x, gdouble y, gpointer data);
+void trg_widget_add_context_menu(GtkWidget *widget, TrgContextMenuFunc func, gpointer data);
+void trg_popover_menu_popup(GtkWidget *parent, GMenuModel *model, gdouble x, gdouble y,
+                            const gchar *prefix, GActionGroup *actions);
 gboolean is_url(const gchar *string);
 gboolean is_magnet(const gchar *string);
 GtkWidget *gtr_combo_box_new_enum(const char *text_1, ...);
 
 GtkWidget *trg_vbox_new(gboolean homogeneous, gint spacing);
 GtkWidget *trg_hbox_new(gboolean homogeneous, gint spacing);
+gchar *trg_strip_mnemonic(const gchar *label);
+void trg_widget_set_margins(GtkWidget *w, gint margin);
 
 #ifdef G_OS_WIN32
 gchar *trg_win32_support_path(gchar *file);

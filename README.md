@@ -10,7 +10,7 @@ the Transmission BitTorrent client, using its HTTP RPC protocol.
 The following packages are required dependencies for building and running
 transmission-remote-gtk:
 
- - gtk >= 3.22
+ - gtk >= 4.10
  - glib >= 2.56 (including gio and gthread)
  - json-glib >= 1.2.8
  - libsoup >= 3.0
@@ -20,16 +20,13 @@ An example command for getting the packages required for an Ubuntu/Debian
 system:
 
 ```
-# apt install libgtk-3-dev gettext libsoup-3.0-dev libjson-glib-dev
+# apt install libgtk-4-dev gettext libsoup-3.0-dev libjson-glib-dev
 ```
 
 ### Optional Dependencies
-The following packages are optional dependencies:
-
- - libappindicator or libayatana-appindicator3, Application tray support
-
-If these libraries are installed at build time they will be automatically
-detected and linked for additional functionality.
+There are currently no optional dependencies. System tray support used
+libappindicator or libayatana-appindicator3, which are only available for
+GTK 3, so it is not available in the GTK 4 version.
 
 ### Build Only Dependencies
 transmission-remote-gtk uses meson for its build system. A relatively new

@@ -31,6 +31,7 @@
 #include "trg-destination-combo.h"
 #include "trg-main-window.h"
 #include "trg-torrent-move-dialog.h"
+#include "util.h"
 
 struct _TrgTorrentMoveDialog {
     GtkDialog parent;
@@ -60,14 +61,14 @@ static void trg_torrent_move_response_cb(GtkDialog *dialog, gint res_id, gpointe
     if (res_id == GTK_RESPONSE_ACCEPT) {
         gchar *location = trg_destination_combo_get_dir(TRG_DESTINATION_COMBO(dlg->location_combo));
         JsonNode *request = torrent_set_location(
-            dlg->ids, location, gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(dlg->move_check)));
+            dlg->ids, location, gtk_check_button_get_active(GTK_CHECK_BUTTON(dlg->move_check)));
         g_free(location);
         trg_destination_combo_save_selection(TRG_DESTINATION_COMBO(dlg->location_combo));
         dispatch_rpc_async(dlg->client, request, on_generic_interactive_action_response, data);
     } else {
         json_array_unref(dlg->ids);
     }
-    gtk_widget_destroy(GTK_WIDGET(dlg));
+    gtk_window_destroy(GTK_WINDOW(dlg));
 }
 
 static void location_changed(GtkComboBox *w, gpointer data)
@@ -109,13 +110,14 @@ static GObject *trg_torrent_move_dialog_constructor(GType type, guint n_construc
         self->move_button,
         trg_destination_combo_has_text(TRG_DESTINATION_COMBO(self->location_combo)));
 
-    gtk_container_set_border_width(GTK_CONTAINER(object), GUI_PAD);
+    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(object)), GUI_PAD);
 
     gtk_dialog_set_default_response(GTK_DIALOG(object), GTK_RESPONSE_ACCEPT);
 
-    gtk_container_set_border_width(GTK_CONTAINER(t), GUI_PAD);
+    trg_widget_set_margins(t, GUI_PAD);
 
-    gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(object))), t, TRUE, TRUE, 0);
+    gtk_widget_set_vexpand(t, TRUE);
+    gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(object))), t);
 
     count = gtk_tree_selection_count_selected_rows(
         gtk_tree_view_get_selection(GTK_TREE_VIEW(self->treeview)));

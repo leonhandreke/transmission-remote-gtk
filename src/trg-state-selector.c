@@ -180,52 +180,42 @@ static void trg_state_selector_update_dynamic_filter(GtkTreeModel *model, GtkTre
     gtk_tree_path_free(path);
 }
 
-static void refresh_statelist_cb(GtkWidget *w, gpointer data)
+static void refresh_statelist_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
 {
     TrgStateSelector *self = TRG_STATE_SELECTOR(data);
     trg_client_inc_serial(self->client);
     trg_state_selector_update(data, TORRENT_UPDATE_ADDREMOVE);
 }
 
-static void view_popup_menu(GtkWidget *treeview, GdkEventButton *event, gpointer data G_GNUC_UNUSED)
+static void view_popup_menu(GtkWidget *treeview, gdouble x, gdouble y, gpointer data G_GNUC_UNUSED)
 {
-    GtkWidget *menu, *item, *box, *img, *label;
+    GSimpleActionGroup *actions = g_simple_action_group_new();
+    GSimpleAction *action = g_simple_action_new("refresh", NULL);
+    GMenu *menu = g_menu_new();
+    GMenuItem *item;
+    GIcon *icon;
 
-    menu = gtk_menu_new();
-    gtk_menu_set_reserve_toggle_size(GTK_MENU(menu), FALSE);
+    g_signal_connect(action, "activate", G_CALLBACK(refresh_statelist_cb), treeview);
+    g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
+    g_object_unref(action);
 
-    item = gtk_menu_item_new();
-    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    img = gtk_image_new_from_icon_name("view-refresh", GTK_ICON_SIZE_MENU);
-    label = gtk_label_new(_("Refresh"));
+    item = g_menu_item_new(_("Refresh"), "state.refresh");
+    icon = g_themed_icon_new("view-refresh");
+    g_menu_item_set_icon(item, icon);
+    g_object_unref(icon);
+    g_menu_append_item(menu, item);
+    g_object_unref(item);
 
-    gtk_container_add(GTK_CONTAINER(box), img);
-    gtk_container_add(GTK_CONTAINER(box), label);
+    trg_popover_menu_popup(treeview, G_MENU_MODEL(menu), x, y, "state", G_ACTION_GROUP(actions));
 
-    gtk_container_add(GTK_CONTAINER(item), box);
-
-    g_signal_connect(item, "activate", G_CALLBACK(refresh_statelist_cb), treeview);
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
-
-    gtk_widget_show_all(menu);
-
-    gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);
+    g_object_unref(menu);
+    g_object_unref(actions);
 }
 
-static gboolean view_onPopupMenu(GtkWidget *treeview, gpointer userdata)
+static gboolean view_onContextMenu(GtkWidget *treeview, gdouble x, gdouble y, gpointer userdata)
 {
-    view_popup_menu(treeview, NULL, userdata);
+    view_popup_menu(treeview, x, y, userdata);
     return TRUE;
-}
-
-static gboolean view_onButtonPressed(GtkWidget *treeview, GdkEventButton *event, gpointer userdata)
-{
-    if (event->type == GDK_BUTTON_PRESS && event->button == 3) {
-        view_popup_menu(treeview, event, userdata);
-        return TRUE;
-    }
-
-    return FALSE;
 }
 
 struct state_find_pos {
@@ -571,7 +561,8 @@ static GObject *trg_state_selector_constructor(GType type, guint n_construct_pro
 
     renderer = gtk_cell_renderer_pixbuf_new();
     gtk_tree_view_column_pack_start(column, renderer, FALSE);
-    g_object_set(renderer, "stock-size", 4, NULL);
+    /* was "stock-size" 4 (GTK_ICON_SIZE_BUTTON, 16px) in GTK 3 */
+    g_object_set(renderer, "icon-size", GTK_ICON_SIZE_NORMAL, NULL);
     gtk_tree_view_column_set_attributes(column, renderer, "icon-name", STATE_SELECTOR_ICON, NULL);
 
     renderer = trg_cell_renderer_counter_new();
@@ -612,8 +603,7 @@ static GObject *trg_state_selector_constructor(GType type, guint n_construct_pro
     selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(object));
 
     g_signal_connect(G_OBJECT(selection), "changed", G_CALLBACK(state_selection_changed), object);
-    g_signal_connect(object, "button-press-event", G_CALLBACK(view_onButtonPressed), NULL);
-    g_signal_connect(object, "popup-menu", G_CALLBACK(view_onPopupMenu), NULL);
+    trg_widget_add_context_menu(GTK_WIDGET(object), view_onContextMenu, NULL);
 
     gtk_tree_view_set_search_column(GTK_TREE_VIEW(object), STATE_SELECTOR_NAME);
 

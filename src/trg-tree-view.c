@@ -35,6 +35,7 @@
 #include "trg-cell-renderer-wanted.h"
 #include "trg-prefs.h"
 #include "trg-tree-view.h"
+#include "util.h"
 
 /* A subclass of GtkTreeView which allows the user to change column visibility
  * by right clicking on any column for a menu to hide the clicked column, or
@@ -204,9 +205,8 @@ static void trg_tree_view_add_column(TrgTreeView *tv, trg_column_description *de
     trg_tree_view_add_column_after(tv, desc, width, NULL);
 }
 
-static void trg_tree_view_user_add_column_cb(GtkWidget *w, trg_column_description *desc)
+static void trg_tree_view_user_add_column_cb(GtkTreeViewColumn *col, trg_column_description *desc)
 {
-    GtkTreeViewColumn *col = g_object_get_data(G_OBJECT(w), "parent-col");
     TrgTreeView *tv = TRG_TREE_VIEW(gtk_tree_view_column_get_tree_view(col));
 
     trg_tree_view_add_column_after(tv, desc, -1, col);
@@ -214,120 +214,172 @@ static void trg_tree_view_user_add_column_cb(GtkWidget *w, trg_column_descriptio
     g_signal_emit(tv, signals[SIGNAL_COLUMN_ADDED], 0, desc->id);
 }
 
-static void trg_tree_view_sort_menu_item_toggled(GtkCheckMenuItem *w, gpointer data)
+static void trg_tree_view_sort_type_change_state(GSimpleAction *action, GVariant *value,
+                                                 gpointer data)
 {
     GtkTreeSortable *model = GTK_TREE_SORTABLE(data);
-    trg_column_description *desc
-        = (trg_column_description *)g_object_get_data(G_OBJECT(w), GDATA_KEY_COLUMN_DESC);
+    gint sortColumn;
 
-    if (gtk_check_menu_item_get_active(w)) {
-        GtkSortType sortType;
-        gtk_tree_sortable_get_sort_column_id(model, NULL, &sortType);
-        gtk_tree_sortable_set_sort_column_id(model, desc->model_column, sortType);
-    }
+    gtk_tree_sortable_get_sort_column_id(model, &sortColumn, NULL);
+    gtk_tree_sortable_set_sort_column_id(model, sortColumn, g_variant_get_int32(value));
 }
 
-static void trg_tree_view_sort_menu_type_toggled(GtkCheckMenuItem *w, gpointer data)
+static void trg_tree_view_sort_column_change_state(GSimpleAction *action, GVariant *value,
+                                                   gpointer data)
 {
     GtkTreeSortable *model = GTK_TREE_SORTABLE(data);
+    GtkSortType sortType;
 
-    if (gtk_check_menu_item_get_active(w)) {
-        gint sortColumn;
-        gint sortType = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(w), "sort-type"));
-        gtk_tree_sortable_get_sort_column_id(model, &sortColumn, NULL);
-        gtk_tree_sortable_set_sort_column_id(model, sortColumn, sortType);
-    }
+    gtk_tree_sortable_get_sort_column_id(model, NULL, &sortType);
+    gtk_tree_sortable_set_sort_column_id(model, g_variant_get_int32(value), sortType);
 }
 
-GtkWidget *trg_tree_view_sort_menu(TrgTreeView *tv, const gchar *label)
+/* Keep the radio items in sync when sorting changes elsewhere, eg. by
+ * clicking a column header. */
+static void trg_tree_view_sort_changed_cb(GtkTreeSortable *model, gpointer data)
+{
+    GActionMap *map = G_ACTION_MAP(data);
+    gint sort;
+    GtkSortType sortType;
+
+    gtk_tree_sortable_get_sort_column_id(model, &sort, &sortType);
+    g_simple_action_set_state(
+        G_SIMPLE_ACTION(g_action_map_lookup_action(map, TRG_TREE_VIEW_SORT_TYPE_ACTION)),
+        g_variant_new_int32(sortType));
+    g_simple_action_set_state(
+        G_SIMPLE_ACTION(g_action_map_lookup_action(map, TRG_TREE_VIEW_SORT_COLUMN_ACTION)),
+        g_variant_new_int32(sort));
+}
+
+GMenu *trg_tree_view_sort_menu(TrgTreeView *tv, GActionMap *map)
 {
     TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
-    GtkWidget *item = gtk_menu_item_new_with_mnemonic(label);
     GtkTreeModel *treeViewModel = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
     GtkTreeSortable *sortableModel
         = GTK_TREE_SORTABLE(gtk_tree_model_filter_get_model(GTK_TREE_MODEL_FILTER(treeViewModel)));
-    GtkWidget *menu = gtk_menu_new();
-    GtkWidget *b;
+    GMenu *menu = g_menu_new();
+    GMenu *section;
+    GMenuItem *item;
+    GSimpleAction *action;
     GList *li;
     gint sort;
     GtkSortType sortType;
-    GSList *group = NULL;
 
     gtk_tree_sortable_get_sort_column_id(sortableModel, &sort, &sortType);
 
-    b = gtk_radio_menu_item_new_with_label(group, _("Ascending"));
-    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(b), sortType == GTK_SORT_ASCENDING);
-    g_object_set_data(G_OBJECT(b), "sort-type", GINT_TO_POINTER(GTK_SORT_ASCENDING));
-    g_signal_connect(b, "toggled", G_CALLBACK(trg_tree_view_sort_menu_type_toggled), sortableModel);
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu), b);
-    group = gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(b));
-    b = gtk_radio_menu_item_new_with_label(group, _("Descending"));
-    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(b), sortType == GTK_SORT_DESCENDING);
-    g_object_set_data(G_OBJECT(b), "sort-type", GINT_TO_POINTER(GTK_SORT_DESCENDING));
-    g_signal_connect(b, "toggled", G_CALLBACK(trg_tree_view_sort_menu_type_toggled), sortableModel);
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu), b);
+    action = g_simple_action_new_stateful(TRG_TREE_VIEW_SORT_TYPE_ACTION, G_VARIANT_TYPE_INT32,
+                                          g_variant_new_int32(sortType));
+    g_signal_connect(action, "change-state", G_CALLBACK(trg_tree_view_sort_type_change_state),
+                     sortableModel);
+    g_action_map_add_action(map, G_ACTION(action));
+    g_object_unref(action);
 
-    group = NULL;
+    action = g_simple_action_new_stateful(TRG_TREE_VIEW_SORT_COLUMN_ACTION, G_VARIANT_TYPE_INT32,
+                                          g_variant_new_int32(sort));
+    g_signal_connect(action, "change-state", G_CALLBACK(trg_tree_view_sort_column_change_state),
+                     sortableModel);
+    g_action_map_add_action(map, G_ACTION(action));
+    g_object_unref(action);
 
-    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+    g_signal_connect_object(sortableModel, "sort-column-changed",
+                            G_CALLBACK(trg_tree_view_sort_changed_cb), map, 0);
 
+    section = g_menu_new();
+    item = g_menu_item_new(_("Ascending"), NULL);
+    g_menu_item_set_action_and_target(item, "win." TRG_TREE_VIEW_SORT_TYPE_ACTION, "i",
+                                      GTK_SORT_ASCENDING);
+    g_menu_append_item(section, item);
+    g_object_unref(item);
+    item = g_menu_item_new(_("Descending"), NULL);
+    g_menu_item_set_action_and_target(item, "win." TRG_TREE_VIEW_SORT_TYPE_ACTION, "i",
+                                      GTK_SORT_DESCENDING);
+    g_menu_append_item(section, item);
+    g_object_unref(item);
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+    g_object_unref(section);
+
+    section = g_menu_new();
     for (li = priv->columns; li; li = g_list_next(li)) {
         trg_column_description *desc = (trg_column_description *)li->data;
         if (!(desc->flags & TRG_COLUMN_HIDE_FROM_TOP_MENU)) {
-            b = gtk_radio_menu_item_new_with_label(group, desc->header);
-            group = gtk_radio_menu_item_get_group(GTK_RADIO_MENU_ITEM(b));
-
-            if (desc->model_column == sort)
-                gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(b), TRUE);
-
-            g_object_set_data(G_OBJECT(b), GDATA_KEY_COLUMN_DESC, desc);
-            g_signal_connect(b, "toggled", G_CALLBACK(trg_tree_view_sort_menu_item_toggled),
-                             sortableModel);
-
-            gtk_menu_shell_append(GTK_MENU_SHELL(menu), b);
+            item = g_menu_item_new(desc->header, NULL);
+            g_menu_item_set_action_and_target(item, "win." TRG_TREE_VIEW_SORT_COLUMN_ACTION, "i",
+                                              desc->model_column);
+            g_menu_append_item(section, item);
+            g_object_unref(item);
         }
     }
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+    g_object_unref(section);
 
-    gtk_menu_item_set_submenu(GTK_MENU_ITEM(item), menu);
-
-    return item;
+    return menu;
 }
 
-static void view_popup_menu(GtkButton *button, GdkEventButton *event, GtkTreeViewColumn *column)
+static void column_menu_hide_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
+{
+    trg_tree_view_hide_column(NULL, GTK_TREE_VIEW_COLUMN(data));
+}
+
+static void column_menu_add_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
+{
+    trg_tree_view_user_add_column_cb(GTK_TREE_VIEW_COLUMN(data),
+                                     g_object_get_data(G_OBJECT(action), GDATA_KEY_COLUMN_DESC));
+}
+
+static void view_popup_menu(GtkWidget *button, gdouble x, gdouble y, GtkTreeViewColumn *column)
 {
     GtkWidget *tv = gtk_tree_view_column_get_tree_view(column);
     TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(tv));
-    GtkWidget *menu, *menuitem;
+    GSimpleActionGroup *actions = g_simple_action_group_new();
+    GMenu *menu = g_menu_new();
+    GSimpleAction *action;
     trg_column_description *desc;
+    graphene_point_t point;
     guint n_showing = 0;
     GList *li;
-
-    menu = gtk_menu_new();
+    gint i;
 
     desc = g_object_get_data(G_OBJECT(column), GDATA_KEY_COLUMN_DESC);
 
-    for (li = priv->columns; li; li = g_list_next(li)) {
+    /* The shown column comes first, checked, and unchecks (hides) it. The
+     * hidden columns follow, unchecked, and add themselves after it. */
+    for (li = priv->columns, i = 0; li; li = g_list_next(li), i++) {
         trg_column_description *desc = (trg_column_description *)li->data;
         if (!(desc->flags & TRG_COLUMN_SHOWING)) {
-            menuitem = gtk_check_menu_item_new_with_label(desc->header);
-            g_object_set_data(G_OBJECT(menuitem), "parent-col", column);
-            g_signal_connect(menuitem, "activate", G_CALLBACK(trg_tree_view_user_add_column_cb),
-                             desc);
-            gtk_menu_shell_append(GTK_MENU_SHELL(menu), menuitem);
+            gchar *name = g_strdup_printf("show-%d", i);
+            gchar *detailed = g_strconcat("columns.", name, NULL);
+
+            action = g_simple_action_new_stateful(name, NULL, g_variant_new_boolean(FALSE));
+            g_object_set_data(G_OBJECT(action), GDATA_KEY_COLUMN_DESC, desc);
+            g_signal_connect(action, "activate", G_CALLBACK(column_menu_add_cb), column);
+            g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
+            g_object_unref(action);
+
+            g_menu_append(menu, desc->header, detailed);
+
+            g_free(detailed);
+            g_free(name);
         } else {
             n_showing++;
         }
     }
 
-    menuitem = gtk_check_menu_item_new_with_label(desc->header);
-    gtk_check_menu_item_set_active(GTK_CHECK_MENU_ITEM(menuitem), TRUE);
-    g_signal_connect(menuitem, "activate", G_CALLBACK(trg_tree_view_hide_column), column);
-    gtk_widget_set_sensitive(menuitem, !(desc->flags & TRG_COLUMN_UNREMOVABLE) && n_showing > 1);
-    gtk_menu_shell_prepend(GTK_MENU_SHELL(menu), menuitem);
+    action = g_simple_action_new_stateful("hide", NULL, g_variant_new_boolean(TRUE));
+    g_signal_connect(action, "activate", G_CALLBACK(column_menu_hide_cb), column);
+    g_simple_action_set_enabled(action, !(desc->flags & TRG_COLUMN_UNREMOVABLE) && n_showing > 1);
+    g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
+    g_object_unref(action);
+    g_menu_prepend(menu, desc->header, "columns.hide");
 
-    gtk_widget_show_all(menu);
+    /* the popover is attached to the tree view, the click was on the header button */
+    if (!gtk_widget_compute_point(button, tv, &GRAPHENE_POINT_INIT((float)x, (float)y), &point))
+        point.x = point.y = -1;
 
-    gtk_menu_popup_at_pointer(GTK_MENU(menu), (GdkEvent *)event);
+    trg_popover_menu_popup(tv, G_MENU_MODEL(menu), point.x, point.y, "columns",
+                           G_ACTION_GROUP(actions));
+
+    g_object_unref(menu);
+    g_object_unref(actions);
 }
 
 /* This used to get the column as an argument binded when the signal was
@@ -335,26 +387,24 @@ static void view_popup_menu(GtkButton *button, GdkEventButton *event, GtkTreeVie
  * circumstances. So bind the column description instead and search for the
  * column by its title.
  */
-static gboolean col_onButtonPressed(GtkButton *button, GdkEventButton *event,
-                                    trg_column_description *desc)
+static void col_onButtonPressed(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
+                                trg_column_description *desc)
 {
-    if (event->type == GDK_BUTTON_PRESS && event->button == 3) {
-        GtkTreeView *gtv = GTK_TREE_VIEW(gtk_widget_get_parent(GTK_WIDGET(button)));
-        GList *cols = gtk_tree_view_get_columns(gtv);
-        GList *li;
-        for (li = cols; li; li = g_list_next(li)) {
-            GtkTreeViewColumn *col = GTK_TREE_VIEW_COLUMN(li->data);
-            if (!g_strcmp0(desc->header, gtk_tree_view_column_get_title(col))) {
-                view_popup_menu(button, event, col);
-                break;
-            }
+    GtkWidget *button = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+    GtkTreeView *gtv = GTK_TREE_VIEW(gtk_widget_get_parent(button));
+    GList *cols = gtk_tree_view_get_columns(gtv);
+    GList *li;
+
+    for (li = cols; li; li = g_list_next(li)) {
+        GtkTreeViewColumn *col = GTK_TREE_VIEW_COLUMN(li->data);
+        if (!g_strcmp0(desc->header, gtk_tree_view_column_get_title(col))) {
+            view_popup_menu(button, x, y, col);
+            break;
         }
-        g_list_free(cols);
-
-        return TRUE;
     }
+    g_list_free(cols);
 
-    return FALSE;
+    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
 static GtkTreeViewColumn *trg_tree_view_icontext_column_new(trg_column_description *desc,
@@ -397,7 +447,8 @@ static void trg_tree_view_add_column_after(TrgTreeView *tv, trg_column_descripti
 {
     GtkCellRenderer *renderer;
     GtkTreeViewColumn *column = NULL;
-    GtkButton *column_button = NULL;
+    GtkWidget *column_button = NULL;
+    GtkGesture *gesture;
 
     switch (desc->type) {
     case TRG_COLTYPE_TEXT:
@@ -492,9 +543,12 @@ static void trg_tree_view_add_column_after(TrgTreeView *tv, trg_column_descripti
     if (after_col)
         gtk_tree_view_move_column_after(GTK_TREE_VIEW(tv), column, after_col);
 
-    column_button = GTK_BUTTON(gtk_tree_view_column_get_button(column));
+    column_button = gtk_tree_view_column_get_button(column);
 
-    g_signal_connect(column_button, "button-press-event", G_CALLBACK(col_onButtonPressed), desc);
+    gesture = gtk_gesture_click_new();
+    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
+    g_signal_connect(gesture, "pressed", G_CALLBACK(col_onButtonPressed), desc);
+    gtk_widget_add_controller(column_button, GTK_EVENT_CONTROLLER(gesture));
 
     if (desc->out)
         *(desc->out) = column;

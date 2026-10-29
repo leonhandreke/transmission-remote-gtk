@@ -24,6 +24,7 @@
 
 #include "trg-gtk-app.h"
 #include "trg-main-window.h"
+#include "trg-menu-bar.h"
 #include "util.h"
 
 enum {
@@ -68,11 +69,32 @@ static void trg_gtk_app_set_property(GObject *object, guint property_id, const G
     }
 }
 
+/* "app.quit" (File -> Quit, Ctrl+Q) closes the window, rather than quitting
+ * straight away, so that it can save its state. */
+static void trg_gtk_app_quit_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
+{
+    GList *windows = gtk_application_get_windows(GTK_APPLICATION(data));
+
+    if (windows)
+        gtk_window_close(GTK_WINDOW(windows->data));
+    else
+        g_application_quit(G_APPLICATION(data));
+}
+
 static void trg_gtk_app_startup(GApplication *app, gpointer userdata)
 {
+    static const GActionEntry app_entries[] = {
+        { "quit", trg_gtk_app_quit_cb, NULL, NULL, NULL, { 0 } },
+    };
     TrgGtkApp *self = TRG_GTK_APP(app);
-    TrgMainWindow *window = trg_main_window_new(self->client);
+    TrgMainWindow *window;
+
+    g_action_map_add_action_entries(G_ACTION_MAP(app), app_entries, G_N_ELEMENTS(app_entries), app);
+
+    window = trg_main_window_new(self->client);
     gtk_window_set_application(GTK_WINDOW(window), GTK_APPLICATION(app));
+    trg_menu_bar_set_accels(GTK_APPLICATION(app));
+    gtk_window_present(GTK_WINDOW(window));
 }
 
 static int trg_gtk_app_command_line(GApplication *application, GApplicationCommandLine *cmdline)

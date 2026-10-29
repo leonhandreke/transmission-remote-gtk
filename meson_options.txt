@@ -1,2 +1,2 @@
-option('libappindicator', type: 'feature', value: 'auto', description: 'libappindicator')
+option('libappindicator', type: 'feature', value: 'auto', description: 'libappindicator (unsupported with GTK 4, must not be enabled)')
 option('nl_langinfo', type: 'feature', value: 'auto', description: 'nl_langinfo() support')
