@@ -28,8 +28,7 @@
 G_BEGIN_DECLS
 
 #define TRG_TYPE_DESTINATION_COMBO (trg_destination_combo_get_type())
-G_DECLARE_FINAL_TYPE(TrgDestinationCombo, trg_destination_combo, TRG, DESTINATION_COMBO,
-                     GtkComboBox)
+G_DECLARE_FINAL_TYPE(TrgDestinationCombo, trg_destination_combo, TRG, DESTINATION_COMBO, GtkBox)
 
 GtkWidget *trg_destination_combo_new(TrgClient *client, const gchar *lastSelectionKey);
 gchar *trg_destination_combo_get_dir(TrgDestinationCombo *combo);

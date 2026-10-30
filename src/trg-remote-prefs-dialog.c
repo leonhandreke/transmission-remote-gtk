@@ -47,7 +47,7 @@
  * as soon as the set is complete.
  */
 struct _TrgRemotePrefsDialog {
-    GtkDialog parent;
+    TrgDialog parent;
 
     TrgClient *client;
     TrgMainWindow *parent_win;
@@ -59,7 +59,7 @@ struct _TrgRemotePrefsDialog {
     GtkWidget *alt_check, *alt_time_check;
 };
 
-G_DEFINE_TYPE(TrgRemotePrefsDialog, trg_remote_prefs_dialog, GTK_TYPE_DIALOG)
+G_DEFINE_TYPE(TrgRemotePrefsDialog, trg_remote_prefs_dialog, TRG_TYPE_DIALOG)
 
 enum {
     PROP_0,
@@ -77,7 +77,7 @@ static void update_session(TrgRemotePrefsDialog *dlg)
 
     /* Connection */
 
-    switch (gtk_combo_box_get_active(GTK_COMBO_BOX(dlg->encryption_combo))) {
+    switch (gtk_drop_down_get_selected(GTK_DROP_DOWN(dlg->encryption_combo))) {
     case 0:
         encryption = "required";
         break;
@@ -496,14 +496,14 @@ static GtkWidget *trg_rprefs_connPage(TrgRemotePrefsDialog *win, JsonObject *s)
     hig_workarea_add_row_w(t, &row, win->port_test_label, w, NULL);
 
     w = win->encryption_combo
-        = gtr_combo_box_new_enum(_("Required"), 0, _("Preferred"), 1, _("Tolerated"), 2, NULL);
+        = gtr_drop_down_new(_("Required"), _("Preferred"), _("Tolerated"), NULL);
     stringValue = session_get_encryption(s);
     if (!g_strcmp0(stringValue, "required")) {
-        gtk_combo_box_set_active(GTK_COMBO_BOX(w), 0);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(w), 0);
     } else if (!g_strcmp0(stringValue, "tolerated")) {
-        gtk_combo_box_set_active(GTK_COMBO_BOX(w), 2);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(w), 2);
     } else {
-        gtk_combo_box_set_active(GTK_COMBO_BOX(w), 1);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(w), 1);
     }
 
     hig_workarea_add_row(t, &row, _("Encryption"), w, NULL);
@@ -610,18 +610,18 @@ static GObject *trg_remote_prefs_dialog_constructor(GType type, guint n_construc
     TrgRemotePrefsDialog *self = TRG_REMOTE_PREFS_DIALOG(object);
     session = trg_client_get_session(self->client);
 
-    contentvbox = gtk_dialog_get_content_area(GTK_DIALOG(object));
+    contentvbox = trg_dialog_get_content_area(TRG_DIALOG(object));
 
     gtk_window_set_title(GTK_WINDOW(object), _("Remote Preferences"));
     gtk_window_set_transient_for(GTK_WINDOW(object), GTK_WINDOW(self->parent_win));
     gtk_window_set_destroy_with_parent(GTK_WINDOW(object), TRUE);
 
-    gtk_dialog_add_button(GTK_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
-    gtk_dialog_add_button(GTK_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
+    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
+    trg_dialog_add_button(TRG_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
 
-    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(object)), GUI_PAD);
+    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
 
-    gtk_dialog_set_default_response(GTK_DIALOG(object), GTK_RESPONSE_OK);
+    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_OK);
 
     g_signal_connect(G_OBJECT(object), "response", G_CALLBACK(trg_remote_prefs_response_cb), NULL);
 

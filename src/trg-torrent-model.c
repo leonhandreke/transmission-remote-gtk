@@ -556,6 +556,33 @@ static GList *trg_torrent_model_find_removed(GtkTreeModel *model, gint64 current
     return args.toRemove;
 }
 
+/* The download directories of all the torrents, newly allocated */
+GList *trg_torrent_model_get_download_dirs(GHashTable *table)
+{
+    GList *values = g_hash_table_get_values(table);
+    GList *dirs = NULL;
+    GList *li;
+
+    for (li = values; li; li = g_list_next(li)) {
+        GtkTreeRowReference *rr = (GtkTreeRowReference *)li->data;
+        GtkTreeModel *model = gtk_tree_row_reference_get_model(rr);
+        GtkTreePath *path = gtk_tree_row_reference_get_path(rr);
+        GtkTreeIter iter;
+
+        if (path && gtk_tree_model_get_iter(model, &iter, path)) {
+            gchar *dd = NULL;
+            gtk_tree_model_get(model, &iter, TORRENT_COLUMN_DOWNLOADDIR, &dd, -1);
+            if (dd)
+                dirs = g_list_prepend(dirs, dd);
+        }
+        gtk_tree_path_free(path);
+    }
+
+    g_list_free(values);
+
+    return dirs;
+}
+
 gboolean get_torrent_data(GHashTable *table, gint64 id, JsonObject **t, GtkTreeIter *out_iter)
 {
     gpointer result = g_hash_table_lookup(table, &id);

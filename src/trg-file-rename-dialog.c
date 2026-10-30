@@ -33,7 +33,7 @@
 #include "util.h"
 
 struct _TrgFileRenameDialog {
-    GtkDialog parent;
+    TrgDialog parent;
 
     TrgClient *client;
     TrgMainWindow *win;
@@ -45,10 +45,10 @@ struct _TrgFileRenameDialog {
 };
 
 typedef struct {
-    GtkDialogClass parent_class;
+    TrgDialogClass parent_class;
 } _TrgFileRenameDialogClass;
 
-G_DEFINE_TYPE(TrgFileRenameDialog, trg_file_rename_dialog, GTK_TYPE_DIALOG)
+G_DEFINE_TYPE(TrgFileRenameDialog, trg_file_rename_dialog, TRG_TYPE_DIALOG)
 
 enum {
     PROP_0,
@@ -80,7 +80,7 @@ static gchar *trg_file_rename_dialog_get_file_path(GtkTreeModel *model, const Gt
     return filepath;
 }
 
-static void trg_file_rename_response_cb(GtkDialog *dlg, gint res_id, gpointer data)
+static void trg_file_rename_response_cb(TrgDialog *dlg, gint res_id, gpointer data)
 {
     TrgFileRenameDialog *self = TRG_FILE_RENAME_DIALOG(dlg);
 
@@ -155,21 +155,21 @@ static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct
 
     gtk_window_set_destroy_with_parent(GTK_WINDOW(object), TRUE);
 
-    gtk_dialog_add_button(GTK_DIALOG(object), _("_Close"), GTK_RESPONSE_CANCEL);
+    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CANCEL);
     self->rename_button
-        = gtk_dialog_add_button(GTK_DIALOG(object), _("Rename"), GTK_RESPONSE_ACCEPT);
+        = trg_dialog_add_button(TRG_DIALOG(object), _("Rename"), GTK_RESPONSE_ACCEPT);
 
     gtk_widget_set_sensitive(self->rename_button,
                              gtk_entry_buffer_get_length(self->name_entry_buf));
 
-    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(object)), GUI_PAD);
+    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
 
-    gtk_dialog_set_default_response(GTK_DIALOG(object), GTK_RESPONSE_ACCEPT);
+    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_ACCEPT);
 
     trg_widget_set_margins(t, GUI_PAD);
 
     gtk_widget_set_vexpand(t, TRUE);
-    gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(object))), t);
+    gtk_box_append(GTK_BOX(trg_dialog_get_content_area(TRG_DIALOG(object))), t);
 
     target_id = trg_files_model_get_torrent_id(TRG_FILES_MODEL(model));
     self->ids = json_array_new();

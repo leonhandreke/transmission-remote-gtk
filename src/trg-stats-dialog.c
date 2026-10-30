@@ -49,7 +49,7 @@ enum {
 #define STATS_UPDATE_INTERVAL 5
 
 struct _TrgStatsDialog {
-    GtkDialog parent;
+    TrgDialog parent;
 
     TrgClient *client;
     TrgMainWindow *parent_win;
@@ -65,7 +65,7 @@ struct _TrgStatsDialog {
     GtkTreeRowReference *rr_version;
 };
 
-G_DEFINE_TYPE(TrgStatsDialog, trg_stats_dialog, GTK_TYPE_DIALOG)
+G_DEFINE_TYPE(TrgStatsDialog, trg_stats_dialog, TRG_TYPE_DIALOG)
 
 static GObject *instance = NULL;
 static gboolean trg_update_stats_timerfunc(gpointer data);
@@ -94,7 +94,7 @@ static void trg_stats_dialog_set_property(GObject *object, guint property_id, co
     }
 }
 
-static void trg_stats_response_cb(GtkDialog *dlg, gint res_id, gpointer data G_GNUC_UNUSED)
+static void trg_stats_response_cb(TrgDialog *dlg, gint res_id, gpointer data G_GNUC_UNUSED)
 {
     TrgStatsDialog *trg_dlg = TRG_STATS_DIALOG(dlg);
     g_clear_handle_id(&trg_dlg->update_stats_timer_tag, g_source_remove);
@@ -269,11 +269,11 @@ static GObject *trg_stats_dialog_constructor(GType type, guint n_construct_prope
     gtk_window_set_title(GTK_WINDOW(obj), _("Statistics"));
     gtk_window_set_transient_for(GTK_WINDOW(obj), GTK_WINDOW(dlg->parent_win));
     gtk_window_set_destroy_with_parent(GTK_WINDOW(obj), TRUE);
-    gtk_dialog_add_button(GTK_DIALOG(obj), _("_Close"), GTK_RESPONSE_CLOSE);
+    trg_dialog_add_button(TRG_DIALOG(obj), _("_Close"), GTK_RESPONSE_CLOSE);
 
-    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(obj)), GUI_PAD);
+    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(obj)), GUI_PAD);
 
-    gtk_dialog_set_default_response(GTK_DIALOG(obj), GTK_RESPONSE_CLOSE);
+    trg_dialog_set_default_response(TRG_DIALOG(obj), GTK_RESPONSE_CLOSE);
 
     g_signal_connect(G_OBJECT(obj), "response", G_CALLBACK(trg_stats_response_cb), NULL);
 
@@ -298,7 +298,7 @@ static GObject *trg_stats_dialog_constructor(GType type, guint n_construct_prope
 
     trg_widget_set_margins(tv, GUI_PAD);
     gtk_widget_set_vexpand(tv, TRUE);
-    gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(obj))), tv);
+    gtk_box_append(GTK_BOX(trg_dialog_get_content_area(TRG_DIALOG(obj))), tv);
 
     dispatch_rpc_async(dlg->client, session_stats(), on_stats_reply, obj);
 

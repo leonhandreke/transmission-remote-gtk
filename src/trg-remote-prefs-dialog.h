@@ -21,11 +21,13 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
+#include "trg-dialog.h"
+
 #include "trg-main-window.h"
 
 #define TRG_TYPE_REMOTE_PREFS_DIALOG trg_remote_prefs_dialog_get_type()
 G_DECLARE_FINAL_TYPE(TrgRemotePrefsDialog, trg_remote_prefs_dialog, TRG, REMOTE_PREFS_DIALOG,
-                     GtkDialog)
+                     TrgDialog)
 
 TrgRemotePrefsDialog *trg_remote_prefs_dialog_get_instance(TrgMainWindow *parent,
                                                            TrgClient *client);

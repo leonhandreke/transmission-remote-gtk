@@ -51,7 +51,10 @@ void g_str_slist_free(GSList *list);
 GRegex *trg_uri_host_regex_new(void);
 gchar *trg_gregex_get_first(GRegex *rx, const gchar *uri);
 gchar *make_error_message(JsonObject *response, int status, gchar *err_msg);
-GtkWidget *trg_error_dialog(GtkWindow *parent, gchar *msg);
+typedef void (*TrgDialogDoneFunc)(gpointer data);
+void trg_error_dialog(GtkWindow *parent, const gchar *msg);
+void trg_error_dialog_full(GtkWindow *parent, const gchar *msg, TrgDialogDoneFunc done,
+                           gpointer data);
 void trg_client_error_dialog(GtkWindow *parent, trg_response *response);
 gchar *add_links_to_text(const gchar *original);
 
@@ -86,11 +89,10 @@ void trg_popover_menu_popup(GtkWidget *parent, GMenuModel *model, gdouble x, gdo
                             const gchar *prefix, GActionGroup *actions);
 gboolean is_url(const gchar *string);
 gboolean is_magnet(const gchar *string);
-GtkWidget *gtr_combo_box_new_enum(const char *text_1, ...);
+GtkWidget *gtr_drop_down_new(const char *text_1, ...) G_GNUC_NULL_TERMINATED;
 
 GtkWidget *trg_vbox_new(gboolean homogeneous, gint spacing);
 GtkWidget *trg_hbox_new(gboolean homogeneous, gint spacing);
-gchar *trg_strip_mnemonic(const gchar *label);
 void trg_widget_set_margins(GtkWidget *w, gint margin);
 
 #ifdef G_OS_WIN32

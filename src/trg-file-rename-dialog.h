@@ -21,6 +21,8 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
+#include "trg-dialog.h"
+
 #include "trg-client.h"
 #include "trg-files-tree-view.h"
 #include "trg-main-window.h"
@@ -28,7 +30,7 @@
 G_BEGIN_DECLS
 #define TRG_TYPE_FILE_RENAME_DIALOG trg_file_rename_dialog_get_type()
 G_DECLARE_FINAL_TYPE(TrgFileRenameDialog, trg_file_rename_dialog, TRG, FILE_RENAME_DIALOG,
-                     GtkDialog)
+                     TrgDialog)
 
 TrgFileRenameDialog *trg_file_rename_dialog_new(TrgMainWindow *win, TrgClient *client,
                                                 TrgFilesTreeView *ttv);

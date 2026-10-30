@@ -105,6 +105,7 @@ trg_torrent_model_update_stats *trg_torrent_model_get_stats(TrgTorrentModel *mod
 GHashTable *get_torrent_table(TrgTorrentModel *model);
 void trg_torrent_model_remove_all(TrgTorrentModel *model);
 gboolean trg_torrent_model_is_remove_in_progress(TrgTorrentModel *model);
+GList *trg_torrent_model_get_download_dirs(GHashTable *table);
 gboolean get_torrent_data(GHashTable *table, gint64 id, JsonObject **t, GtkTreeIter *out_iter);
 gchar *shorten_download_dir(TrgClient *tc, const gchar *downloadDir);
 void trg_torrent_model_reload_dir_aliases(TrgClient *tc, GtkTreeModel *model);

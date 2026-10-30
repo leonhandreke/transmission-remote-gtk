@@ -21,12 +21,14 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
+#include "trg-dialog.h"
+
 #include "trg-client.h"
 #include "trg-main-window.h"
 
 #define TRG_TYPE_TORRENT_MOVE_DIALOG trg_torrent_move_dialog_get_type()
 G_DECLARE_FINAL_TYPE(TrgTorrentMoveDialog, trg_torrent_move_dialog, TRG, TORRENT_MOVE_DIALOG,
-                     GtkDialog)
+                     TrgDialog)
 
 TrgTorrentMoveDialog *trg_torrent_move_dialog_new(TrgMainWindow *win, TrgClient *client,
                                                   TrgTorrentTreeView *ttv);

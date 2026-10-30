@@ -21,11 +21,12 @@
 #include <glib-object.h>
 
 #include "trg-client.h"
+#include "trg-dialog.h"
 #include "trg-torrent-tree-view.h"
 
 #define TRG_TYPE_TORRENT_PROPS_DIALOG trg_torrent_props_dialog_get_type()
 G_DECLARE_FINAL_TYPE(TrgTorrentPropsDialog, trg_torrent_props_dialog, TRG, TORRENT_PROPS_DIALOG,
-                     GtkDialog)
+                     TrgDialog)
 
 TrgTorrentPropsDialog *trg_torrent_props_dialog_new(GtkWindow *window, TrgTorrentTreeView *treeview,
                                                     TrgTorrentModel *torrentModel,

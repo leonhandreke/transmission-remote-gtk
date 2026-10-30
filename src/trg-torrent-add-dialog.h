@@ -21,12 +21,14 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
+#include "trg-dialog.h"
+
 #include "trg-client.h"
 #include "trg-main-window.h"
 
 #define TRG_TYPE_TORRENT_ADD_DIALOG trg_torrent_add_dialog_get_type()
 G_DECLARE_FINAL_TYPE(TrgTorrentAddDialog, trg_torrent_add_dialog, TRG, TORRENT_ADD_DIALOG,
-                     GtkDialog)
+                     TrgDialog)
 
 TrgTorrentAddDialog *trg_torrent_add_dialog_new_from_filenames(TrgMainWindow *parent,
                                                                TrgClient *client,

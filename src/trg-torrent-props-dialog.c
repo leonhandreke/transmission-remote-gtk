@@ -54,7 +54,7 @@
  * values and then send it with the IDs.
  */
 struct _TrgTorrentPropsDialog {
-    GtkDialog parent;
+    TrgDialog parent;
 
     TrgTorrentTreeView *tv;
     TrgTorrentModel *torrentModel;
@@ -91,7 +91,7 @@ struct _TrgTorrentPropsDialog {
     gboolean show_details;
 };
 
-G_DEFINE_TYPE(TrgTorrentPropsDialog, trg_torrent_props_dialog, GTK_TYPE_DIALOG)
+G_DEFINE_TYPE(TrgTorrentPropsDialog, trg_torrent_props_dialog, TRG_TYPE_DIALOG)
 
 enum {
     PROP_0,
@@ -127,7 +127,7 @@ static void trg_torrent_props_dialog_get_property(GObject *object, guint prop_id
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 }
 
-static void trg_torrent_props_response_cb(GtkDialog *dialog, gint res_id,
+static void trg_torrent_props_response_cb(TrgDialog *dialog, gint res_id,
                                           gpointer data G_GNUC_UNUSED)
 {
     TrgTorrentPropsDialog *self = TRG_TORRENT_PROPS_DIALOG(dialog);
@@ -154,10 +154,10 @@ static void trg_torrent_props_response_cb(GtkDialog *dialog, gint res_id,
         JsonObject *args = node_get_arguments(request);
 
         json_object_set_int_member(args, FIELD_SEED_RATIO_MODE,
-                                   gtk_combo_box_get_active(GTK_COMBO_BOX(self->seedRatioMode)));
+                                   gtk_drop_down_get_selected(GTK_DROP_DOWN(self->seedRatioMode)));
         json_object_set_int_member(
             args, FIELD_BANDWIDTH_PRIORITY,
-            gtk_combo_box_get_active(GTK_COMBO_BOX(self->bandwidthPriorityCombo)) - 1);
+            (gint)gtk_drop_down_get_selected(GTK_DROP_DOWN(self->bandwidthPriorityCombo)) - 1);
 
         trg_json_widgets_save(self->widgets, args);
 
@@ -168,10 +168,9 @@ static void trg_torrent_props_response_cb(GtkDialog *dialog, gint res_id,
     gtk_window_destroy(GTK_WINDOW(dialog));
 }
 
-static void seed_ratio_mode_changed_cb(GtkWidget *w, gpointer data)
+static void seed_ratio_mode_changed_cb(GtkWidget *w, GParamSpec *pspec, gpointer data)
 {
-    gtk_widget_set_sensitive(GTK_WIDGET(data),
-                             gtk_combo_box_get_active(GTK_COMBO_BOX(w)) == 1 ? TRUE : FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(data), gtk_drop_down_get_selected(GTK_DROP_DOWN(w)) == 1);
 }
 
 static GtkWidget *info_page_new(TrgTorrentPropsDialog *dialog)
@@ -372,9 +371,8 @@ static GtkWidget *trg_props_limits_page_new(TrgTorrentPropsDialog *win, JsonObje
                                   _("Honor global limits"), NULL);
     hig_workarea_add_wide_control(t, &row, w);
 
-    w = win->bandwidthPriorityCombo
-        = gtr_combo_box_new_enum(_("Low"), 0, _("Normal"), 1, _("High"), 2, NULL);
-    gtk_combo_box_set_active(GTK_COMBO_BOX(w), torrent_get_bandwidth_priority(json) + 1);
+    w = win->bandwidthPriorityCombo = gtr_drop_down_new(_("Low"), _("Normal"), _("High"), NULL);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(w), torrent_get_bandwidth_priority(json) + 1);
 
     hig_workarea_add_row(t, &row, _("Torrent priority:"), w, NULL);
 
@@ -396,16 +394,15 @@ static GtkWidget *trg_props_limits_page_new(TrgTorrentPropsDialog *win, JsonObje
 
     hig_workarea_add_section_title(t, &row, _("Seeding"));
 
-    w = win->seedRatioMode
-        = gtr_combo_box_new_enum(_("Use global settings"), 0, _("Stop seeding at ratio"), 1,
-                                 _("Seed regardless of ratio"), 2, NULL);
-    gtk_combo_box_set_active(GTK_COMBO_BOX(w), torrent_get_seed_ratio_mode(json));
+    w = win->seedRatioMode = gtr_drop_down_new(_("Use global settings"), _("Stop seeding at ratio"),
+                                               _("Seed regardless of ratio"), NULL);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(w), torrent_get_seed_ratio_mode(json));
     hig_workarea_add_row(t, &row, _("Seed ratio mode:"), w, NULL);
 
     w = trg_json_widget_spin_double_new(&win->widgets, json, FIELD_SEED_RATIO_LIMIT, NULL, 0,
                                         INT_MAX, 0.2);
-    seed_ratio_mode_changed_cb(win->seedRatioMode, w);
-    g_signal_connect(G_OBJECT(win->seedRatioMode), "changed",
+    seed_ratio_mode_changed_cb(win->seedRatioMode, NULL, w);
+    g_signal_connect(G_OBJECT(win->seedRatioMode), "notify::selected",
                      G_CALLBACK(seed_ratio_mode_changed_cb), w);
     hig_workarea_add_row(t, &row, _("Seed ratio limit:"), w, w);
 
@@ -480,12 +477,12 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
     gtk_window_set_transient_for(window, GTK_WINDOW(propsDialog->parent_win));
     gtk_window_set_destroy_with_parent(window, TRUE);
 
-    gtk_dialog_add_button(GTK_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
-    gtk_dialog_add_button(GTK_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
+    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
+    trg_dialog_add_button(TRG_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
 
-    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(object)), GUI_PAD);
+    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
 
-    gtk_dialog_set_default_response(GTK_DIALOG(object), GTK_RESPONSE_OK);
+    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_OK);
 
     g_signal_connect(G_OBJECT(object), "response", G_CALLBACK(trg_torrent_props_response_cb), NULL);
 
@@ -553,7 +550,7 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
 
     trg_widget_set_margins(notebook, GUI_PAD);
 
-    contentvbox = gtk_dialog_get_content_area(GTK_DIALOG(object));
+    contentvbox = trg_dialog_get_content_area(TRG_DIALOG(object));
     gtk_widget_set_vexpand(notebook, TRUE);
     gtk_box_append(GTK_BOX(contentvbox), notebook);
 

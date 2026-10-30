@@ -34,7 +34,7 @@
 #include "util.h"
 
 struct _TrgTorrentMoveDialog {
-    GtkDialog parent;
+    TrgDialog parent;
 
     TrgClient *client;
     TrgMainWindow *win;
@@ -45,7 +45,7 @@ struct _TrgTorrentMoveDialog {
     GtkWidget *move_button;
 };
 
-G_DEFINE_TYPE(TrgTorrentMoveDialog, trg_torrent_move_dialog, GTK_TYPE_DIALOG)
+G_DEFINE_TYPE(TrgTorrentMoveDialog, trg_torrent_move_dialog, TRG_TYPE_DIALOG)
 
 enum {
     PROP_0,
@@ -54,7 +54,7 @@ enum {
     PROP_TREEVIEW
 };
 
-static void trg_torrent_move_response_cb(GtkDialog *dialog, gint res_id, gpointer data)
+static void trg_torrent_move_response_cb(TrgDialog *dialog, gint res_id, gpointer data)
 {
     TrgTorrentMoveDialog *dlg = TRG_TORRENT_MOVE_DIALOG(dialog);
 
@@ -71,7 +71,7 @@ static void trg_torrent_move_response_cb(GtkDialog *dialog, gint res_id, gpointe
     gtk_window_destroy(GTK_WINDOW(dlg));
 }
 
-static void location_changed(GtkComboBox *w, gpointer data)
+static void location_changed(TrgDestinationCombo *w, gpointer data)
 {
     TrgTorrentMoveDialog *dlg = TRG_TORRENT_MOVE_DIALOG(data);
     gtk_widget_set_sensitive(
@@ -103,21 +103,21 @@ static GObject *trg_torrent_move_dialog_constructor(GType type, guint n_construc
 
     gtk_window_set_destroy_with_parent(GTK_WINDOW(object), TRUE);
 
-    gtk_dialog_add_button(GTK_DIALOG(object), _("_Close"), GTK_RESPONSE_CANCEL);
-    self->move_button = gtk_dialog_add_button(GTK_DIALOG(object), _("Move"), GTK_RESPONSE_ACCEPT);
+    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CANCEL);
+    self->move_button = trg_dialog_add_button(TRG_DIALOG(object), _("Move"), GTK_RESPONSE_ACCEPT);
 
     gtk_widget_set_sensitive(
         self->move_button,
         trg_destination_combo_has_text(TRG_DESTINATION_COMBO(self->location_combo)));
 
-    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(object)), GUI_PAD);
+    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
 
-    gtk_dialog_set_default_response(GTK_DIALOG(object), GTK_RESPONSE_ACCEPT);
+    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_ACCEPT);
 
     trg_widget_set_margins(t, GUI_PAD);
 
     gtk_widget_set_vexpand(t, TRUE);
-    gtk_box_append(GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(object))), t);
+    gtk_box_append(GTK_BOX(trg_dialog_get_content_area(TRG_DIALOG(object))), t);
 
     count = gtk_tree_selection_count_selected_rows(
         gtk_tree_view_get_selection(GTK_TREE_VIEW(self->treeview)));

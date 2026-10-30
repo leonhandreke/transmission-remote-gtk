@@ -26,6 +26,7 @@
 #include <gtk/gtk.h>
 
 #include "hig.h"
+#include "trg-item.h"
 #include "trg-json-widgets.h"
 #include "trg-main-window.h"
 #include "trg-persistent-tree-view.h"
@@ -41,7 +42,7 @@
  */
 
 struct _TrgPreferencesDialog {
-    GtkDialog parent;
+    TrgDialog parent;
 
     TrgMainWindow *win;
     TrgClient *client;
@@ -54,7 +55,7 @@ struct _TrgPreferencesDialog {
     GtkWidget *notebook;
 };
 
-G_DEFINE_TYPE(TrgPreferencesDialog, trg_preferences_dialog, GTK_TYPE_DIALOG)
+G_DEFINE_TYPE(TrgPreferencesDialog, trg_preferences_dialog, TRG_TYPE_DIALOG)
 
 enum {
     PROP_0,
@@ -127,7 +128,7 @@ static void trg_preferences_dialog_set_property(GObject *object, guint prop_id, 
     }
 }
 
-static void trg_preferences_response_cb(GtkDialog *dlg, gint res_id, gpointer data G_GNUC_UNUSED)
+static void trg_preferences_response_cb(TrgDialog *dlg, gint res_id, gpointer data G_GNUC_UNUSED)
 {
     TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(dlg);
     GList *li;
@@ -360,41 +361,64 @@ static GtkWidget *trg_prefs_generalPage(TrgPreferencesDialog *dlg)
     return t;
 }
 
-static void profile_changed_cb(GtkWidget *w, gpointer data)
+/* The items of the profile drop down */
+enum {
+    PROFILE_COLUMN_PROFILE,
+    PROFILE_COLUMN_NAME
+};
+
+static const TrgItemColumn profile_item_columns[] = {
+    { "profile", G_TYPE_POINTER },
+    { "name", G_TYPE_STRING },
+};
+
+#define TRG_TYPE_PROFILE_ITEM trg_profile_item_get_type()
+TRG_DEFINE_ITEM_TYPE(TrgProfileItem, trg_profile_item, TRG, PROFILE_ITEM, profile_item_columns)
+
+static TrgItem *trg_prefs_profile_combo_get_selected(TrgPreferencesDialog *self)
+{
+    return gtk_drop_down_get_selected_item(GTK_DROP_DOWN(self->profileComboBox));
+}
+
+static void profile_changed_cb(GtkWidget *w, GParamSpec *pspec, gpointer data)
 {
     TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(data);
-    GtkTreeModel *model = gtk_combo_box_get_model(GTK_COMBO_BOX(w));
-    gint n_children = gtk_tree_model_iter_n_children(model, NULL);
-
-    GtkTreeIter iter;
-    JsonObject *profile;
+    GListModel *model = gtk_drop_down_get_model(GTK_DROP_DOWN(w));
+    TrgItem *item;
 
     trg_pref_widget_save_all(TRG_PREFERENCES_DIALOG(data));
 
-    if (gtk_combo_box_get_active_iter(GTK_COMBO_BOX(w), &iter)) {
-        gtk_tree_model_get(model, &iter, 0, &profile, -1);
-        trg_prefs_set_profile(self->prefs, profile);
+    if ((item = trg_prefs_profile_combo_get_selected(self))) {
+        trg_prefs_set_profile(self->prefs, trg_item_get_pointer(item, PROFILE_COLUMN_PROFILE));
         trg_pref_widget_refresh_all(TRG_PREFERENCES_DIALOG(data));
-        gtk_widget_set_sensitive(self->profileDelButton, n_children > 1);
+        gtk_widget_set_sensitive(self->profileDelButton, g_list_model_get_n_items(model) > 1);
     } else {
         gtk_widget_set_sensitive(self->profileDelButton, FALSE);
-        gtk_combo_box_set_active(GTK_COMBO_BOX(w), 0);
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(w), 0);
     }
 }
 
-static void trg_prefs_profile_combo_populate(TrgPreferencesDialog *dialog, GtkComboBox *combo,
+static TrgItem *trg_prefs_profile_item_new(JsonObject *profile, const gchar *name)
+{
+    TrgItem *item = g_object_new(TRG_TYPE_PROFILE_ITEM, NULL);
+
+    trg_item_set(item, PROFILE_COLUMN_PROFILE, profile, PROFILE_COLUMN_NAME, name, -1);
+
+    return item;
+}
+
+static void trg_prefs_profile_combo_populate(TrgPreferencesDialog *dialog, GtkDropDown *combo,
                                              TrgPrefs *prefs)
 {
     gint profile_id = trg_prefs_get_int(prefs, TRG_PREFS_KEY_PROFILE_ID, TRG_PREFS_GLOBAL);
-    GtkListStore *store = GTK_LIST_STORE(gtk_combo_box_get_model(combo));
+    GListStore *store = G_LIST_STORE(gtk_drop_down_get_model(combo));
     GList *profiles = json_array_get_elements(trg_prefs_get_profiles(prefs));
     GList *li;
 
-    int i = 0;
     for (li = profiles; li; li = g_list_next(li)) {
         JsonObject *profile = json_node_get_object((JsonNode *)li->data);
         const gchar *name_value;
-        GtkTreeIter iter;
+        TrgItem *item;
 
         if (json_object_has_member(profile, TRG_PREFS_KEY_PROFILE_NAME)) {
             name_value = json_object_get_string_member(profile, TRG_PREFS_KEY_PROFILE_NAME);
@@ -402,28 +426,60 @@ static void trg_prefs_profile_combo_populate(TrgPreferencesDialog *dialog, GtkCo
             name_value = _(TRG_PROFILE_NAME_DEFAULT);
         }
 
-        gtk_list_store_insert_with_values(store, &iter, INT_MAX, 0, profile, 1, name_value, -1);
-        if (i == profile_id)
-            gtk_combo_box_set_active_iter(combo, &iter);
-
-        i++;
+        item = trg_prefs_profile_item_new(profile, name_value);
+        g_list_store_append(store, item);
+        g_object_unref(item);
     }
+
+    if (profile_id >= 0 && (guint)profile_id < g_list_model_get_n_items(G_LIST_MODEL(store)))
+        gtk_drop_down_set_selected(combo, profile_id);
 
     gtk_widget_set_sensitive(dialog->profileDelButton, g_list_length(profiles) > 1);
 
     g_list_free(profiles);
 }
 
+static void trg_prefs_profile_label_setup(GtkSignalListItemFactory *factory, GtkListItem *list_item,
+                                          gpointer data)
+{
+    GtkWidget *label = gtk_label_new(NULL);
+
+    gtk_label_set_xalign(GTK_LABEL(label), 0);
+    gtk_list_item_set_child(list_item, label);
+}
+
+/* Bound to the name, so the label follows the name entry */
+static void trg_prefs_profile_label_bind(GtkSignalListItemFactory *factory, GtkListItem *list_item,
+                                         gpointer data)
+{
+    GBinding *binding = g_object_bind_property(gtk_list_item_get_item(list_item), "name",
+                                               gtk_list_item_get_child(list_item), "label",
+                                               G_BINDING_SYNC_CREATE);
+
+    g_object_set_data(G_OBJECT(list_item), "binding", binding);
+}
+
+static void trg_prefs_profile_label_unbind(GtkSignalListItemFactory *factory,
+                                           GtkListItem *list_item, gpointer data)
+{
+    GBinding *binding = g_object_get_data(G_OBJECT(list_item), "binding");
+
+    if (binding)
+        g_binding_unbind(binding);
+    g_object_set_data(G_OBJECT(list_item), "binding", NULL);
+}
+
 static GtkWidget *trg_prefs_profile_combo_new(TrgClient *tc)
 {
-    GtkWidget *w;
-    GtkCellRenderer *r;
-    GtkListStore *store = gtk_list_store_new(2, G_TYPE_POINTER, G_TYPE_STRING);
+    GListStore *store = g_list_store_new(TRG_TYPE_PROFILE_ITEM);
+    GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
+    GtkWidget *w = gtk_drop_down_new(G_LIST_MODEL(store), NULL);
 
-    w = gtk_combo_box_new_with_model(GTK_TREE_MODEL(store));
-    r = gtk_cell_renderer_text_new();
-    gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(w), r, FALSE);
-    gtk_cell_layout_add_attribute(GTK_CELL_LAYOUT(w), r, "text", 1);
+    g_signal_connect(factory, "setup", G_CALLBACK(trg_prefs_profile_label_setup), NULL);
+    g_signal_connect(factory, "bind", G_CALLBACK(trg_prefs_profile_label_bind), NULL);
+    g_signal_connect(factory, "unbind", G_CALLBACK(trg_prefs_profile_label_unbind), NULL);
+    gtk_drop_down_set_factory(GTK_DROP_DOWN(w), factory);
+    g_object_unref(factory);
 
     return w;
 }
@@ -431,17 +487,10 @@ static GtkWidget *trg_prefs_profile_combo_new(TrgClient *tc)
 static void name_changed_cb(GtkWidget *w, gpointer data)
 {
     TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(data);
-    GtkTreeIter iter;
-    GtkTreeModel *model;
-    GtkComboBox *combo;
+    TrgItem *item = trg_prefs_profile_combo_get_selected(self);
 
-    combo = GTK_COMBO_BOX(self->profileComboBox);
-    model = gtk_combo_box_get_model(combo);
-
-    if (gtk_combo_box_get_active_iter(combo, &iter)) {
-        gtk_list_store_set(GTK_LIST_STORE(model), &iter, 1, gtk_editable_get_text(GTK_EDITABLE(w)),
-                           -1);
-    }
+    if (item)
+        trg_item_set(item, PROFILE_COLUMN_NAME, gtk_editable_get_text(GTK_EDITABLE(w)), -1);
 }
 
 static void del_profile_cb(GtkWidget *w, gpointer data)
@@ -449,17 +498,15 @@ static void del_profile_cb(GtkWidget *w, gpointer data)
     GtkWidget *win = GTK_WIDGET(gtk_widget_get_root(w));
     TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(win);
     TrgPrefs *prefs = self->prefs;
-    GtkComboBox *combo = GTK_COMBO_BOX(data);
-    GtkTreeModel *profileModel = gtk_combo_box_get_model(combo);
-    GtkTreeIter iter;
-    JsonObject *profile;
+    GtkDropDown *combo = GTK_DROP_DOWN(data);
+    guint position = gtk_drop_down_get_selected(combo);
+    TrgItem *item = trg_prefs_profile_combo_get_selected(self);
 
-    if (gtk_combo_box_get_active_iter(combo, &iter)) {
-        gtk_tree_model_get(profileModel, &iter, 0, &profile, -1);
-        trg_prefs_del_profile(prefs, profile);
+    if (item) {
+        trg_prefs_del_profile(prefs, trg_item_get_pointer(item, PROFILE_COLUMN_PROFILE));
         trg_prefs_set_profile(prefs, NULL);
-        gtk_list_store_remove(GTK_LIST_STORE(profileModel), &iter);
-        gtk_combo_box_set_active(combo, 0);
+        g_list_store_remove(G_LIST_STORE(gtk_drop_down_get_model(combo)), position);
+        gtk_drop_down_set_selected(combo, 0);
     }
 }
 
@@ -467,14 +514,14 @@ static void add_profile_cb(GtkWidget *w, gpointer data)
 {
     GtkWidget *win = GTK_WIDGET(gtk_widget_get_root(w));
     TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(win);
-    GtkComboBox *combo = GTK_COMBO_BOX(data);
-    GtkTreeModel *profileModel = gtk_combo_box_get_model(combo);
-    GtkTreeIter iter;
-
+    GtkDropDown *combo = GTK_DROP_DOWN(data);
+    GListStore *store = G_LIST_STORE(gtk_drop_down_get_model(combo));
     JsonObject *profile = trg_prefs_new_profile(self->prefs);
-    gtk_list_store_insert_with_values(GTK_LIST_STORE(profileModel), &iter, INT_MAX, 0, profile, 1,
-                                      _(TRG_PROFILE_NAME_DEFAULT), -1);
-    gtk_combo_box_set_active_iter(combo, &iter);
+    TrgItem *item = trg_prefs_profile_item_new(profile, _(TRG_PROFILE_NAME_DEFAULT));
+
+    g_list_store_append(store, item);
+    g_object_unref(item);
+    gtk_drop_down_set_selected(combo, g_list_model_get_n_items(G_LIST_MODEL(store)) - 1);
 }
 
 static GtkWidget *trg_prefs_dirsPage(TrgPreferencesDialog *dlg)
@@ -606,9 +653,9 @@ static GtkWidget *trg_prefs_serverPage(TrgPreferencesDialog *dlg)
     gtk_widget_set_margin_end(dlg->profileDelButton, 4);
     gtk_box_append(GTK_BOX(profileButtonsHbox), dlg->profileDelButton);
 
-    trg_prefs_profile_combo_populate(dlg, GTK_COMBO_BOX(dlg->profileComboBox), prefs);
-    g_signal_connect(G_OBJECT(dlg->profileComboBox), "changed", G_CALLBACK(profile_changed_cb),
-                     dlg);
+    trg_prefs_profile_combo_populate(dlg, GTK_DROP_DOWN(dlg->profileComboBox), prefs);
+    g_signal_connect(G_OBJECT(dlg->profileComboBox), "notify::selected",
+                     G_CALLBACK(profile_changed_cb), dlg);
 
     /* Name */
 
@@ -694,17 +741,17 @@ static GObject *trg_preferences_dialog_constructor(GType type, guint n_construct
                  ->constructor(type, n_construct_properties, construct_params);
     TrgPreferencesDialog *self = TRG_PREFERENCES_DIALOG(object);
 
-    contentvbox = gtk_dialog_get_content_area(GTK_DIALOG(object));
+    contentvbox = trg_dialog_get_content_area(TRG_DIALOG(object));
 
     gtk_window_set_transient_for(GTK_WINDOW(object), GTK_WINDOW(self->win));
     gtk_window_set_destroy_with_parent(GTK_WINDOW(object), TRUE);
-    gtk_dialog_add_button(GTK_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
-    gtk_dialog_add_button(GTK_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
+    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
+    trg_dialog_add_button(TRG_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
 
-    gtk_dialog_set_default_response(GTK_DIALOG(object), GTK_RESPONSE_OK);
+    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_OK);
 
     gtk_window_set_title(GTK_WINDOW(object), _("Local Preferences"));
-    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(object)), GUI_PAD);
+    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
 
     g_signal_connect(G_OBJECT(object), "response", G_CALLBACK(trg_preferences_response_cb), NULL);
 

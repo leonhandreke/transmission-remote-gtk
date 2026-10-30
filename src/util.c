@@ -262,33 +262,20 @@ void add_file_id_to_array(JsonObject *args, const gchar *key, gint index)
 
 /* GTK utilities. */
 
-GtkWidget *gtr_combo_box_new_enum(const char *text_1, ...)
+/* A drop down of the given (NULL terminated) labels, the selected position is
+ * the index of the label. */
+GtkWidget *gtr_drop_down_new(const char *text_1, ...)
 {
-    GtkWidget *w;
-    GtkCellRenderer *r;
-    GtkListStore *store;
-    va_list vl;
+    GtkStringList *strings = gtk_string_list_new(NULL);
     const char *text;
+    va_list vl;
+
     va_start(vl, text_1);
+    for (text = text_1; text; text = va_arg(vl, const char *))
+        gtk_string_list_append(strings, text);
+    va_end(vl);
 
-    store = gtk_list_store_new(2, G_TYPE_INT, G_TYPE_STRING);
-
-    text = text_1;
-    if (text != NULL)
-        do {
-            const int val = va_arg(vl, int);
-            gtk_list_store_insert_with_values(store, NULL, INT_MAX, 0, val, 1, text, -1);
-            text = va_arg(vl, const char *);
-        } while (text != NULL);
-
-    w = gtk_combo_box_new_with_model(GTK_TREE_MODEL(store));
-    r = gtk_cell_renderer_text_new();
-    gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(w), r, TRUE);
-    gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(w), r, "text", 1, NULL);
-
-    /* cleanup */
-    g_object_unref(store);
-    return w;
+    return gtk_drop_down_new(G_LIST_MODEL(strings), NULL);
 }
 
 GtkWidget *my_scrolledwin_new(GtkWidget *child)
@@ -315,17 +302,40 @@ void trg_client_error_dialog(GtkWindow *parent, trg_response *response)
     trg_error_dialog(parent, msg);
 }
 
-GtkWidget *trg_error_dialog(GtkWindow *parent, gchar *msg)
-{
-    GtkWidget *dialog = gtk_message_dialog_new(parent, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR,
-                                               GTK_BUTTONS_OK, "%s", msg);
-    gtk_window_set_title(GTK_WINDOW(dialog), _("Error"));
-    g_signal_connect(dialog, "response", G_CALLBACK(gtk_window_destroy), NULL);
-    gtk_window_present(GTK_WINDOW(dialog));
+typedef struct {
+    TrgDialogDoneFunc done;
+    gpointer data;
+} trg_error_dialog_data;
 
-    /* Doesn't block like gtk_dialog_run() did, callers can connect to
-     * "response" to continue after it's dismissed. */
-    return dialog;
+static void trg_error_dialog_done_cb(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+    trg_error_dialog_data *data = user_data;
+
+    gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, NULL);
+    if (data->done)
+        data->done(data->data);
+    g_free(data);
+}
+
+/* Shows an error message, calls done (if not NULL) once it's dismissed. */
+void trg_error_dialog_full(GtkWindow *parent, const gchar *msg, TrgDialogDoneFunc done,
+                           gpointer data)
+{
+    GtkAlertDialog *dialog = gtk_alert_dialog_new("%s", _("Error"));
+    trg_error_dialog_data *done_data = g_new0(trg_error_dialog_data, 1);
+
+    gtk_alert_dialog_set_detail(dialog, msg);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
+
+    done_data->done = done;
+    done_data->data = data;
+    gtk_alert_dialog_choose(dialog, parent, NULL, trg_error_dialog_done_cb, done_data);
+    g_object_unref(dialog);
+}
+
+void trg_error_dialog(GtkWindow *parent, const gchar *msg)
+{
+    trg_error_dialog_full(parent, msg, NULL, NULL);
 }
 
 /* Context menus: GTK 4 has no "button-press-event" or "popup-menu" signals,
@@ -704,25 +714,6 @@ void trg_widget_set_margins(GtkWidget *w, gint margin)
     gtk_widget_set_margin_end(w, margin);
     gtk_widget_set_margin_top(w, margin);
     gtk_widget_set_margin_bottom(w, margin);
-}
-
-/* Remove the mnemonic underscores from a label, for places in GTK 4 that
- * don't support mnemonics. */
-gchar *trg_strip_mnemonic(const gchar *label)
-{
-    GString *str = g_string_new(NULL);
-    const gchar *p;
-
-    for (p = label; *p; p++) {
-        if (*p == '_') {
-            if (p[1] != '_')
-                continue;
-            p++;
-        }
-        g_string_append_c(str, *p);
-    }
-
-    return g_string_free(str, FALSE);
 }
 
 GtkWidget *trg_hbox_new(gboolean homogeneous, gint spacing)

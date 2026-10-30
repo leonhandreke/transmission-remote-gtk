@@ -447,7 +447,7 @@ static void disconnect_cb(GSimpleAction *action, GVariant *parameter, gpointer d
     trg_status_bar_reset(win->statusBar);
 }
 
-static void connect_error_response_cb(TrgMainWindow *win)
+static void connect_error_response_cb(gpointer win)
 {
     open_local_prefs_cb(NULL, NULL, win);
 }
@@ -479,12 +479,10 @@ void connect_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
         trg_prefs_profile_change_emit_signal(prefs);
 
     if (!trg_client_parse_settings(win->client, &err_msg)) {
-        GtkWidget *dialog = trg_error_dialog(GTK_WINDOW(data), err_msg);
         reset_connect_args(TRG_MAIN_WINDOW(data));
 
         /* open the preferences once the (modal) error is dismissed */
-        g_signal_connect_object(dialog, "response", G_CALLBACK(connect_error_response_cb), win,
-                                G_CONNECT_SWAPPED);
+        trg_error_dialog_full(GTK_WINDOW(data), err_msg, connect_error_response_cb, win);
 
         return;
     }
@@ -623,12 +621,13 @@ typedef struct {
     gboolean delete_data;
 } confirm_action_data;
 
-static void confirm_action_response_cb(GtkDialog *dialog, gint response, gpointer user_data)
+static void confirm_action_response_cb(GObject *source, GAsyncResult *result, gpointer user_data)
 {
     confirm_action_data *data = user_data;
     TrgMainWindow *win = data->win;
+    gint response = gtk_alert_dialog_choose_finish(GTK_ALERT_DIALOG(source), result, NULL);
 
-    if (response == GTK_RESPONSE_ACCEPT) {
+    if (response == 1) {
         if (data->delete_data)
             dispatch_rpc_async(win->client, torrent_remove(data->ids, TRUE), on_delete_complete,
                                win);
@@ -640,7 +639,6 @@ static void confirm_action_response_cb(GtkDialog *dialog, gint response, gpointe
     }
 
     g_free(data);
-    gtk_window_destroy(GTK_WINDOW(dialog));
 }
 
 /* Asks for confirmation and removes the torrents in ids if given. Takes
@@ -649,8 +647,10 @@ static void confirm_action_dialog(TrgMainWindow *win, GtkTreeSelection *selectio
                                   const gchar *action_name, const gchar *action_label,
                                   JsonArray *ids, gboolean delete_data)
 {
+    const char *buttons[] = { _("_Cancel"), action_label, NULL };
     gint selectCount;
-    GtkWidget *dialog = NULL;
+    GtkAlertDialog *dialog;
+    gchar *markup, *message = NULL;
     confirm_action_data *data;
 
     selectCount = gtk_tree_selection_count_selected_rows(selection);
@@ -670,33 +670,34 @@ static void confirm_action_dialog(TrgMainWindow *win, GtkTreeSelection *selectio
                            TORRENT_COLUMN_NAME, &name, -1);
         g_list_free_full(list, (GDestroyNotify)gtk_tree_path_free);
 
-        dialog = gtk_message_dialog_new_with_markup(
-            GTK_WINDOW(win), GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
-            GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE, _("<big><b>%s \"%s\"?</b></big>"), action_name,
-            name);
+        markup = g_markup_printf_escaped(_("<big><b>%s \"%s\"?</b></big>"), action_name, name);
         g_free(name);
     } else if (selectCount > 1) {
-        dialog = gtk_message_dialog_new_with_markup(
-            GTK_WINDOW(win), GTK_DIALOG_DESTROY_WITH_PARENT | GTK_DIALOG_MODAL,
-            GTK_MESSAGE_QUESTION, GTK_BUTTONS_NONE, _("<big><b>%s %d torrents?</b></big>"),
-            action_name, selectCount);
-
+        markup = g_markup_printf_escaped(_("<big><b>%s %d torrents?</b></big>"), action_name,
+                                         selectCount);
     } else {
         json_array_unref(ids);
         return;
     }
 
-    gtk_dialog_add_buttons(GTK_DIALOG(dialog), _("_Cancel"), GTK_RESPONSE_CANCEL, action_label,
-                           GTK_RESPONSE_ACCEPT, NULL);
-    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_CANCEL);
+    /* The (translated) message is markup, an alert shows plain text */
+    if (!pango_parse_markup(markup, -1, 0, NULL, &message, NULL, NULL))
+        message = g_strdup(markup);
+    dialog = gtk_alert_dialog_new("%s", message);
+    g_free(message);
+    g_free(markup);
+
+    gtk_alert_dialog_set_buttons(dialog, buttons);
+    gtk_alert_dialog_set_cancel_button(dialog, 0);
+    gtk_alert_dialog_set_default_button(dialog, 0);
+    gtk_alert_dialog_set_modal(dialog, TRUE);
 
     data = g_new0(confirm_action_data, 1);
     data->win = win;
     data->ids = ids;
     data->delete_data = delete_data;
-    g_signal_connect(dialog, "response", G_CALLBACK(confirm_action_response_cb), data);
-
-    gtk_window_present(GTK_WINDOW(dialog));
+    gtk_alert_dialog_choose(dialog, GTK_WINDOW(win), NULL, confirm_action_response_cb, data);
+    g_object_unref(dialog);
 }
 
 static gboolean is_ready_for_torrent_action(TrgMainWindow *win)

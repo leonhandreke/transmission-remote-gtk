@@ -22,11 +22,13 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 
+#include "trg-dialog.h"
+
 #include "trg-main-window.h"
 
 #define TRG_TYPE_PREFERENCES_DIALOG (trg_preferences_dialog_get_type())
 G_DECLARE_FINAL_TYPE(TrgPreferencesDialog, trg_preferences_dialog, TRG, PREFERENCES_DIALOG,
-                     GtkDialog)
+                     TrgDialog)
 
 typedef struct {
     GtkWidget *widget;

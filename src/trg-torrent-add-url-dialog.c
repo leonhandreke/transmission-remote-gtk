@@ -31,7 +31,7 @@
 #include "util.h"
 
 struct _TrgTorrentAddUrlDialog {
-    GtkDialog parent;
+    TrgDialog parent;
 
     TrgClient *client;
     TrgMainWindow *win;
@@ -40,7 +40,7 @@ struct _TrgTorrentAddUrlDialog {
     GtkWidget *addButton;
 };
 
-G_DEFINE_TYPE(TrgTorrentAddUrlDialog, trg_torrent_add_url_dialog, GTK_TYPE_DIALOG)
+G_DEFINE_TYPE(TrgTorrentAddUrlDialog, trg_torrent_add_url_dialog, TRG_TYPE_DIALOG)
 
 static void trg_torrent_add_url_dialog_class_init(TrgTorrentAddUrlDialogClass *klass)
 {
@@ -58,11 +58,7 @@ static void show_dht_not_enabled_warning(TrgTorrentAddUrlDialog *dlg)
                    "Table (DHT) should be enabled in remote settings.");
     /* The add dialog is destroyed right after this, so use the main window as
      * parent now that the warning doesn't block. */
-    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(dlg->win), GTK_DIALOG_MODAL,
-                                               GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "%s", msg);
-    gtk_window_set_title(GTK_WINDOW(dialog), _("Error"));
-    g_signal_connect(dialog, "response", G_CALLBACK(gtk_window_destroy), NULL);
-    gtk_window_present(GTK_WINDOW(dialog));
+    trg_error_dialog(GTK_WINDOW(dlg->win), msg);
 }
 
 static void trg_torrent_add_url_response_cb(TrgTorrentAddUrlDialog *dlg, gint res_id, gpointer data)
@@ -90,7 +86,7 @@ static void url_entry_changed(GtkWidget *w, gpointer data)
 
 static void url_entry_activate(GtkWidget *w, gpointer data)
 {
-    gtk_dialog_response(GTK_DIALOG(data), GTK_RESPONSE_ACCEPT);
+    trg_dialog_response(TRG_DIALOG(data), GTK_RESPONSE_ACCEPT);
 }
 
 static void clipboard_text_received(GObject *source, GAsyncResult *res, gpointer text_widget)
@@ -112,7 +108,7 @@ static void trg_torrent_add_url_dialog_init(TrgTorrentAddUrlDialog *self)
     GtkWidget *w, *t, *contentvbox;
     guint row = 0;
 
-    contentvbox = gtk_dialog_get_content_area(GTK_DIALOG(self));
+    contentvbox = trg_dialog_get_content_area(TRG_DIALOG(self));
 
     t = hig_workarea_create();
 
@@ -129,13 +125,13 @@ static void trg_torrent_add_url_dialog_init(TrgTorrentAddUrlDialog *self)
     gtk_window_set_title(GTK_WINDOW(self), _("Add torrent from URL"));
     gtk_window_set_destroy_with_parent(GTK_WINDOW(self), TRUE);
 
-    gtk_dialog_add_button(GTK_DIALOG(self), _("_Close"), GTK_RESPONSE_CANCEL);
-    self->addButton = gtk_dialog_add_button(GTK_DIALOG(self), _("_Add"), GTK_RESPONSE_ACCEPT);
+    trg_dialog_add_button(TRG_DIALOG(self), _("_Close"), GTK_RESPONSE_CANCEL);
+    self->addButton = trg_dialog_add_button(TRG_DIALOG(self), _("_Add"), GTK_RESPONSE_ACCEPT);
     gtk_widget_set_sensitive(self->addButton, FALSE);
 
-    trg_widget_set_margins(gtk_dialog_get_content_area(GTK_DIALOG(self)), GUI_PAD);
+    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(self)), GUI_PAD);
 
-    gtk_dialog_set_default_response(GTK_DIALOG(self), GTK_RESPONSE_ACCEPT);
+    trg_dialog_set_default_response(TRG_DIALOG(self), GTK_RESPONSE_ACCEPT);
 
     trg_widget_set_margins(t, GUI_PAD);
 

@@ -21,10 +21,12 @@
 #include <glib-object.h>
 #include <gtk/gtk.h>
 
+#include "trg-dialog.h"
+
 #include "trg-client.h"
 #include "trg-main-window.h"
 
 #define TRG_TYPE_STATS_DIALOG trg_stats_dialog_get_type()
-G_DECLARE_FINAL_TYPE(TrgStatsDialog, trg_stats_dialog, TRG, STATS_DIALOG, GtkDialog);
+G_DECLARE_FINAL_TYPE(TrgStatsDialog, trg_stats_dialog, TRG, STATS_DIALOG, TrgDialog);
 
 TrgStatsDialog *trg_stats_dialog_get_instance(TrgMainWindow *parent, TrgClient *client);
