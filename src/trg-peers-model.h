@@ -20,41 +20,18 @@
 #ifndef TRG_PEERS_MODEL_H_
 #define TRG_PEERS_MODEL_H_
 
-#include "config.h"
-
 #include <glib-object.h>
-#include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
 
+#include "trg-model.h"
 #include "trg-tree-view.h"
 
 G_BEGIN_DECLS
+
 #define TRG_TYPE_PEERS_MODEL trg_peers_model_get_type()
-#define TRG_PEERS_MODEL(obj)                                                                       \
-    (G_TYPE_CHECK_INSTANCE_CAST((obj), TRG_TYPE_PEERS_MODEL, TrgPeersModel))
-#define TRG_PEERS_MODEL_CLASS(klass)                                                               \
-    (G_TYPE_CHECK_CLASS_CAST((klass), TRG_TYPE_PEERS_MODEL, TrgPeersModelClass))
-#define TRG_IS_PEERS_MODEL(obj)         (G_TYPE_CHECK_INSTANCE_TYPE((obj), TRG_TYPE_PEERS_MODEL))
-#define TRG_IS_PEERS_MODEL_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass), TRG_TYPE_PEERS_MODEL))
-#define TRG_PEERS_MODEL_GET_CLASS(obj)                                                             \
-    (G_TYPE_INSTANCE_GET_CLASS((obj), TRG_TYPE_PEERS_MODEL, TrgPeersModelClass))
-typedef struct {
-    GtkListStore parent;
-} TrgPeersModel;
-
-typedef struct {
-    GtkListStoreClass parent_class;
-} TrgPeersModelClass;
-
-GType trg_peers_model_get_type(void);
+G_DECLARE_FINAL_TYPE(TrgPeersModel, trg_peers_model, TRG, PEERS_MODEL, TrgListModel)
 
 TrgPeersModel *trg_peers_model_new(void);
-
-G_END_DECLS struct peerAndIter {
-    const gchar *ip;
-    GtkTreeIter iter;
-    gboolean found;
-};
 
 enum {
     PEERSCOL_ICON,
@@ -70,6 +47,9 @@ enum {
 };
 
 void trg_peers_model_update(TrgPeersModel *model, TrgTreeView *tv, gint64 updateSerial,
-                            JsonObject *t, gboolean first);
+                            JsonObject *t, gint mode);
+void trg_peers_model_clear(TrgPeersModel *model);
+
+G_END_DECLS
 
 #endif /* TRG_PEERS_MODEL_H_ */

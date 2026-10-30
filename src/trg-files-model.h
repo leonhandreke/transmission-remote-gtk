@@ -21,11 +21,11 @@
 #include <glib-object.h>
 #include <json-glib/json-glib.h>
 
+#include "trg-legacy-tree-view.h"
 #include "trg-model.h"
-#include "trg-tree-view.h"
 
 #define TRG_TYPE_FILES_MODEL trg_files_model_get_type()
-G_DECLARE_FINAL_TYPE(TrgFilesModel, trg_files_model, TRG, FILES_MODEL, TrgTreeView)
+G_DECLARE_FINAL_TYPE(TrgFilesModel, trg_files_model, TRG, FILES_MODEL, TrgLegacyTreeView)
 
 TrgFilesModel *trg_files_model_new(void);
 

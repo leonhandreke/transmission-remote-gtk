@@ -26,6 +26,7 @@
 #include "json.h"
 #include "requests.h"
 #include "trg-client.h"
+#include "trg-item.h"
 #include "trg-main-window.h"
 #include "trg-prefs.h"
 #include "trg-trackers-model.h"
@@ -37,8 +38,8 @@ struct _TrgTrackersTreeView {
     TrgTreeView parent;
 
     TrgClient *client;
-    GtkCellRenderer *announceRenderer;
-    GtkTreeViewColumn *announceColumn;
+    trg_column_description *announceColumn;
+    TrgTrackersModel *model;
     TrgMainWindow *win;
 };
 
@@ -57,9 +58,8 @@ static gboolean on_trackers_update(gpointer data)
 {
     trg_response *response = (trg_response *)data;
     TrgTrackersTreeView *tv = TRG_TRACKERS_TREE_VIEW(response->cb_data);
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(response->cb_data));
 
-    trg_trackers_model_set_accept(TRG_TRACKERS_MODEL(model), TRUE);
+    trg_trackers_model_set_accept(tv->model, TRUE);
 
     response->cb_data = tv->win;
     return on_generic_interactive_action_response(data);
@@ -67,64 +67,47 @@ static gboolean on_trackers_update(gpointer data)
 
 void trg_trackers_tree_view_new_connection(TrgTrackersTreeView *tv, TrgClient *tc)
 {
-    gboolean editable = is_tracker_edit_supported(tc);
-
-    g_object_set(tv->announceRenderer, "editable", editable, "mode",
-                 editable ? GTK_CELL_RENDERER_MODE_EDITABLE : GTK_CELL_RENDERER_MODE_INERT, NULL);
+    trg_tree_view_set_column_editable(tv->announceColumn, is_tracker_edit_supported(tc));
 }
 
-static void trg_tracker_announce_edited(GtkCellRendererText *renderer, gchar *path, gchar *new_text,
-                                        gpointer user_data)
+/* Editing an announce URL replaces the tracker, or adds it for a new row */
+static void trg_tracker_announce_edit(TrgTreeView *ttv, gpointer item, gboolean done,
+                                      const gchar *new_text, gpointer data)
 {
-    TrgTrackersTreeView *tv = TRG_TRACKERS_TREE_VIEW(user_data);
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(user_data));
-    gint64 torrentId = trg_trackers_model_get_torrent_id(TRG_TRACKERS_MODEL(model));
-    JsonArray *torrentIds = json_array_new();
-    JsonArray *trackerModifiers = json_array_new();
-
-    gint64 trackerId;
+    TrgTrackersTreeView *tv = TRG_TRACKERS_TREE_VIEW(ttv);
+    gint64 torrentId = trg_trackers_model_get_torrent_id(tv->model);
+    JsonArray *torrentIds, *trackerModifiers;
     JsonNode *req;
     JsonObject *args;
-    GtkTreeIter iter;
-    gchar *icon;
 
-    gtk_tree_model_get_iter_from_string(model, &iter, path);
-    gtk_list_store_set(GTK_LIST_STORE(model), &iter, TRACKERCOL_ANNOUNCE, new_text, -1);
-    gtk_tree_model_get(model, &iter, TRACKERCOL_ID, &trackerId, TRACKERCOL_ICON, &icon, -1);
+    if (!done) {
+        trg_trackers_model_set_accept(tv->model, FALSE);
+        return;
+    }
 
+    if (!new_text || !*new_text) {
+        trg_trackers_model_set_accept(tv->model, TRUE);
+        return;
+    }
+
+    trg_item_set(item, TRACKERCOL_ANNOUNCE, new_text, -1);
+
+    torrentIds = json_array_new();
+    trackerModifiers = json_array_new();
     json_array_add_int_element(torrentIds, torrentId);
-
     req = torrent_set(torrentIds);
     args = node_get_arguments(req);
 
-    if (!g_strcmp0(icon, "list-add")) {
+    if (!g_strcmp0(trg_item_get_string(item, TRACKERCOL_ICON), "list-add")) {
         json_array_add_string_element(trackerModifiers, new_text);
         json_object_set_array_member(args, "trackerAdd", trackerModifiers);
     } else {
-        json_array_add_int_element(trackerModifiers, trackerId);
+        json_array_add_int_element(trackerModifiers, trg_item_get_int64(item, TRACKERCOL_ID));
         json_array_add_string_element(trackerModifiers, new_text);
         json_object_set_array_member(args, "trackerReplace", trackerModifiers);
     }
 
-    g_free(icon);
-
-    dispatch_rpc_async(tv->client, req, on_trackers_update, user_data);
-}
-
-static void trg_tracker_announce_editing_started(GtkCellRenderer *renderer G_GNUC_UNUSED,
-                                                 GtkCellEditable *editable G_GNUC_UNUSED,
-                                                 gchar *path G_GNUC_UNUSED, gpointer user_data)
-{
-    TrgTrackersModel *model = TRG_TRACKERS_MODEL(gtk_tree_view_get_model(GTK_TREE_VIEW(user_data)));
-
-    trg_trackers_model_set_accept(model, FALSE);
-}
-
-static void trg_tracker_announce_editing_canceled(GtkWidget *w G_GNUC_UNUSED, gpointer data)
-{
-    TrgTrackersModel *model = TRG_TRACKERS_MODEL(gtk_tree_view_get_model(GTK_TREE_VIEW(data)));
-
-    trg_trackers_model_set_accept(model, TRUE);
+    dispatch_rpc_async(tv->client, req, on_trackers_update, tv);
 }
 
 static void trg_trackers_tree_view_init(TrgTrackersTreeView *self)
@@ -137,15 +120,10 @@ static void trg_trackers_tree_view_init(TrgTrackersTreeView *self)
     desc->model_column_extra = TRACKERCOL_ICON;
 
     desc = trg_tree_view_reg_column(ttv, TRG_COLTYPE_TEXT, TRACKERCOL_ANNOUNCE, _("Announce URL"),
-                                    "announce-url", TRG_COLUMN_UNREMOVABLE);
-    self->announceRenderer = desc->customRenderer = gtk_cell_renderer_text_new();
-    g_signal_connect(self->announceRenderer, "edited", G_CALLBACK(trg_tracker_announce_edited),
-                     self);
-    g_signal_connect(self->announceRenderer, "editing-canceled",
-                     G_CALLBACK(trg_tracker_announce_editing_canceled), self);
-    g_signal_connect(self->announceRenderer, "editing-started",
-                     G_CALLBACK(trg_tracker_announce_editing_started), self);
-    desc->out = &self->announceColumn;
+                                    "announce-url", TRG_COLUMN_UNREMOVABLE | TRG_COLUMN_EDITABLE);
+    desc->edit = trg_tracker_announce_edit;
+    desc->editable = FALSE;
+    self->announceColumn = desc;
 
     trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TRACKERCOL_LAST_ANNOUNCE_PEER_COUNT,
                              _("Peers"), "last-announce-peer-count", 0);
@@ -165,75 +143,57 @@ static void trg_trackers_tree_view_init(TrgTrackersTreeView *self)
                              TRG_COLUMN_EXTRA);
 }
 
-static void add_tracker(GtkWidget *w, gpointer data)
+static void add_tracker(TrgTrackersTreeView *self)
 {
-    GtkTreeView *tv = GTK_TREE_VIEW(data);
-    TrgTrackersTreeView *self = TRG_TRACKERS_TREE_VIEW(data);
-    GtkTreeModel *model = gtk_tree_view_get_model(tv);
-    GtkTreeIter iter;
-    GtkTreePath *path;
+    gpointer item = trg_trackers_model_add_new(self->model);
 
-    gtk_list_store_append(GTK_LIST_STORE(model), &iter);
-    gtk_list_store_set(GTK_LIST_STORE(model), &iter, TRACKERCOL_ICON, "list-add", -1);
-
-    path = gtk_tree_model_get_path(model, &iter);
-    gtk_tree_view_set_cursor(tv, path, self->announceColumn, TRUE);
-    gtk_tree_path_free(path);
+    trg_tree_view_select_item(TRG_TREE_VIEW(self), item);
+    trg_tree_view_start_editing(TRG_TREE_VIEW(self), item, self->announceColumn);
 }
 
-static void delete_tracker(GtkWidget *w, gpointer data)
+static void delete_tracker(TrgTrackersTreeView *self)
 {
-    TrgTrackersTreeView *self = TRG_TRACKERS_TREE_VIEW(data);
-    GtkTreeView *tv = GTK_TREE_VIEW(data);
-    GList *selectionRefs = trg_tree_view_get_selected_refs_list(tv);
-    GtkTreeModel *model = gtk_tree_view_get_model(tv);
+    GList *items = trg_tree_view_get_selected_items(TRG_TREE_VIEW(self));
+    GListStore *store = trg_list_model_get_store(TRG_LIST_MODEL(self->model));
     JsonArray *trackerIds = json_array_new();
-    gint64 torrentId = trg_trackers_model_get_torrent_id(TRG_TRACKERS_MODEL(model));
+    gint64 torrentId = trg_trackers_model_get_torrent_id(self->model);
     JsonArray *torrentIds = json_array_new();
-
     JsonNode *req;
     JsonObject *args;
     GList *li;
 
-    for (li = selectionRefs; li; li = g_list_next(li)) {
-        GtkTreeRowReference *rr = (GtkTreeRowReference *)li->data;
-        GtkTreePath *path = gtk_tree_row_reference_get_path(rr);
-        if (path) {
-            gint64 trackerId;
-            GtkTreeIter trackerIter;
-            gtk_tree_model_get_iter(model, &trackerIter, path);
-            gtk_tree_model_get(model, &trackerIter, TRACKERCOL_ID, &trackerId, -1);
-            json_array_add_int_element(trackerIds, trackerId);
-            gtk_list_store_remove(GTK_LIST_STORE(model), &trackerIter);
-            gtk_tree_path_free(path);
-        }
-        gtk_tree_row_reference_free(rr);
+    for (li = items; li; li = g_list_next(li)) {
+        guint position;
+
+        json_array_add_int_element(trackerIds, trg_item_get_int64(li->data, TRACKERCOL_ID));
+        if (g_list_store_find(store, li->data, &position))
+            g_list_store_remove(store, position);
     }
-    g_list_free(selectionRefs);
+
+    g_list_free(items);
 
     json_array_add_int_element(torrentIds, torrentId);
-
     req = torrent_set(torrentIds);
     args = node_get_arguments(req);
 
     json_object_set_array_member(args, "trackerRemove", trackerIds);
 
-    trg_trackers_model_set_accept(TRG_TRACKERS_MODEL(model), FALSE);
+    trg_trackers_model_set_accept(self->model, FALSE);
 
-    dispatch_rpc_async(self->client, req, on_trackers_update, data);
+    dispatch_rpc_async(self->client, req, on_trackers_update, self);
 }
 
 static void add_tracker_action_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
 {
-    add_tracker(NULL, data);
+    add_tracker(TRG_TRACKERS_TREE_VIEW(data));
 }
 
 static void delete_tracker_action_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
 {
-    delete_tracker(NULL, data);
+    delete_tracker(TRG_TRACKERS_TREE_VIEW(data));
 }
 
-static void view_popup_menu_full(GtkWidget *treeview, gdouble x, gdouble y, gboolean with_delete)
+static void view_popup_menu(GtkWidget *treeview, gdouble x, gdouble y, gboolean with_delete)
 {
     static const GActionEntry entries[] = {
         { "delete", delete_tracker_action_cb, NULL, NULL, NULL, { 0 } },
@@ -255,55 +215,30 @@ static void view_popup_menu_full(GtkWidget *treeview, gdouble x, gdouble y, gboo
     g_object_unref(actions);
 }
 
-static void view_popup_menu_add_only(GtkWidget *treeview, gdouble x, gdouble y,
-                                     gpointer data G_GNUC_UNUSED)
-{
-    view_popup_menu_full(treeview, x, y, FALSE);
-}
-
-static void view_popup_menu(GtkWidget *treeview, gdouble x, gdouble y, gpointer data G_GNUC_UNUSED)
-{
-    view_popup_menu_full(treeview, x, y, TRUE);
-}
-
-static gboolean view_onButtonPressed(GtkWidget *treeview, gdouble x, gdouble y, gpointer userdata)
+static gboolean view_onContextMenu(GtkWidget *treeview, gdouble x, gdouble y, gpointer userdata)
 {
     TrgTrackersTreeView *self = TRG_TRACKERS_TREE_VIEW(treeview);
-    TrgTrackersModel *model = TRG_TRACKERS_MODEL(gtk_tree_view_get_model(GTK_TREE_VIEW(treeview)));
-    GtkTreeSelection *selection;
-    GtkTreePath *path;
-    gint bx, by;
+    TrgTreeView *tv = TRG_TREE_VIEW(treeview);
 
     if (!is_tracker_edit_supported(self->client))
         return FALSE;
 
-    selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(treeview));
-    gtk_tree_view_convert_widget_to_bin_window_coords(GTK_TREE_VIEW(treeview), (gint)x, (gint)y,
-                                                      &bx, &by);
-
-    if (gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(treeview), bx, by, &path, NULL, NULL, NULL)) {
-        if (!gtk_tree_selection_path_is_selected(selection, path)) {
-            gtk_tree_selection_unselect_all(selection);
-            gtk_tree_selection_select_path(selection, path);
-        }
-        gtk_tree_path_free(path);
-
-        view_popup_menu(treeview, x, y, userdata);
-    } else if (trg_trackers_model_get_torrent_id(model) >= 0) {
-        view_popup_menu_add_only(treeview, x, y, userdata);
-    }
-    return TRUE;
-}
-
-static gboolean view_onContextMenu(GtkWidget *treeview, gdouble x, gdouble y, gpointer userdata)
-{
     /* from the keyboard */
     if (x < 0) {
-        view_popup_menu(treeview, x, y, userdata);
+        view_popup_menu(treeview, x, y, trg_tree_view_count_selected(tv) > 0);
         return TRUE;
     }
 
-    return view_onButtonPressed(treeview, x, y, userdata);
+    /* the column headers have their own menu */
+    if (trg_tree_view_point_in_header(tv, x, y))
+        return FALSE;
+
+    if (trg_tree_view_select_at(tv, x, y))
+        view_popup_menu(treeview, x, y, TRUE);
+    else if (trg_trackers_model_get_torrent_id(self->model) >= 0)
+        view_popup_menu(treeview, x, y, FALSE);
+
+    return TRUE;
 }
 
 TrgTrackersTreeView *trg_trackers_tree_view_new(TrgTrackersModel *model, TrgClient *client,
@@ -311,14 +246,15 @@ TrgTrackersTreeView *trg_trackers_tree_view_new(TrgTrackersModel *model, TrgClie
 {
     GObject *obj = g_object_new(TRG_TYPE_TRACKERS_TREE_VIEW, "config-id", configId, "prefs",
                                 trg_client_get_prefs(client), NULL);
-
     TrgTrackersTreeView *self = TRG_TRACKERS_TREE_VIEW(obj);
 
-    gtk_tree_view_set_model(GTK_TREE_VIEW(obj), GTK_TREE_MODEL(model));
+    self->model = model;
     self->client = client;
     self->win = win;
 
+    trg_tree_view_set_model(TRG_TREE_VIEW(obj), G_LIST_MODEL(model));
     trg_tree_view_setup_columns(TRG_TREE_VIEW(obj));
+    trg_tree_view_restore_sort(TRG_TREE_VIEW(obj));
 
     trg_widget_add_context_menu(GTK_WIDGET(obj), view_onContextMenu, NULL);
 

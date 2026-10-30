@@ -23,18 +23,18 @@
 #include <gtk/gtk.h>
 
 #include "torrent-cell-renderer.h"
+#include "trg-legacy-tree-view.h"
 #include "trg-prefs.h"
 #include "trg-torrent-model.h"
 #include "trg-torrent-tree-view.h"
-#include "trg-tree-view.h"
 
 struct _TrgTorrentTreeView {
-    TrgTreeView parent;
+    TrgLegacyTreeView parent;
 
     TrgClient *client;
 };
 
-G_DEFINE_TYPE(TrgTorrentTreeView, trg_torrent_tree_view, TRG_TYPE_TREE_VIEW)
+G_DEFINE_TYPE(TrgTorrentTreeView, trg_torrent_tree_view, TRG_TYPE_LEGACY_TREE_VIEW)
 
 static void trg_torrent_tree_view_class_init(TrgTorrentTreeViewClass *klass G_GNUC_UNUSED)
 {
@@ -42,74 +42,82 @@ static void trg_torrent_tree_view_class_init(TrgTorrentTreeViewClass *klass G_GN
 
 static void trg_torrent_tree_view_init(TrgTorrentTreeView *tttv)
 {
-    TrgTreeView *ttv = TRG_TREE_VIEW(tttv);
-    trg_column_description *desc;
+    TrgLegacyTreeView *ttv = TRG_LEGACY_TREE_VIEW(tttv);
+    trg_legacy_column_description *desc;
 
-    desc = trg_tree_view_reg_column(ttv, TRG_COLTYPE_ICONTEXT, TORRENT_COLUMN_NAME, _("Name"),
-                                    "name", 0);
+    desc = trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_ICONTEXT, TORRENT_COLUMN_NAME,
+                                           _("Name"), "name", 0);
     desc->model_column_extra = TORRENT_COLUMN_ICON;
 
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_SIZE, TORRENT_COLUMN_SIZEWHENDONE, _("Size"), "size",
-                             0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_PROG, TORRENT_COLUMN_PERCENTDONE, _("Done"), "done",
-                             0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_TEXT, TORRENT_COLUMN_STATUS, _("Status"), "status",
-                             0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_SEEDS, _("Seeds"), "seeds",
-                             0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_PEERS_TO_US, _("Sending"),
-                             "sending", TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_LEECHERS, _("Leechers"),
-                             "leechers", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_DOWNLOADS, _("Downloads"),
-                             "downloads", TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_PEERS_FROM_US,
-                             _("Receiving"), "connected-leechers", TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_PEERS_CONNECTED,
-                             _("Connected"), "connected-peers", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMPEX, _("PEX Peers"),
-                             "from-pex", TRG_COLUMN_EXTRA | TRG_COLUMN_HIDE_FROM_TOP_MENU);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMDHT, _("DHT Peers"),
-                             "from-dht", TRG_COLUMN_EXTRA | TRG_COLUMN_HIDE_FROM_TOP_MENU);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMTRACKERS,
-                             _("Tracker Peers"), "from-trackers",
-                             TRG_COLUMN_EXTRA | TRG_COLUMN_HIDE_FROM_TOP_MENU);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMLTEP, _("LTEP Peers"),
-                             "from-ltep", TRG_COLUMN_EXTRA | TRG_COLUMN_HIDE_FROM_TOP_MENU);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMRESUME,
-                             _("Resumed Peers"), "from-resume",
-                             TRG_COLUMN_EXTRA | TRG_COLUMN_HIDE_FROM_TOP_MENU);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMINCOMING,
-                             _("Incoming Peers"), "from-incoming",
-                             TRG_COLUMN_EXTRA | TRG_COLUMN_HIDE_FROM_TOP_MENU);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_TEXT, TORRENT_COLUMN_PEER_SOURCES,
-                             _("Peers T/I/E/H/X/L/R"), "peer-sources",
-                             TRG_COLUMN_EXTRA | TRG_COLUMN_HIDE_FROM_TOP_MENU);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_SPEED, TORRENT_COLUMN_DOWNSPEED, _("Down Speed"),
-                             "down-speed", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_SPEED, TORRENT_COLUMN_UPSPEED, _("Up Speed"),
-                             "up-speed", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_ETA, TORRENT_COLUMN_ETA, _("ETA"), "eta", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_SIZE, TORRENT_COLUMN_UPLOADED, _("Uploaded"),
-                             "uploaded", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_SIZE, TORRENT_COLUMN_DOWNLOADED, _("Downloaded"),
-                             "downloaded", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_RATIO, TORRENT_COLUMN_RATIO, _("Ratio"), "ratio", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_EPOCH, TORRENT_COLUMN_ADDED, _("Added"), "added", 0);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_TEXT, TORRENT_COLUMN_TRACKERHOST, _("First Tracker"),
-                             "first-tracker", TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_TEXT, TORRENT_COLUMN_DOWNLOADDIR, _("Location"),
-                             "download-dir", TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_TEXT, TORRENT_COLUMN_ID, _("ID"), "id",
-                             TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_PRIO, TORRENT_COLUMN_BANDWIDTH_PRIORITY,
-                             _("Priority"), "priority", TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_NUMGTEQZERO, TORRENT_COLUMN_QUEUE_POSITION,
-                             _("Queue Position"), "queue-position", TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_EPOCH, TORRENT_COLUMN_DONE_DATE, _("Completed"),
-                             "done-date", TRG_COLUMN_EXTRA);
-    trg_tree_view_reg_column(ttv, TRG_COLTYPE_EPOCH, TORRENT_COLUMN_LASTACTIVE, _("Last Active"),
-                             "last-active", TRG_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_SIZE, TORRENT_COLUMN_SIZEWHENDONE,
+                                    _("Size"), "size", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_PROG, TORRENT_COLUMN_PERCENTDONE,
+                                    _("Done"), "done", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_TEXT, TORRENT_COLUMN_STATUS,
+                                    _("Status"), "status", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_SEEDS,
+                                    _("Seeds"), "seeds", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_PEERS_TO_US,
+                                    _("Sending"), "sending", TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_LEECHERS,
+                                    _("Leechers"), "leechers", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_DOWNLOADS,
+                                    _("Downloads"), "downloads", TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_PEERS_FROM_US,
+                                    _("Receiving"), "connected-leechers", TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO,
+                                    TORRENT_COLUMN_PEERS_CONNECTED, _("Connected"),
+                                    "connected-peers", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMPEX,
+                                    _("PEX Peers"), "from-pex",
+                                    TRG_LEGACY_COLUMN_EXTRA | TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMDHT,
+                                    _("DHT Peers"), "from-dht",
+                                    TRG_LEGACY_COLUMN_EXTRA | TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMTRACKERS,
+                                    _("Tracker Peers"), "from-trackers",
+                                    TRG_LEGACY_COLUMN_EXTRA | TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMLTEP,
+                                    _("LTEP Peers"), "from-ltep",
+                                    TRG_LEGACY_COLUMN_EXTRA | TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMRESUME,
+                                    _("Resumed Peers"), "from-resume",
+                                    TRG_LEGACY_COLUMN_EXTRA | TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTZERO, TORRENT_COLUMN_FROMINCOMING,
+                                    _("Incoming Peers"), "from-incoming",
+                                    TRG_LEGACY_COLUMN_EXTRA | TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_TEXT, TORRENT_COLUMN_PEER_SOURCES,
+                                    _("Peers T/I/E/H/X/L/R"), "peer-sources",
+                                    TRG_LEGACY_COLUMN_EXTRA | TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_SPEED, TORRENT_COLUMN_DOWNSPEED,
+                                    _("Down Speed"), "down-speed", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_SPEED, TORRENT_COLUMN_UPSPEED,
+                                    _("Up Speed"), "up-speed", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_ETA, TORRENT_COLUMN_ETA, _("ETA"),
+                                    "eta", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_SIZE, TORRENT_COLUMN_UPLOADED,
+                                    _("Uploaded"), "uploaded", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_SIZE, TORRENT_COLUMN_DOWNLOADED,
+                                    _("Downloaded"), "downloaded", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_RATIO, TORRENT_COLUMN_RATIO, _("Ratio"),
+                                    "ratio", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_EPOCH, TORRENT_COLUMN_ADDED, _("Added"),
+                                    "added", 0);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_TEXT, TORRENT_COLUMN_TRACKERHOST,
+                                    _("First Tracker"), "first-tracker", TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_TEXT, TORRENT_COLUMN_DOWNLOADDIR,
+                                    _("Location"), "download-dir", TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_TEXT, TORRENT_COLUMN_ID, _("ID"), "id",
+                                    TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_PRIO, TORRENT_COLUMN_BANDWIDTH_PRIORITY,
+                                    _("Priority"), "priority", TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_NUMGTEQZERO,
+                                    TORRENT_COLUMN_QUEUE_POSITION, _("Queue Position"),
+                                    "queue-position", TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_EPOCH, TORRENT_COLUMN_DONE_DATE,
+                                    _("Completed"), "done-date", TRG_LEGACY_COLUMN_EXTRA);
+    trg_legacy_tree_view_reg_column(ttv, TRG_LEGACY_COLTYPE_EPOCH, TORRENT_COLUMN_LASTACTIVE,
+                                    _("Last Active"), "last-active", TRG_LEGACY_COLUMN_EXTRA);
 
     gtk_tree_view_set_search_column(GTK_TREE_VIEW(tttv), TORRENT_COLUMN_NAME);
 }
@@ -140,7 +148,7 @@ static void setup_classic_layout(TrgTorrentTreeView *tv)
     gtk_tree_view_set_rubber_banding(GTK_TREE_VIEW(tv), TRUE);
     gtk_tree_view_set_headers_clickable(GTK_TREE_VIEW(tv), TRUE);
     gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tv), TRUE);
-    trg_tree_view_setup_columns(TRG_TREE_VIEW(tv));
+    trg_legacy_tree_view_setup_columns(TRG_LEGACY_TREE_VIEW(tv));
 }
 
 static void trg_torrent_tree_view_renderer_pref_changed(TrgPrefs *p, const gchar *updatedKey,
@@ -197,7 +205,7 @@ static void trg_torrent_tree_view_pref_changed(TrgPrefs *p, const gchar *updated
         TrgTorrentTreeView *ttv = TRG_TORRENT_TREE_VIEW(data);
         TrgPrefs *prefs = trg_client_get_prefs(ttv->client);
 
-        trg_tree_view_remove_all_columns(TRG_TREE_VIEW(data));
+        trg_legacy_tree_view_remove_all_columns(TRG_LEGACY_TREE_VIEW(data));
         if (trg_prefs_get_int(p, TRG_PREFS_KEY_STYLE, TRG_PREFS_GLOBAL) == TRG_STYLE_CLASSIC)
             setup_classic_layout(TRG_TORRENT_TREE_VIEW(data));
         else
@@ -214,7 +222,7 @@ TrgTorrentTreeView *trg_torrent_tree_view_new(TrgClient *tc, GtkTreeModel *model
     TrgPrefs *prefs = trg_client_get_prefs(tc);
     gint64 style = trg_prefs_get_int(prefs, TRG_PREFS_KEY_STYLE, TRG_PREFS_GLOBAL);
 
-    trg_tree_view_set_prefs(TRG_TREE_VIEW(obj), trg_client_get_prefs(tc));
+    trg_legacy_tree_view_set_prefs(TRG_LEGACY_TREE_VIEW(obj), trg_client_get_prefs(tc));
     gtk_tree_view_set_model(GTK_TREE_VIEW(obj), model);
 
     self->client = tc;
@@ -227,7 +235,8 @@ TrgTorrentTreeView *trg_torrent_tree_view_new(TrgClient *tc, GtkTreeModel *model
 
     g_signal_connect(prefs, "pref-changed", G_CALLBACK(trg_torrent_tree_view_pref_changed), obj);
 
-    trg_tree_view_restore_sort(TRG_TREE_VIEW(obj), TRG_TREE_VIEW_SORTABLE_PARENT);
+    trg_legacy_tree_view_restore_sort(TRG_LEGACY_TREE_VIEW(obj),
+                                      TRG_LEGACY_TREE_VIEW_SORTABLE_PARENT);
 
     return TRG_TORRENT_TREE_VIEW(obj);
 }

@@ -22,11 +22,11 @@
 
 #include "trg-client.h"
 #include "trg-files-model.h"
+#include "trg-legacy-tree-view.h"
 #include "trg-main-window.h"
-#include "trg-tree-view.h"
 
 #define TRG_TYPE_FILES_TREE_VIEW trg_files_tree_view_get_type()
-G_DECLARE_FINAL_TYPE(TrgFilesTreeView, trg_files_tree_view, TRG, FILES_TREE_VIEW, TrgTreeView)
+G_DECLARE_FINAL_TYPE(TrgFilesTreeView, trg_files_tree_view, TRG, FILES_TREE_VIEW, TrgLegacyTreeView)
 
 enum {
     NOT_SET = 1000,

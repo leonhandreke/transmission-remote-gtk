@@ -19,89 +19,173 @@
 
 #include "config.h"
 
+#include <gio/gio.h>
+
+#include "trg-item.h"
 #include "trg-model.h"
-#include <glib.h>
-#include <gtk/gtk.h>
-#include <json-glib/json-glib.h>
 
-/* An extension of GtkListStore which provides some functions for looking up
- * an entry by ID. Also for removing entries which have an old update serial,
- * which means it needs removing.
- */
+typedef struct {
+    GListStore *store;
+    GType item_type;
+} TrgListModelPrivate;
 
-struct trg_model_remove_removed_foreachfunc_args {
-    gint64 currentSerial;
-    gint serial_column;
-    GList *toRemove;
+enum {
+    PROP_0,
+    PROP_ITEM_TYPE
 };
 
-static gboolean trg_model_remove_removed_foreachfunc(GtkTreeModel *model,
-                                                     GtkTreePath *path G_GNUC_UNUSED,
-                                                     GtkTreeIter *iter, gpointer data)
-{
-    struct trg_model_remove_removed_foreachfunc_args *args
-        = (struct trg_model_remove_removed_foreachfunc_args *)data;
-    gint64 rowSerial;
-    gtk_tree_model_get(model, iter, args->serial_column, &rowSerial, -1);
-    if (rowSerial != args->currentSerial)
-        args->toRemove = g_list_append(args->toRemove, gtk_tree_iter_copy(iter));
+static void trg_list_model_list_model_init(GListModelInterface *iface);
 
-    return FALSE;
+G_DEFINE_TYPE_WITH_CODE(TrgListModel, trg_list_model, G_TYPE_OBJECT,
+                        G_ADD_PRIVATE(TrgListModel)
+                            G_IMPLEMENT_INTERFACE(G_TYPE_LIST_MODEL,
+                                                  trg_list_model_list_model_init))
+
+GListStore *trg_list_model_get_store(TrgListModel *model)
+{
+    TrgListModelPrivate *priv = trg_list_model_get_instance_private(model);
+
+    return priv->store;
 }
 
-guint trg_model_remove_removed(GtkListStore *model, gint serial_column, gint64 currentSerial)
+static GType trg_list_model_get_item_type(GListModel *list)
 {
-    struct trg_model_remove_removed_foreachfunc_args args;
-    GList *li;
-    guint removed = 0;
+    TrgListModelPrivate *priv = trg_list_model_get_instance_private(TRG_LIST_MODEL(list));
 
-    args.toRemove = NULL;
-    args.currentSerial = currentSerial;
-    args.serial_column = serial_column;
-    gtk_tree_model_foreach(GTK_TREE_MODEL(model), trg_model_remove_removed_foreachfunc, &args);
-    if (args.toRemove != NULL) {
-        for (li = g_list_last(args.toRemove); li != NULL; li = g_list_previous(li)) {
-            gtk_list_store_remove(model, (GtkTreeIter *)li->data);
-            gtk_tree_iter_free((GtkTreeIter *)li->data);
-            removed++;
+    return priv->item_type;
+}
+
+static guint trg_list_model_get_n_items(GListModel *list)
+{
+    return g_list_model_get_n_items(G_LIST_MODEL(trg_list_model_get_store(TRG_LIST_MODEL(list))));
+}
+
+static gpointer trg_list_model_get_item(GListModel *list, guint position)
+{
+    return g_list_model_get_item(G_LIST_MODEL(trg_list_model_get_store(TRG_LIST_MODEL(list))),
+                                 position);
+}
+
+static void trg_list_model_list_model_init(GListModelInterface *iface)
+{
+    iface->get_item_type = trg_list_model_get_item_type;
+    iface->get_n_items = trg_list_model_get_n_items;
+    iface->get_item = trg_list_model_get_item;
+}
+
+static void trg_list_model_store_changed(GListModel *store, guint position, guint removed,
+                                         guint added, TrgListModel *self)
+{
+    g_list_model_items_changed(G_LIST_MODEL(self), position, removed, added);
+}
+
+static void trg_list_model_set_property(GObject *object, guint property_id, const GValue *value,
+                                        GParamSpec *pspec)
+{
+    TrgListModelPrivate *priv = trg_list_model_get_instance_private(TRG_LIST_MODEL(object));
+
+    switch (property_id) {
+    case PROP_ITEM_TYPE:
+        priv->item_type = g_value_get_gtype(value);
+        break;
+    default:
+        G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+        break;
+    }
+}
+
+static void trg_list_model_constructed(GObject *object)
+{
+    TrgListModel *self = TRG_LIST_MODEL(object);
+    TrgListModelPrivate *priv = trg_list_model_get_instance_private(self);
+
+    G_OBJECT_CLASS(trg_list_model_parent_class)->constructed(object);
+
+    priv->store = g_list_store_new(priv->item_type);
+    g_signal_connect(priv->store, "items-changed", G_CALLBACK(trg_list_model_store_changed), self);
+}
+
+static void trg_list_model_dispose(GObject *object)
+{
+    TrgListModelPrivate *priv = trg_list_model_get_instance_private(TRG_LIST_MODEL(object));
+
+    if (priv->store) {
+        g_signal_handlers_disconnect_by_data(priv->store, object);
+        g_clear_object(&priv->store);
+    }
+
+    G_OBJECT_CLASS(trg_list_model_parent_class)->dispose(object);
+}
+
+static void trg_list_model_class_init(TrgListModelClass *klass)
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+    object_class->set_property = trg_list_model_set_property;
+    object_class->constructed = trg_list_model_constructed;
+    object_class->dispose = trg_list_model_dispose;
+
+    g_object_class_install_property(
+        object_class, PROP_ITEM_TYPE,
+        g_param_spec_gtype("item-type", NULL, NULL, TRG_TYPE_ITEM,
+                           G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
+}
+
+static void trg_list_model_init(TrgListModel *self)
+{
+}
+
+/* Removes the items whose serial column isn't currentSerial, in runs, so
+ * it's linear in the number of items. Returns how many were removed. */
+guint trg_model_remove_removed(GListStore *store, gint serial_column, gint64 currentSerial)
+{
+    GListModel *model = G_LIST_MODEL(store);
+    guint n = g_list_model_get_n_items(model);
+    guint removed = 0;
+    guint i = n;
+
+    while (i > 0) {
+        guint end = i;
+
+        /* find a run of stale items ending at end - 1 */
+        while (i > 0) {
+            g_autoptr(TrgItem) item = g_list_model_get_item(model, i - 1);
+            if (trg_item_get_int64(item, serial_column) == currentSerial)
+                break;
+            i--;
         }
-        g_list_free(args.toRemove);
+
+        if (i < end) {
+            g_list_store_splice(store, i, end - i, NULL, 0);
+            removed += end - i;
+        } else {
+            i--;
+        }
     }
 
     return removed;
 }
 
-struct find_existing_item_foreach_args {
-    gint64 id;
-    gint search_column;
-    GtkTreeIter iter;
-    gboolean found;
-};
-
-static gboolean find_existing_item_foreachfunc(GtkTreeModel *model, GtkTreePath *path G_GNUC_UNUSED,
-                                               GtkTreeIter *iter, gpointer data)
+/* The first item whose search_column (an integer column) is id */
+gpointer trg_model_find_item(GListModel *model, gint search_column, gint64 id, guint *position)
 {
-    struct find_existing_item_foreach_args *args = (struct find_existing_item_foreach_args *)data;
-    gint64 currentId;
+    guint i, n = g_list_model_get_n_items(model);
 
-    gtk_tree_model_get(model, iter, args->search_column, &currentId, -1);
-    if (currentId == args->id) {
-        args->iter = *iter;
-        return args->found = TRUE;
+    for (i = 0; i < n; i++) {
+        g_autoptr(TrgItem) item = g_list_model_get_item(model, i);
+        GValue value = G_VALUE_INIT;
+        gint64 current;
+
+        g_value_init(&value, G_TYPE_INT64);
+        g_value_transform(trg_item_peek_value(item, search_column), &value);
+        current = g_value_get_int64(&value);
+
+        if (current == id) {
+            if (position)
+                *position = i;
+            return item;
+        }
     }
 
-    return FALSE;
-}
-
-gboolean find_existing_model_item(GtkTreeModel *model, gint search_column, gint64 id,
-                                  GtkTreeIter *iter)
-{
-    struct find_existing_item_foreach_args args;
-    args.id = id;
-    args.found = FALSE;
-    args.search_column = search_column;
-    gtk_tree_model_foreach(model, find_existing_item_foreachfunc, &args);
-    if (args.found == TRUE)
-        *iter = args.iter;
-    return args.found;
+    return NULL;
 }

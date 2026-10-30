@@ -28,9 +28,9 @@
 #include "json.h"
 #include "requests.h"
 #include "trg-client.h"
+#include "trg-legacy-tree-view.h"
 #include "trg-main-window.h"
 #include "trg-stats-dialog.h"
-#include "trg-tree-view.h"
 #include "util.h"
 
 enum {
@@ -287,7 +287,7 @@ static GObject *trg_stats_dialog_constructor(GType type, guint n_construct_prope
     dlg->rr_session_count = stats_dialog_add_statistic(dlg->model, _("Session Count"));
     dlg->rr_active = stats_dialog_add_statistic(dlg->model, _("Time Active"));
 
-    tv = dlg->tv = trg_tree_view_new();
+    tv = dlg->tv = trg_legacy_tree_view_new();
     gtk_widget_set_sensitive(tv, TRUE);
 
     trg_stats_add_column(GTK_TREE_VIEW(tv), STATCOL_STAT, _("Statistic"), 200);

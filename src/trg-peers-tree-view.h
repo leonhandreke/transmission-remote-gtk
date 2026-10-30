@@ -25,30 +25,16 @@
 
 #include "trg-peers-model.h"
 #include "trg-prefs.h"
+#include "trg-tree-view.h"
 
 G_BEGIN_DECLS
+
 #define TRG_TYPE_PEERS_TREE_VIEW trg_peers_tree_view_get_type()
-#define TRG_PEERS_TREE_VIEW(obj)                                                                   \
-    (G_TYPE_CHECK_INSTANCE_CAST((obj), TRG_TYPE_PEERS_TREE_VIEW, TrgPeersTreeView))
-#define TRG_PEERS_TREE_VIEW_CLASS(klass)                                                           \
-    (G_TYPE_CHECK_CLASS_CAST((klass), TRG_TYPE_PEERS_TREE_VIEW, TrgPeersTreeViewClass))
-#define TRG_IS_PEERS_TREE_VIEW(obj) (G_TYPE_CHECK_INSTANCE_TYPE((obj), TRG_TYPE_PEERS_TREE_VIEW))
-#define TRG_IS_PEERS_TREE_VIEW_CLASS(klass)                                                        \
-    (G_TYPE_CHECK_CLASS_TYPE((klass), TRG_TYPE_PEERS_TREE_VIEW))
-#define TRG_PEERS_TREE_VIEW_GET_CLASS(obj)                                                         \
-    (G_TYPE_INSTANCE_GET_CLASS((obj), TRG_TYPE_PEERS_TREE_VIEW, TrgPeersTreeViewClass))
-typedef struct {
-    TrgTreeView parent;
-} TrgPeersTreeView;
-
-typedef struct {
-    TrgTreeViewClass parent_class;
-} TrgPeersTreeViewClass;
-
-GType trg_peers_tree_view_get_type(void);
+G_DECLARE_FINAL_TYPE(TrgPeersTreeView, trg_peers_tree_view, TRG, PEERS_TREE_VIEW, TrgTreeView)
 
 TrgPeersTreeView *trg_peers_tree_view_new(TrgPrefs *prefs, TrgPeersModel *model,
                                           const gchar *configId);
 
 G_END_DECLS
+
 #endif /* TRG_PEERS_TREE_VIEW_H_ */

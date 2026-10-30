@@ -141,8 +141,9 @@ static void trg_torrent_props_response_cb(TrgDialog *dialog, gint res_id,
 
         trg_tree_view_persist(TRG_TREE_VIEW(self->peersTv),
                               TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
-        trg_tree_view_persist(TRG_TREE_VIEW(self->filesTv),
-                              TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
+        trg_legacy_tree_view_persist(TRG_LEGACY_TREE_VIEW(self->filesTv),
+                                     TRG_LEGACY_TREE_VIEW_PERSIST_SORT
+                                         | TRG_LEGACY_TREE_VIEW_PERSIST_LAYOUT);
         trg_tree_view_persist(TRG_TREE_VIEW(self->trackersTv),
                               TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
     }
@@ -518,8 +519,7 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
         trg_peers_model_update(propsDialog->peersModel, TRG_TREE_VIEW(propsDialog->peersTv), serial,
                                json, TORRENT_GET_MODE_FIRST);
         gtk_widget_set_sensitive(GTK_WIDGET(propsDialog->peersTv), TRUE);
-        gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
-                                 my_scrolledwin_new(GTK_WIDGET(propsDialog->peersTv)),
+        gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->peersTv),
                                  gtk_label_new(_("Peers")));
 
         /* Trackers */
@@ -531,8 +531,7 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
         trg_trackers_tree_view_new_connection(propsDialog->trackersTv, propsDialog->client);
         trg_trackers_model_update(propsDialog->trackersModel, serial, json, TORRENT_GET_MODE_FIRST);
         gtk_widget_set_sensitive(GTK_WIDGET(propsDialog->trackersTv), TRUE);
-        gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
-                                 my_scrolledwin_new(GTK_WIDGET(propsDialog->trackersTv)),
+        gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->trackersTv),
                                  gtk_label_new(_("Trackers")));
 
         g_object_unref(propsDialog->trackersModel);

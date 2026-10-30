@@ -23,29 +23,28 @@
 #include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "trg-cell-renderer-epoch.h"
-#include "trg-cell-renderer-eta.h"
-#include "trg-cell-renderer-file-icon.h"
-#include "trg-cell-renderer-numgteqthan.h"
-#include "trg-cell-renderer-priority.h"
-#include "trg-cell-renderer-ratio.h"
-#include "trg-cell-renderer-size.h"
-#include "trg-cell-renderer-speed.h"
-#include "trg-cell-renderer-wanted.h"
+#include "protocol-constants.h"
+#include "trg-item.h"
 #include "trg-prefs.h"
 #include "trg-tree-view.h"
 #include "util.h"
 
-/* A subclass of GtkTreeView which allows the user to change column visibility
- * by right clicking on any column for a menu to hide the clicked column, or
- * insert any hidden column after.
+/* A GtkColumnView (in a scrolled window) of TrgItems, which allows the user
+ * to change column visibility with the menu of each column header: uncheck
+ * the column to hide it, or choose a hidden column to show it after.
  *
  * This class persists these choices to TrgPrefs, and restores them when it is
- * initialised. Column widths are also saved/restored.
+ * initialised. Column order, widths and the sort column are also saved and
+ * restored.
  *
- * All the columns must be preregistered so it knows what model column,
- * renderers etc to use if it should be created, and what columns are available.
+ * All the columns must be preregistered so it knows what model column, cell
+ * widgets etc to use if it should be created, and what columns are available.
+ *
+ * Sorting is by a model column, which needn't be a shown column, so the view
+ * has its own sorter for the GtkSortListModel and keeps the sort indicator of
+ * the column view's headers in sync with it.
  */
 
 enum {
@@ -55,7 +54,8 @@ enum {
 };
 
 enum {
-    SIGNAL_COLUMN_ADDED,
+    SIGNAL_SORT_CHANGED,
+    SIGNAL_ROW_ACTIVATED,
     SIGNAL_COUNT
 };
 
@@ -65,25 +65,74 @@ typedef struct {
     GList *columns;
     TrgPrefs *prefs;
     gchar *configId;
+
+    GtkWidget *scrolled;
+    GtkWidget *column_view;
+    GtkWidget *list_view;
+
+    GListModel *model;
+    GtkSortListModel *sort_model;
+    GtkSelectionModel *selection;
+    GtkSorter *sorter;
+
+    gint sort_column;
+    GtkSortType sort_order;
+    gboolean sortable;
+    gboolean column_menus;
+    gboolean updating_sort;
+
+    gint search_column;
+    GString *search;
+    gint64 search_time;
+
+    GSimpleActionGroup *actions;
 } TrgTreeViewPrivate;
 
-G_DEFINE_TYPE_WITH_PRIVATE(TrgTreeView, trg_tree_view, GTK_TYPE_TREE_VIEW)
+G_DEFINE_TYPE_WITH_PRIVATE(TrgTreeView, trg_tree_view, GTK_TYPE_WIDGET)
 
 #define GDATA_KEY_COLUMN_DESC "column-desc"
+#define GDATA_KEY_LIST_ITEM   "trg-list-item"
+#define GDATA_KEY_CELL        "trg-cell"
+#define GDATA_KEY_START_EDIT  "trg-start-editing"
+
+/* A cell (the widgets of a column of a row) and what it's bound to */
+typedef struct {
+    trg_column_description *desc;
+    GtkListItem *list_item;
+    GtkWidget *expander;
+    GtkWidget *image;
+    GtkWidget *widget;
+    TrgItem *item;
+    gulong handler, handler_extra;
+    gboolean updating;
+    gchar *edit_original;
+} TrgTreeViewCell;
+
+static void trg_tree_view_update_column_menus(TrgTreeView *tv);
+static void trg_tree_view_add_column_after(TrgTreeView *tv, trg_column_description *desc,
+                                           gint64 width, trg_column_description *after);
+
+gpointer trg_tree_view_row_item(gpointer row)
+{
+    if (GTK_IS_TREE_LIST_ROW(row)) {
+        gpointer item = gtk_tree_list_row_get_item(GTK_TREE_LIST_ROW(row));
+        /* the row keeps a reference */
+        g_object_unref(item);
+        return item;
+    }
+
+    return row;
+}
 
 gboolean trg_tree_view_is_column_showing(TrgTreeView *tv, gint index)
 {
     TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
-
     GList *li;
+
     for (li = priv->columns; li; li = g_list_next(li)) {
         trg_column_description *cd = (trg_column_description *)li->data;
-        if (cd->model_column == index) {
-            if (cd->flags & TRG_COLUMN_SHOWING)
-                return TRUE;
-            else
-                break;
-        }
+        if (cd->model_column == index)
+            return (cd->flags & TRG_COLUMN_SHOWING) != 0;
     }
 
     return FALSE;
@@ -122,23 +171,19 @@ static void trg_tree_view_set_property(GObject *object, guint property_id, const
     }
 }
 
-static GObject *trg_tree_view_constructor(GType type, guint n_construct_properties,
-                                          GObjectConstructParam *construct_params)
-{
-    GObject *obj = G_OBJECT_CLASS(trg_tree_view_parent_class)
-                       ->constructor(type, n_construct_properties, construct_params);
-
-    return obj;
-}
-
 static JsonObject *trg_prefs_get_tree_view_props(TrgTreeView *tv)
 {
     TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
-    JsonObject *root = trg_prefs_get_root(priv->prefs);
+    JsonObject *root;
     const gchar *className
         = priv->configId && strlen(priv->configId) > 0 ? priv->configId : G_OBJECT_TYPE_NAME(tv);
     JsonObject *obj;
     JsonObject *tvProps = NULL;
+
+    if (!priv->prefs)
+        return NULL;
+
+    root = trg_prefs_get_root(priv->prefs);
 
     if (!json_object_has_member(root, TRG_PREFS_KEY_TREE_VIEWS)) {
         obj = json_object_new();
@@ -157,9 +202,6 @@ static JsonObject *trg_prefs_get_tree_view_props(TrgTreeView *tv)
     return tvProps;
 }
 
-static void trg_tree_view_add_column_after(TrgTreeView *tv, trg_column_description *desc,
-                                           gint64 width, GtkTreeViewColumn *after_col);
-
 trg_column_description *trg_tree_view_reg_column(TrgTreeView *tv, gint type, gint model_column,
                                                  const gchar *header, const gchar *id, guint flags)
 {
@@ -168,9 +210,12 @@ trg_column_description *trg_tree_view_reg_column(TrgTreeView *tv, gint type, gin
 
     desc->type = type;
     desc->model_column = model_column;
+    desc->model_column_extra = -1;
     desc->header = g_strdup(header);
     desc->id = g_strdup(id);
     desc->flags = flags;
+    desc->editable = (flags & TRG_COLUMN_EDITABLE) != 0;
+    desc->tv = tv;
 
     priv->columns = g_list_append(priv->columns, desc);
 
@@ -181,10 +226,9 @@ static trg_column_description *trg_tree_view_find_column(TrgTreeView *tv, const 
 {
     TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
     GList *li;
-    trg_column_description *desc;
 
     for (li = priv->columns; li; li = g_list_next(li)) {
-        desc = (trg_column_description *)li->data;
+        trg_column_description *desc = (trg_column_description *)li->data;
         if (!g_strcmp0(desc->id, id))
             return desc;
     }
@@ -192,57 +236,618 @@ static trg_column_description *trg_tree_view_find_column(TrgTreeView *tv, const 
     return NULL;
 }
 
-static void trg_tree_view_hide_column(GtkWidget *w, GtkTreeViewColumn *col)
+/***
+ * Value formatting, like the cell renderers of the GtkTreeView did.
+ */
+
+static gint64 trg_value_get_int64(const GValue *value)
 {
-    trg_column_description *desc = g_object_get_data(G_OBJECT(col), GDATA_KEY_COLUMN_DESC);
-    GtkWidget *tv = gtk_tree_view_column_get_tree_view(col);
-    desc->flags &= ~TRG_COLUMN_SHOWING;
-    gtk_tree_view_remove_column(GTK_TREE_VIEW(tv), col);
+    switch (G_TYPE_FUNDAMENTAL(G_VALUE_TYPE(value))) {
+    case G_TYPE_INT:
+        return g_value_get_int(value);
+    case G_TYPE_UINT:
+        return g_value_get_uint(value);
+    case G_TYPE_INT64:
+        return g_value_get_int64(value);
+    case G_TYPE_DOUBLE:
+        return (gint64)g_value_get_double(value);
+    case G_TYPE_BOOLEAN:
+        return g_value_get_boolean(value);
+    default:
+        return 0;
+    }
 }
 
-static void trg_tree_view_add_column(TrgTreeView *tv, trg_column_description *desc, gint64 width)
+static gdouble trg_value_get_double(const GValue *value)
 {
-    trg_tree_view_add_column_after(tv, desc, width, NULL);
+    if (G_VALUE_HOLDS_DOUBLE(value))
+        return g_value_get_double(value);
+    return (gdouble)trg_value_get_int64(value);
 }
 
-static void trg_tree_view_user_add_column_cb(GtkTreeViewColumn *col, trg_column_description *desc)
+static gchar *trg_value_to_string(const GValue *value)
 {
-    TrgTreeView *tv = TRG_TREE_VIEW(gtk_tree_view_column_get_tree_view(col));
+    GValue str = G_VALUE_INIT;
+    gchar *result;
 
-    trg_tree_view_add_column_after(tv, desc, -1, col);
+    if (G_VALUE_HOLDS_STRING(value))
+        return g_value_dup_string(value);
 
-    g_signal_emit(tv, signals[SIGNAL_COLUMN_ADDED], 0, desc->id);
+    g_value_init(&str, G_TYPE_STRING);
+    if (g_value_transform(value, &str))
+        result = g_value_dup_string(&str);
+    else
+        result = NULL;
+    g_value_unset(&str);
+
+    return result;
+}
+
+static GIcon *trg_file_icon_for(gint64 file_id, const gchar *name)
+{
+    if (file_id == -1)
+        return g_themed_icon_new("folder");
+
+#ifndef G_OS_WIN32
+    if (name) {
+        gboolean uncertain;
+        gchar *mimetype = g_content_type_guess(name, NULL, 0, &uncertain);
+        GIcon *icon = NULL;
+
+        if (!uncertain && mimetype)
+            icon = g_content_type_get_icon(mimetype);
+
+        g_free(mimetype);
+
+        if (icon)
+            return icon;
+    }
+#endif
+
+    return g_themed_icon_new("text-x-generic");
+}
+
+static gchar *trg_tree_view_format(trg_column_description *desc, const GValue *value)
+{
+    char buf[64];
+
+    switch (desc->type) {
+    case TRG_COLTYPE_SPEED: {
+        gint64 speed = trg_value_get_int64(value);
+        if (speed > 0)
+            return g_strdup(trg_strlspeed(buf, speed / disk_K));
+        return NULL;
+    }
+    case TRG_COLTYPE_EPOCH: {
+        gint64 epoch = trg_value_get_int64(value);
+        return epoch > 0 ? epoch_to_string(epoch) : NULL;
+    }
+    case TRG_COLTYPE_ETA: {
+        gint64 eta = trg_value_get_int64(value);
+        if (eta > 0)
+            return g_strdup(tr_strltime_short(buf, eta, sizeof(buf)));
+        else if (eta == -2)
+            return g_strdup("∞");
+        return NULL;
+    }
+    case TRG_COLTYPE_SIZE: {
+        gint64 size = trg_value_get_int64(value);
+        return size > 0 ? g_strdup(trg_strlsize(buf, size)) : NULL;
+    }
+    case TRG_COLTYPE_RATIO: {
+        gdouble ratio = trg_value_get_double(value);
+        return ratio > 0 ? g_strdup(trg_strlratio(buf, ratio)) : NULL;
+    }
+    case TRG_COLTYPE_PRIO:
+        switch (trg_value_get_int64(value)) {
+        case TR_PRI_LOW:
+            return g_strdup(_("Low"));
+        case TR_PRI_HIGH:
+            return g_strdup(_("High"));
+        case TR_PRI_NORMAL:
+            return g_strdup(_("Normal"));
+        case TR_PRI_MIXED:
+            return g_strdup(_("Mixed"));
+        default:
+            return NULL;
+        }
+    case TRG_COLTYPE_NUMGTZERO:
+    case TRG_COLTYPE_NUMGTEQZERO: {
+        gint64 v = trg_value_get_int64(value);
+        if (v >= (desc->type == TRG_COLTYPE_NUMGTZERO ? 1 : 0))
+            return g_strdup_printf("%" G_GINT64_FORMAT, v);
+        return NULL;
+    }
+    default:
+        return trg_value_to_string(value);
+    }
+}
+
+/***
+ * Cells
+ */
+
+static void trg_tree_view_cell_refresh(TrgTreeViewCell *cell)
+{
+    trg_column_description *desc = cell->desc;
+    TrgItem *item = cell->item;
+    const GValue *value;
+
+    if (!item)
+        return;
+
+    value = trg_item_peek_value(item, desc->model_column);
+    cell->updating = TRUE;
+
+    switch (desc->type) {
+    case TRG_COLTYPE_PROG: {
+        gdouble progress = CLAMP(trg_value_get_double(value), 0.0, 100.0);
+        gchar *text = g_strdup_printf(C_("progress bar label", "%d %%"), (gint)progress);
+        gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(cell->widget), progress / 100.0);
+        gtk_progress_bar_set_text(GTK_PROGRESS_BAR(cell->widget), text);
+        g_free(text);
+        break;
+    }
+    case TRG_COLTYPE_WANTED: {
+        gint64 wanted = trg_value_get_int64(value);
+        gtk_check_button_set_inconsistent(GTK_CHECK_BUTTON(cell->widget), wanted == TR_PRI_MIXED);
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(cell->widget), wanted == TRUE);
+        break;
+    }
+    case TRG_COLTYPE_ICONTEXT:
+    case TRG_COLTYPE_FILEICONTEXT: {
+        gchar *text = trg_value_to_string(value);
+
+        gtk_label_set_text(GTK_LABEL(cell->widget), text ? text : "");
+
+        if (desc->type == TRG_COLTYPE_ICONTEXT) {
+            gtk_image_set_from_icon_name(GTK_IMAGE(cell->image),
+                                         desc->model_column_extra >= 0
+                                             ? trg_item_get_string(item, desc->model_column_extra)
+                                             : NULL);
+        } else {
+            gint64 file_id = desc->model_column_extra >= 0
+                ? trg_value_get_int64(trg_item_peek_value(item, desc->model_column_extra))
+                : 0;
+            if (file_id == -2) {
+                gtk_image_clear(GTK_IMAGE(cell->image));
+            } else {
+                GIcon *icon = trg_file_icon_for(file_id, text);
+                gtk_image_set_from_gicon(GTK_IMAGE(cell->image), icon);
+                g_object_unref(icon);
+            }
+        }
+
+        g_free(text);
+        break;
+    }
+    default: {
+        gchar *text = trg_tree_view_format(desc, value);
+
+        if (GTK_IS_EDITABLE_LABEL(cell->widget)) {
+            if (!gtk_editable_label_get_editing(GTK_EDITABLE_LABEL(cell->widget)))
+                gtk_editable_set_text(GTK_EDITABLE(cell->widget), text ? text : "");
+            gtk_widget_set_can_target(cell->widget, desc->editable);
+            gtk_editable_set_editable(GTK_EDITABLE(cell->widget), desc->editable);
+        } else {
+            gtk_label_set_text(GTK_LABEL(cell->widget), text ? text : "");
+        }
+
+        g_free(text);
+        break;
+    }
+    }
+
+    cell->updating = FALSE;
+}
+
+static void trg_tree_view_cell_notify(GObject *object, GParamSpec *pspec, TrgTreeViewCell *cell)
+{
+    trg_tree_view_cell_refresh(cell);
+}
+
+static void trg_tree_view_wanted_toggled(GtkCheckButton *button, TrgTreeViewCell *cell)
+{
+    if (cell->updating || !cell->item)
+        return;
+
+    if (cell->desc->activate)
+        cell->desc->activate(cell->desc->tv, cell->item, cell->desc->func_data);
+
+    /* the model decides the state */
+    trg_tree_view_cell_refresh(cell);
+}
+
+static void trg_tree_view_cell_clicked(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
+                                       TrgTreeViewCell *cell)
+{
+    if (n_press == 1 && cell->item && cell->desc->activate) {
+        cell->desc->activate(cell->desc->tv, cell->item, cell->desc->func_data);
+        gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+    }
+}
+
+static void trg_tree_view_cell_editing_cb(GtkEditableLabel *label, GParamSpec *pspec,
+                                          TrgTreeViewCell *cell)
+{
+    trg_column_description *desc = cell->desc;
+    TrgItem *item = cell->item;
+
+    if (!item)
+        return;
+
+    if (gtk_editable_label_get_editing(label)) {
+        g_free(cell->edit_original);
+        cell->edit_original = g_strdup(gtk_editable_get_text(GTK_EDITABLE(label)));
+        if (desc->edit)
+            desc->edit(desc->tv, item, FALSE, NULL, desc->func_data);
+    } else {
+        const gchar *text = gtk_editable_get_text(GTK_EDITABLE(label));
+        gboolean changed = g_strcmp0(text, cell->edit_original) != 0;
+
+        g_object_ref(item);
+        if (desc->edit) {
+            gchar *new_text = changed ? g_strdup(text) : NULL;
+            desc->edit(desc->tv, item, TRUE, new_text, desc->func_data);
+            g_free(new_text);
+        }
+        g_clear_pointer(&cell->edit_original, g_free);
+        if (cell->item == item)
+            trg_tree_view_cell_refresh(cell);
+        g_object_unref(item);
+    }
+}
+
+static void trg_tree_view_cell_free(TrgTreeViewCell *cell)
+{
+    g_free(cell->edit_original);
+    g_free(cell);
+}
+
+void trg_tree_view_mark_row_widget(GtkWidget *widget, GtkListItem *list_item)
+{
+    g_object_set_data(G_OBJECT(widget), GDATA_KEY_LIST_ITEM, list_item);
+}
+
+static void trg_tree_view_cell_setup(GtkSignalListItemFactory *factory, GtkListItem *list_item,
+                                     trg_column_description *desc)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(desc->tv);
+    TrgTreeViewCell *cell = g_new0(TrgTreeViewCell, 1);
+    GtkWidget *child;
+
+    cell->desc = desc;
+    cell->list_item = list_item;
+
+    switch (desc->type) {
+    case TRG_COLTYPE_ICONTEXT:
+    case TRG_COLTYPE_FILEICONTEXT:
+        child = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+        cell->image = gtk_image_new();
+        gtk_box_append(GTK_BOX(child), cell->image);
+        cell->widget = gtk_label_new(NULL);
+        gtk_label_set_xalign(GTK_LABEL(cell->widget), 0);
+        gtk_label_set_ellipsize(GTK_LABEL(cell->widget), PANGO_ELLIPSIZE_END);
+        gtk_widget_set_hexpand(cell->widget, TRUE);
+        gtk_box_append(GTK_BOX(child), cell->widget);
+        break;
+    case TRG_COLTYPE_WANTED:
+        child = cell->widget = gtk_check_button_new();
+        gtk_widget_set_halign(child, GTK_ALIGN_CENTER);
+        g_signal_connect(child, "toggled", G_CALLBACK(trg_tree_view_wanted_toggled), cell);
+        break;
+    case TRG_COLTYPE_PROG:
+        child = cell->widget = gtk_progress_bar_new();
+        gtk_progress_bar_set_show_text(GTK_PROGRESS_BAR(child), TRUE);
+        gtk_widget_set_valign(child, GTK_ALIGN_CENTER);
+        break;
+    default:
+        if (desc->flags & TRG_COLUMN_EDITABLE) {
+            child = cell->widget = gtk_editable_label_new("");
+            g_signal_connect(child, "notify::editing", G_CALLBACK(trg_tree_view_cell_editing_cb),
+                             cell);
+        } else {
+            child = cell->widget = gtk_label_new(NULL);
+            gtk_label_set_ellipsize(GTK_LABEL(child), PANGO_ELLIPSIZE_END);
+            switch (desc->type) {
+            case TRG_COLTYPE_SPEED:
+            case TRG_COLTYPE_SIZE:
+            case TRG_COLTYPE_RATIO:
+            case TRG_COLTYPE_NUMGTZERO:
+            case TRG_COLTYPE_NUMGTEQZERO:
+                gtk_label_set_xalign(GTK_LABEL(child), 1);
+                break;
+            default:
+                gtk_label_set_xalign(GTK_LABEL(child), 0);
+                break;
+            }
+        }
+        if (desc->type == TRG_COLTYPE_PRIO) {
+            GtkGesture *gesture = gtk_gesture_click_new();
+            gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_PRIMARY);
+            g_signal_connect(gesture, "released", G_CALLBACK(trg_tree_view_cell_clicked), cell);
+            gtk_widget_add_controller(child, GTK_EVENT_CONTROLLER(gesture));
+        }
+        break;
+    }
+
+    /* the expander of a tree goes in its file name column */
+    if (desc->type == TRG_COLTYPE_FILEICONTEXT && GTK_IS_TREE_LIST_MODEL(priv->model)) {
+        cell->expander = gtk_tree_expander_new();
+        gtk_tree_expander_set_child(GTK_TREE_EXPANDER(cell->expander), child);
+        child = cell->expander;
+    }
+
+    trg_tree_view_mark_row_widget(child, list_item);
+    g_object_set_data_full(G_OBJECT(list_item), GDATA_KEY_CELL, cell,
+                           (GDestroyNotify)trg_tree_view_cell_free);
+    gtk_list_item_set_child(list_item, child);
+}
+
+static gboolean trg_tree_view_start_editing_idle(gpointer data)
+{
+    GtkWidget *label = GTK_WIDGET(data);
+
+    if (gtk_widget_get_mapped(label)) {
+        gtk_widget_set_can_target(label, TRUE);
+        gtk_editable_label_start_editing(GTK_EDITABLE_LABEL(label));
+        gtk_widget_grab_focus(label);
+    }
+
+    g_object_unref(label);
+
+    return G_SOURCE_REMOVE;
+}
+
+static void trg_tree_view_cell_bind(GtkSignalListItemFactory *factory, GtkListItem *list_item,
+                                    trg_column_description *desc)
+{
+    TrgTreeViewCell *cell = g_object_get_data(G_OBJECT(list_item), GDATA_KEY_CELL);
+    gpointer row = gtk_list_item_get_item(list_item);
+    TrgItem *item = trg_tree_view_row_item(row);
+    gchar *signal;
+
+    if (cell->expander)
+        gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(cell->expander),
+                                       GTK_IS_TREE_LIST_ROW(row) ? row : NULL);
+
+    cell->item = item;
+
+    signal = g_strconcat(
+        "notify::", g_param_spec_get_name(trg_item_get_column_pspec(item, desc->model_column)),
+        NULL);
+    cell->handler = g_signal_connect(item, signal, G_CALLBACK(trg_tree_view_cell_notify), cell);
+    g_free(signal);
+
+    if ((desc->type == TRG_COLTYPE_ICONTEXT || desc->type == TRG_COLTYPE_FILEICONTEXT)
+        && desc->model_column_extra >= 0) {
+        signal = g_strconcat(
+            "notify::",
+            g_param_spec_get_name(trg_item_get_column_pspec(item, desc->model_column_extra)), NULL);
+        cell->handler_extra
+            = g_signal_connect(item, signal, G_CALLBACK(trg_tree_view_cell_notify), cell);
+        g_free(signal);
+    }
+
+    trg_tree_view_cell_refresh(cell);
+
+    if (GTK_IS_EDITABLE_LABEL(cell->widget)
+        && g_object_get_data(G_OBJECT(item), GDATA_KEY_START_EDIT) == desc) {
+        g_object_set_data(G_OBJECT(item), GDATA_KEY_START_EDIT, NULL);
+        g_idle_add(trg_tree_view_start_editing_idle, g_object_ref(cell->widget));
+    }
+}
+
+static void trg_tree_view_cell_unbind(GtkSignalListItemFactory *factory, GtkListItem *list_item,
+                                      trg_column_description *desc)
+{
+    TrgTreeViewCell *cell = g_object_get_data(G_OBJECT(list_item), GDATA_KEY_CELL);
+
+    if (cell->item) {
+        g_clear_signal_handler(&cell->handler, cell->item);
+        g_clear_signal_handler(&cell->handler_extra, cell->item);
+    }
+
+    if (cell->expander)
+        gtk_tree_expander_set_list_row(GTK_TREE_EXPANDER(cell->expander), NULL);
+
+    cell->item = NULL;
+}
+
+void trg_tree_view_set_column_editable(trg_column_description *desc, gboolean editable)
+{
+    desc->editable = editable;
+}
+
+static guint trg_tree_view_find_position(TrgTreeView *tv, gpointer item)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GListModel *model = G_LIST_MODEL(priv->selection);
+    guint i, n = model ? g_list_model_get_n_items(model) : 0;
+
+    for (i = 0; i < n; i++) {
+        g_autoptr(GObject) row = g_list_model_get_item(model, i);
+        if (trg_tree_view_row_item(row) == item)
+            return i;
+    }
+
+    return GTK_INVALID_LIST_POSITION;
+}
+
+static GtkWidget *trg_tree_view_get_list_base(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkWidget *child;
+
+    if (priv->list_view && gtk_widget_get_parent(priv->list_view))
+        return priv->list_view;
+
+    /* the rows of a column view are in a GtkListView */
+    for (child = gtk_widget_get_first_child(priv->column_view); child;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (GTK_IS_LIST_VIEW(child))
+            return child;
+    }
+
+    return NULL;
+}
+
+static void trg_tree_view_scroll_to(TrgTreeView *tv, guint position)
+{
+    GtkWidget *list = trg_tree_view_get_list_base(tv);
+
+    if (list && position != GTK_INVALID_LIST_POSITION)
+        gtk_widget_activate_action(list, "list.scroll-to-item", "u", position);
+}
+
+/* Starts editing the cell of item in the editable column desc, once it's
+ * shown. */
+void trg_tree_view_start_editing(TrgTreeView *tv, gpointer item, trg_column_description *desc)
+{
+    g_object_set_data(G_OBJECT(item), GDATA_KEY_START_EDIT, desc);
+    trg_tree_view_scroll_to(tv, trg_tree_view_find_position(tv, item));
+}
+
+/***
+ * Sorting
+ */
+
+static int trg_tree_view_sort_func(gconstpointer a, gconstpointer b, gpointer data)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(data));
+    gint column = priv->sort_column;
+    gint result;
+
+    if (column < 0 || (guint)column >= trg_item_get_n_columns((gpointer)a))
+        return GTK_ORDERING_EQUAL;
+
+    result = trg_item_compare((gpointer)a, (gpointer)b, column);
+    if (priv->sort_order == GTK_SORT_DESCENDING)
+        result = -result;
+
+    return result < 0 ? GTK_ORDERING_SMALLER
+                      : (result > 0 ? GTK_ORDERING_LARGER : GTK_ORDERING_EQUAL);
+}
+
+static trg_column_description *trg_tree_view_find_model_column(TrgTreeView *tv, gint column)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GList *li;
+
+    for (li = priv->columns; li; li = g_list_next(li)) {
+        trg_column_description *desc = (trg_column_description *)li->data;
+        if (desc->model_column == column)
+            return desc;
+    }
+
+    return NULL;
+}
+
+/* Show the sort column in the column headers */
+static void trg_tree_view_sync_sort_indicator(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    trg_column_description *desc = trg_tree_view_find_model_column(tv, priv->sort_column);
+
+    priv->updating_sort = TRUE;
+    gtk_column_view_sort_by_column(GTK_COLUMN_VIEW(priv->column_view), desc ? desc->column : NULL,
+                                   priv->sort_order);
+    priv->updating_sort = FALSE;
+}
+
+void trg_tree_view_set_sort(TrgTreeView *tv, gint column, GtkSortType order)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    if (column < 0)
+        column = -1;
+
+    if (priv->sort_column == column && priv->sort_order == order)
+        return;
+
+    priv->sort_column = column;
+    priv->sort_order = order;
+
+    trg_tree_view_sync_sort_indicator(tv);
+    trg_tree_view_resort(tv);
+
+    g_signal_emit(tv, signals[SIGNAL_SORT_CHANGED], 0);
+}
+
+gint trg_tree_view_get_sort(TrgTreeView *tv, GtkSortType *order)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    if (order)
+        *order = priv->sort_order;
+
+    return priv->sort_column;
+}
+
+/* The items changed, so they may be in a different order now */
+void trg_tree_view_resort(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    if (priv->sort_column >= 0)
+        gtk_sorter_changed(priv->sorter, GTK_SORTER_CHANGE_DIFFERENT);
+}
+
+/* A column header was clicked */
+static void trg_tree_view_column_sorter_changed(GtkSorter *sorter, GtkSorterChange change,
+                                                TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkColumnViewSorter *cvs = GTK_COLUMN_VIEW_SORTER(sorter);
+    GtkColumnViewColumn *column;
+    trg_column_description *desc;
+
+    if (priv->updating_sort)
+        return;
+
+    column = gtk_column_view_sorter_get_primary_sort_column(cvs);
+    desc = column ? g_object_get_data(G_OBJECT(column), GDATA_KEY_COLUMN_DESC) : NULL;
+
+    if (desc)
+        trg_tree_view_set_sort(tv, desc->model_column,
+                               gtk_column_view_sorter_get_primary_sort_order(cvs));
+    else
+        trg_tree_view_set_sort(tv, -1, GTK_SORT_ASCENDING);
+}
+
+void trg_tree_view_set_sortable(TrgTreeView *tv, gboolean sortable)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    priv->sortable = sortable;
 }
 
 static void trg_tree_view_sort_type_change_state(GSimpleAction *action, GVariant *value,
                                                  gpointer data)
 {
-    GtkTreeSortable *model = GTK_TREE_SORTABLE(data);
-    gint sortColumn;
+    TrgTreeView *tv = TRG_TREE_VIEW(data);
 
-    gtk_tree_sortable_get_sort_column_id(model, &sortColumn, NULL);
-    gtk_tree_sortable_set_sort_column_id(model, sortColumn, g_variant_get_int32(value));
+    trg_tree_view_set_sort(tv, trg_tree_view_get_sort(tv, NULL), g_variant_get_int32(value));
 }
 
 static void trg_tree_view_sort_column_change_state(GSimpleAction *action, GVariant *value,
                                                    gpointer data)
 {
-    GtkTreeSortable *model = GTK_TREE_SORTABLE(data);
+    TrgTreeView *tv = TRG_TREE_VIEW(data);
     GtkSortType sortType;
 
-    gtk_tree_sortable_get_sort_column_id(model, NULL, &sortType);
-    gtk_tree_sortable_set_sort_column_id(model, g_variant_get_int32(value), sortType);
+    trg_tree_view_get_sort(tv, &sortType);
+    trg_tree_view_set_sort(tv, g_variant_get_int32(value), sortType);
 }
 
 /* Keep the radio items in sync when sorting changes elsewhere, eg. by
  * clicking a column header. */
-static void trg_tree_view_sort_changed_cb(GtkTreeSortable *model, gpointer data)
+static void trg_tree_view_sort_changed_cb(TrgTreeView *tv, gpointer data)
 {
     GActionMap *map = G_ACTION_MAP(data);
-    gint sort;
     GtkSortType sortType;
+    gint sort = trg_tree_view_get_sort(tv, &sortType);
 
-    gtk_tree_sortable_get_sort_column_id(model, &sort, &sortType);
     g_simple_action_set_state(
         G_SIMPLE_ACTION(g_action_map_lookup_action(map, TRG_TREE_VIEW_SORT_TYPE_ACTION)),
         g_variant_new_int32(sortType));
@@ -254,35 +859,28 @@ static void trg_tree_view_sort_changed_cb(GtkTreeSortable *model, gpointer data)
 GMenu *trg_tree_view_sort_menu(TrgTreeView *tv, GActionMap *map)
 {
     TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
-    GtkTreeModel *treeViewModel = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
-    GtkTreeSortable *sortableModel
-        = GTK_TREE_SORTABLE(gtk_tree_model_filter_get_model(GTK_TREE_MODEL_FILTER(treeViewModel)));
     GMenu *menu = g_menu_new();
     GMenu *section;
     GMenuItem *item;
     GSimpleAction *action;
     GList *li;
-    gint sort;
     GtkSortType sortType;
-
-    gtk_tree_sortable_get_sort_column_id(sortableModel, &sort, &sortType);
+    gint sort = trg_tree_view_get_sort(tv, &sortType);
 
     action = g_simple_action_new_stateful(TRG_TREE_VIEW_SORT_TYPE_ACTION, G_VARIANT_TYPE_INT32,
                                           g_variant_new_int32(sortType));
-    g_signal_connect(action, "change-state", G_CALLBACK(trg_tree_view_sort_type_change_state),
-                     sortableModel);
+    g_signal_connect(action, "change-state", G_CALLBACK(trg_tree_view_sort_type_change_state), tv);
     g_action_map_add_action(map, G_ACTION(action));
     g_object_unref(action);
 
     action = g_simple_action_new_stateful(TRG_TREE_VIEW_SORT_COLUMN_ACTION, G_VARIANT_TYPE_INT32,
                                           g_variant_new_int32(sort));
     g_signal_connect(action, "change-state", G_CALLBACK(trg_tree_view_sort_column_change_state),
-                     sortableModel);
+                     tv);
     g_action_map_add_action(map, G_ACTION(action));
     g_object_unref(action);
 
-    g_signal_connect_object(sortableModel, "sort-column-changed",
-                            G_CALLBACK(trg_tree_view_sort_changed_cb), map, 0);
+    g_signal_connect_object(tv, "sort-changed", G_CALLBACK(trg_tree_view_sort_changed_cb), map, 0);
 
     section = g_menu_new();
     item = g_menu_item_new(_("Ascending"), NULL);
@@ -315,273 +913,212 @@ GMenu *trg_tree_view_sort_menu(TrgTreeView *tv, GActionMap *map)
     return menu;
 }
 
-static void column_menu_hide_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
-{
-    trg_tree_view_hide_column(NULL, GTK_TREE_VIEW_COLUMN(data));
-}
-
-static void column_menu_add_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
-{
-    trg_tree_view_user_add_column_cb(GTK_TREE_VIEW_COLUMN(data),
-                                     g_object_get_data(G_OBJECT(action), GDATA_KEY_COLUMN_DESC));
-}
-
-static void view_popup_menu(GtkWidget *button, gdouble x, gdouble y, GtkTreeViewColumn *column)
-{
-    GtkWidget *tv = gtk_tree_view_column_get_tree_view(column);
-    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(tv));
-    GSimpleActionGroup *actions = g_simple_action_group_new();
-    GMenu *menu = g_menu_new();
-    GSimpleAction *action;
-    trg_column_description *desc;
-    graphene_point_t point;
-    guint n_showing = 0;
-    GList *li;
-    gint i;
-
-    desc = g_object_get_data(G_OBJECT(column), GDATA_KEY_COLUMN_DESC);
-
-    /* The shown column comes first, checked, and unchecks (hides) it. The
-     * hidden columns follow, unchecked, and add themselves after it. */
-    for (li = priv->columns, i = 0; li; li = g_list_next(li), i++) {
-        trg_column_description *desc = (trg_column_description *)li->data;
-        if (!(desc->flags & TRG_COLUMN_SHOWING)) {
-            gchar *name = g_strdup_printf("show-%d", i);
-            gchar *detailed = g_strconcat("columns.", name, NULL);
-
-            action = g_simple_action_new_stateful(name, NULL, g_variant_new_boolean(FALSE));
-            g_object_set_data(G_OBJECT(action), GDATA_KEY_COLUMN_DESC, desc);
-            g_signal_connect(action, "activate", G_CALLBACK(column_menu_add_cb), column);
-            g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
-            g_object_unref(action);
-
-            g_menu_append(menu, desc->header, detailed);
-
-            g_free(detailed);
-            g_free(name);
-        } else {
-            n_showing++;
-        }
-    }
-
-    action = g_simple_action_new_stateful("hide", NULL, g_variant_new_boolean(TRUE));
-    g_signal_connect(action, "activate", G_CALLBACK(column_menu_hide_cb), column);
-    g_simple_action_set_enabled(action, !(desc->flags & TRG_COLUMN_UNREMOVABLE) && n_showing > 1);
-    g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
-    g_object_unref(action);
-    g_menu_prepend(menu, desc->header, "columns.hide");
-
-    /* the popover is attached to the tree view, the click was on the header button */
-    if (!gtk_widget_compute_point(button, tv, &GRAPHENE_POINT_INIT((float)x, (float)y), &point))
-        point.x = point.y = -1;
-
-    trg_popover_menu_popup(tv, G_MENU_MODEL(menu), point.x, point.y, "columns",
-                           G_ACTION_GROUP(actions));
-
-    g_object_unref(menu);
-    g_object_unref(actions);
-}
-
-/* This used to get the column as an argument binded when the signal was
- * created, but it seems GTK now destroys and recreates them in some
- * circumstances. So bind the column description instead and search for the
- * column by its title.
+/***
+ * Columns
  */
-static void col_onButtonPressed(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
-                                trg_column_description *desc)
+
+static guint trg_tree_view_count_showing(TrgTreeView *tv)
 {
-    GtkWidget *button = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
-    GtkTreeView *gtv = GTK_TREE_VIEW(gtk_widget_get_parent(button));
-    GList *cols = gtk_tree_view_get_columns(gtv);
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    guint n = 0;
     GList *li;
 
-    for (li = cols; li; li = g_list_next(li)) {
-        GtkTreeViewColumn *col = GTK_TREE_VIEW_COLUMN(li->data);
-        if (!g_strcmp0(desc->header, gtk_tree_view_column_get_title(col))) {
-            view_popup_menu(button, x, y, col);
-            break;
-        }
+    for (li = priv->columns; li; li = g_list_next(li))
+        if (((trg_column_description *)li->data)->flags & TRG_COLUMN_SHOWING)
+            n++;
+
+    return n;
+}
+
+static void trg_tree_view_hide_column(TrgTreeView *tv, trg_column_description *desc)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    if (!desc->column)
+        return;
+
+    gtk_column_view_remove_column(GTK_COLUMN_VIEW(priv->column_view), desc->column);
+    g_clear_object(&desc->column);
+    desc->flags &= ~TRG_COLUMN_SHOWING;
+}
+
+static void trg_tree_view_column_visible_activate(GSimpleAction *action, GVariant *parameter,
+                                                  gpointer data)
+{
+    TrgTreeView *tv = TRG_TREE_VIEW(data);
+    trg_column_description *desc = g_object_get_data(G_OBJECT(action), GDATA_KEY_COLUMN_DESC);
+
+    if (desc->flags & TRG_COLUMN_SHOWING) {
+        trg_tree_view_hide_column(tv, desc);
+        trg_tree_view_sync_sort_indicator(tv);
+        trg_tree_view_update_column_menus(tv);
     }
-    g_list_free(cols);
-
-    gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
-static GtkTreeViewColumn *trg_tree_view_icontext_column_new(trg_column_description *desc,
-                                                            gchar *renderer_property)
+static void trg_tree_view_column_show_after_activate(GSimpleAction *action, GVariant *parameter,
+                                                     gpointer data)
 {
-    GtkTreeViewColumn *column = gtk_tree_view_column_new();
-    GtkCellRenderer *renderer = gtk_cell_renderer_pixbuf_new();
+    TrgTreeView *tv = TRG_TREE_VIEW(data);
+    const gchar *id, *after_id;
+    trg_column_description *desc, *after;
 
-    gtk_tree_view_column_set_title(column, desc->header);
-    gtk_tree_view_column_pack_start(column, renderer, FALSE);
-    gtk_tree_view_column_set_attributes(column, renderer, renderer_property,
-                                        desc->model_column_extra, NULL);
+    g_variant_get(parameter, "(&s&s)", &id, &after_id);
+    desc = trg_tree_view_find_column(tv, id);
+    after = trg_tree_view_find_column(tv, after_id);
 
-    renderer = gtk_cell_renderer_text_new();
-    gtk_tree_view_column_pack_start(column, renderer, TRUE);
-    gtk_tree_view_column_set_attributes(column, renderer, "text", desc->model_column, NULL);
-
-    return column;
+    if (desc && !(desc->flags & TRG_COLUMN_SHOWING)) {
+        trg_tree_view_add_column_after(tv, desc, -1, after);
+        trg_tree_view_sync_sort_indicator(tv);
+        trg_tree_view_update_column_menus(tv);
+    }
 }
 
-static GtkTreeViewColumn *trg_tree_view_fileicontext_column_new(trg_column_description *desc)
+static GSimpleAction *trg_tree_view_column_action(TrgTreeView *tv, trg_column_description *desc)
 {
-    GtkTreeViewColumn *column = gtk_tree_view_column_new();
-    GtkCellRenderer *renderer = trg_cell_renderer_file_icon_new();
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    gchar *name = g_strconcat("visible-", desc->id, NULL);
+    GAction *action = g_action_map_lookup_action(G_ACTION_MAP(priv->actions), name);
 
-    gtk_tree_view_column_set_title(column, desc->header);
-    gtk_tree_view_column_pack_start(column, renderer, FALSE);
-    gtk_tree_view_column_set_attributes(column, renderer, "file-id", desc->model_column_extra,
-                                        "file-name", desc->model_column, NULL);
+    if (!action) {
+        action = G_ACTION(g_simple_action_new_stateful(name, NULL, g_variant_new_boolean(FALSE)));
+        g_object_set_data(G_OBJECT(action), GDATA_KEY_COLUMN_DESC, desc);
+        g_signal_connect(action, "activate", G_CALLBACK(trg_tree_view_column_visible_activate), tv);
+        g_action_map_add_action(G_ACTION_MAP(priv->actions), action);
+        g_object_unref(action);
+    }
 
-    renderer = gtk_cell_renderer_text_new();
-    gtk_tree_view_column_pack_start(column, renderer, TRUE);
-    gtk_tree_view_column_set_attributes(column, renderer, "text", desc->model_column, NULL);
+    g_free(name);
 
-    return column;
+    return G_SIMPLE_ACTION(action);
+}
+
+/* The menu of each column header has the column itself, checked, which hides
+ * it, and then the hidden columns, which show themselves after it. */
+static void trg_tree_view_update_column_menus(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    guint n_showing = trg_tree_view_count_showing(tv);
+    GList *li, *lj;
+
+    for (li = priv->columns; li; li = g_list_next(li)) {
+        trg_column_description *desc = (trg_column_description *)li->data;
+        GSimpleAction *action = trg_tree_view_column_action(tv, desc);
+        gboolean showing = (desc->flags & TRG_COLUMN_SHOWING) != 0;
+        GMenu *menu;
+        gchar *detailed;
+
+        g_simple_action_set_state(action, g_variant_new_boolean(showing));
+        g_simple_action_set_enabled(
+            action, showing && !(desc->flags & TRG_COLUMN_UNREMOVABLE) && n_showing > 1);
+
+        if (!desc->column)
+            continue;
+
+        if (!priv->column_menus) {
+            gtk_column_view_column_set_header_menu(desc->column, NULL);
+            continue;
+        }
+
+        menu = g_menu_new();
+        detailed = g_strconcat("tvcol.visible-", desc->id, NULL);
+        g_menu_append(menu, desc->header, detailed);
+        g_free(detailed);
+
+        for (lj = priv->columns; lj; lj = g_list_next(lj)) {
+            trg_column_description *hidden = (trg_column_description *)lj->data;
+            if (!(hidden->flags & TRG_COLUMN_SHOWING)) {
+                GMenuItem *item = g_menu_item_new(hidden->header, NULL);
+                g_menu_item_set_action_and_target(item, "tvcol.show-after", "(ss)", hidden->id,
+                                                  desc->id);
+                g_menu_append_item(menu, item);
+                g_object_unref(item);
+            }
+        }
+
+        gtk_column_view_column_set_header_menu(desc->column, G_MENU_MODEL(menu));
+        g_object_unref(menu);
+    }
+}
+
+void trg_tree_view_set_column_menus(TrgTreeView *tv, gboolean enabled)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    priv->column_menus = enabled;
+    trg_tree_view_update_column_menus(tv);
 }
 
 static void trg_tree_view_add_column_after(TrgTreeView *tv, trg_column_description *desc,
-                                           gint64 width, GtkTreeViewColumn *after_col)
+                                           gint64 width, trg_column_description *after)
 {
-    GtkCellRenderer *renderer;
-    GtkTreeViewColumn *column = NULL;
-    GtkWidget *column_button = NULL;
-    GtkGesture *gesture;
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkColumnView *cv = GTK_COLUMN_VIEW(priv->column_view);
+    GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
+    GtkColumnViewColumn *column;
+    guint position = g_list_model_get_n_items(gtk_column_view_get_columns(cv));
 
-    switch (desc->type) {
-    case TRG_COLTYPE_TEXT:
-        renderer = desc->customRenderer ? desc->customRenderer : gtk_cell_renderer_text_new();
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "text",
-                                                          desc->model_column, NULL);
+    g_signal_connect(factory, "setup", G_CALLBACK(trg_tree_view_cell_setup), desc);
+    g_signal_connect(factory, "bind", G_CALLBACK(trg_tree_view_cell_bind), desc);
+    g_signal_connect(factory, "unbind", G_CALLBACK(trg_tree_view_cell_unbind), desc);
 
-        break;
-    case TRG_COLTYPE_SPEED:
-        renderer = trg_cell_renderer_speed_new();
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "speed-value",
-                                                          desc->model_column, NULL);
-        break;
-    case TRG_COLTYPE_EPOCH:
-        renderer = trg_cell_renderer_epoch_new();
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "epoch-value",
-                                                          desc->model_column, NULL);
-        break;
-    case TRG_COLTYPE_ETA:
-        renderer = trg_cell_renderer_eta_new();
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "eta-value",
-                                                          desc->model_column, NULL);
-        break;
-    case TRG_COLTYPE_SIZE:
-        renderer = trg_cell_renderer_size_new();
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "size-value",
-                                                          desc->model_column, NULL);
-        break;
-    case TRG_COLTYPE_PROG:
-        renderer = gtk_cell_renderer_progress_new();
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "value",
-                                                          desc->model_column, NULL);
-        break;
-    case TRG_COLTYPE_RATIO:
-        renderer = trg_cell_renderer_ratio_new();
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "ratio-value",
-                                                          desc->model_column, NULL);
-        break;
-    case TRG_COLTYPE_WANTED:
-        column = gtk_tree_view_column_new();
-        renderer = trg_cell_renderer_wanted_new();
-        /*gtk_cell_renderer_set_alignment(GTK_CELL_RENDERER(renderer), 0.5f,
-           0.0); */
-        gtk_tree_view_column_set_title(column, desc->header);
-        gtk_tree_view_column_pack_start(column, renderer, TRUE);
-        gtk_tree_view_column_set_attributes(column, renderer, "wanted-value", desc->model_column,
-                                            NULL);
-        break;
-    case TRG_COLTYPE_ICONTEXT:
-        column = trg_tree_view_icontext_column_new(desc, "icon-name");
-        break;
-    case TRG_COLTYPE_FILEICONTEXT:
-        column = trg_tree_view_fileicontext_column_new(desc);
-        break;
-    case TRG_COLTYPE_PRIO:
-        renderer = trg_cell_renderer_priority_new();
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "priority-value",
-                                                          desc->model_column, NULL);
-        break;
-    case TRG_COLTYPE_NUMGTZERO:
-        renderer = trg_cell_renderer_numgteqthan_new(1);
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "value",
-                                                          desc->model_column, NULL);
-        break;
-    case TRG_COLTYPE_NUMGTEQZERO:
-        renderer = trg_cell_renderer_numgteqthan_new(0);
-        column = gtk_tree_view_column_new_with_attributes(desc->header, renderer, "value",
-                                                          desc->model_column, NULL);
-        break;
-    default:
-        g_critical("unknown TrgTreeView column");
-        return;
-    }
+    column = gtk_column_view_column_new(desc->header, factory);
+    gtk_column_view_column_set_id(column, desc->id);
+    gtk_column_view_column_set_resizable(column, TRUE);
+    gtk_column_view_column_set_expand(column, TRUE);
 
-    // gtk_tree_view_column_set_min_width(column, 0);
-    gtk_tree_view_column_set_resizable(column, TRUE);
-    gtk_tree_view_column_set_reorderable(column, TRUE);
-    gtk_tree_view_column_set_sort_column_id(column, desc->model_column);
-    gtk_tree_view_column_set_expand(column, TRUE);
+    if (width > 0)
+        gtk_column_view_column_set_fixed_width(column, (gint)width);
 
-    /*gtk_tree_view_column_set_sizing(column,
-                                    GTK_TREE_VIEW_COLUMN_FIXED);*/
-
-    if (width > 0) {
-        // gtk_tree_view_column_set_fixed_width(column, width);
+    /* The column view's sorter only shows the sort column (and makes the
+     * headers clickable), the view's own sorter sorts. */
+    if (priv->sortable) {
+        GtkSorter *sorter = GTK_SORTER(gtk_custom_sorter_new(NULL, NULL, NULL));
+        gtk_column_view_column_set_sorter(column, sorter);
+        g_object_unref(sorter);
     }
 
     g_object_set_data(G_OBJECT(column), GDATA_KEY_COLUMN_DESC, desc);
 
-    gtk_tree_view_append_column(GTK_TREE_VIEW(tv), column);
+    if (after && after->column) {
+        GListModel *columns = gtk_column_view_get_columns(cv);
+        guint i, n = g_list_model_get_n_items(columns);
+        for (i = 0; i < n; i++) {
+            g_autoptr(GtkColumnViewColumn) c = g_list_model_get_item(columns, i);
+            if (c == after->column) {
+                position = i + 1;
+                break;
+            }
+        }
+    }
 
-    if (after_col)
-        gtk_tree_view_move_column_after(GTK_TREE_VIEW(tv), column, after_col);
+    gtk_column_view_insert_column(cv, position, column);
 
-    column_button = gtk_tree_view_column_get_button(column);
-
-    gesture = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
-    g_signal_connect(gesture, "pressed", G_CALLBACK(col_onButtonPressed), desc);
-    gtk_widget_add_controller(column_button, GTK_EVENT_CONTROLLER(gesture));
-
-    if (desc->out)
-        *(desc->out) = column;
-
+    desc->column = column;
     desc->flags |= TRG_COLUMN_SHOWING;
 }
 
 void trg_tree_view_remove_all_columns(TrgTreeView *tv)
 {
-    GtkTreeView *gtv = GTK_TREE_VIEW(tv);
-    GList *cols = gtk_tree_view_get_columns(gtv);
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
     GList *li;
-    for (li = cols; li; li = g_list_next(li)) {
-        gtk_tree_view_remove_column(gtv, GTK_TREE_VIEW_COLUMN(li->data));
-    }
-    g_list_free(cols);
+
+    for (li = priv->columns; li; li = g_list_next(li))
+        trg_tree_view_hide_column(tv, (trg_column_description *)li->data);
 }
 
 void trg_tree_view_persist(TrgTreeView *tv, guint flags)
 {
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
     JsonObject *props = trg_prefs_get_tree_view_props(tv);
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
-    GList *cols, *li;
     JsonArray *widths, *columns;
-    gint sort_column_id;
     GtkSortType sort_type;
+    gint sort_column_id;
+
+    if (!props)
+        return;
 
     if (flags & TRG_TREE_VIEW_PERSIST_SORT) {
-        gtk_tree_sortable_get_sort_column_id(
-            GTK_TREE_SORTABLE((flags & TRG_TREE_VIEW_SORTABLE_PARENT)
-                                  ? gtk_tree_model_filter_get_model(GTK_TREE_MODEL_FILTER(model))
-                                  : model),
-            &sort_column_id, &sort_type);
+        sort_column_id = trg_tree_view_get_sort(tv, &sort_type);
 
         if (json_object_has_member(props, TRG_PREFS_KEY_TV_SORT_COL))
             json_object_remove_member(props, TRG_PREFS_KEY_TV_SORT_COL);
@@ -594,7 +1131,8 @@ void trg_tree_view_persist(TrgTreeView *tv, guint flags)
     }
 
     if (flags & TRG_TREE_VIEW_PERSIST_LAYOUT) {
-        cols = gtk_tree_view_get_columns(GTK_TREE_VIEW(tv));
+        GListModel *cols = gtk_column_view_get_columns(GTK_COLUMN_VIEW(priv->column_view));
+        guint i, n = g_list_model_get_n_items(cols);
 
         if (json_object_has_member(props, TRG_PREFS_KEY_TV_WIDTHS))
             json_object_remove_member(props, TRG_PREFS_KEY_TV_WIDTHS);
@@ -608,33 +1146,26 @@ void trg_tree_view_persist(TrgTreeView *tv, guint flags)
         columns = json_array_new();
         json_object_set_array_member(props, TRG_PREFS_KEY_TV_COLUMNS, columns);
 
-        for (li = cols; li; li = g_list_next(li)) {
-            GtkTreeViewColumn *col = (GtkTreeViewColumn *)li->data;
-            trg_column_description *desc
-                = g_object_get_data(G_OBJECT(li->data), GDATA_KEY_COLUMN_DESC);
+        /* The width is the one the user resized the column to, or -1 */
+        for (i = 0; i < n; i++) {
+            g_autoptr(GtkColumnViewColumn) col = g_list_model_get_item(cols, i);
+            trg_column_description *desc = g_object_get_data(G_OBJECT(col), GDATA_KEY_COLUMN_DESC);
 
             json_array_add_string_element(columns, desc->id);
-            json_array_add_int_element(widths, gtk_tree_view_column_get_width(col));
+            json_array_add_int_element(widths, gtk_column_view_column_get_fixed_width(col));
         }
-
-        g_list_free(cols);
     }
 }
 
-void trg_tree_view_restore_sort(TrgTreeView *tv, guint flags)
+void trg_tree_view_restore_sort(TrgTreeView *tv)
 {
     JsonObject *props = trg_prefs_get_tree_view_props(tv);
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
 
-    if (json_object_has_member(props, TRG_PREFS_KEY_TV_SORT_COL)
+    if (props && json_object_has_member(props, TRG_PREFS_KEY_TV_SORT_COL)
         && json_object_has_member(props, TRG_PREFS_KEY_TV_SORT_TYPE)) {
         gint64 sort_col = json_object_get_int_member(props, TRG_PREFS_KEY_TV_SORT_COL);
         gint64 sort_type = json_object_get_int_member(props, TRG_PREFS_KEY_TV_SORT_TYPE);
-        gtk_tree_sortable_set_sort_column_id(
-            GTK_TREE_SORTABLE((flags & TRG_TREE_VIEW_SORTABLE_PARENT)
-                                  ? gtk_tree_model_filter_get_model(GTK_TREE_MODEL_FILTER(model))
-                                  : model),
-            sort_col, (GtkSortType)sort_type);
+        trg_tree_view_set_sort(tv, (gint)sort_col, (GtkSortType)sort_type);
     }
 }
 
@@ -650,55 +1181,434 @@ void trg_tree_view_setup_columns(TrgTreeView *tv)
     JsonObject *props = trg_prefs_get_tree_view_props(tv);
     GList *columns, *widths, *cli, *wli;
 
-    if (!json_object_has_member(props, TRG_PREFS_KEY_TV_COLUMNS)
+    if (!props || !json_object_has_member(props, TRG_PREFS_KEY_TV_COLUMNS)
         || !json_object_has_member(props, TRG_PREFS_KEY_TV_WIDTHS)) {
         GList *li;
         for (li = priv->columns; li; li = g_list_next(li)) {
             trg_column_description *desc = (trg_column_description *)li->data;
             if (desc && !(desc->flags & TRG_COLUMN_EXTRA))
-                trg_tree_view_add_column(tv, desc, -1);
+                trg_tree_view_add_column_after(tv, desc, -1, NULL);
         }
-        return;
+    } else {
+        columns = json_array_get_elements(
+            json_object_get_array_member(props, TRG_PREFS_KEY_TV_COLUMNS));
+        widths
+            = json_array_get_elements(json_object_get_array_member(props, TRG_PREFS_KEY_TV_WIDTHS));
+
+        for (cli = columns, wli = widths; cli && wli;
+             cli = g_list_next(cli), wli = g_list_next(wli)) {
+            trg_column_description *desc
+                = trg_tree_view_find_column(tv, json_node_get_string((JsonNode *)cli->data));
+            if (desc && !(desc->flags & TRG_COLUMN_SHOWING))
+                trg_tree_view_add_column_after(tv, desc, json_node_get_int((JsonNode *)wli->data),
+                                               NULL);
+        }
+
+        g_list_free(columns);
+        g_list_free(widths);
     }
 
-    columns
-        = json_array_get_elements(json_object_get_array_member(props, TRG_PREFS_KEY_TV_COLUMNS));
-    widths = json_array_get_elements(json_object_get_array_member(props, TRG_PREFS_KEY_TV_WIDTHS));
-
-    for (cli = columns, wli = widths; cli && wli; cli = g_list_next(cli), wli = g_list_next(wli)) {
-        trg_column_description *desc
-            = trg_tree_view_find_column(tv, json_node_get_string((JsonNode *)cli->data));
-        if (desc) {
-            gint64 width = json_node_get_int((JsonNode *)wli->data);
-            trg_tree_view_add_column(tv, desc, width);
-        }
-    }
-
-    g_list_free(columns);
-    g_list_free(widths);
+    trg_tree_view_sync_sort_indicator(tv);
+    trg_tree_view_update_column_menus(tv);
 }
 
-GList *trg_tree_view_get_selected_refs_list(GtkTreeView *tv)
+/***
+ * Model and selection
+ */
+
+void trg_tree_view_set_model(TrgTreeView *tv, GListModel *model)
 {
-    GtkTreeModel *model = gtk_tree_view_get_model(tv);
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(tv);
-    GList *li, *selectionList;
-    GList *refList = NULL;
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkSorter *sorter;
 
-    selectionList = gtk_tree_selection_get_selected_rows(selection, NULL);
-    for (li = selectionList; li != NULL; li = g_list_next(li)) {
-        GtkTreePath *path = (GtkTreePath *)li->data;
-        GtkTreeRowReference *ref = gtk_tree_row_reference_new(model, path);
-        gtk_tree_path_free(path);
-        refList = g_list_append(refList, ref);
+    g_set_object(&priv->model, model);
+
+    if (GTK_IS_TREE_LIST_MODEL(model))
+        sorter = GTK_SORTER(gtk_tree_list_row_sorter_new(g_object_ref(priv->sorter)));
+    else
+        sorter = g_object_ref(priv->sorter);
+
+    g_clear_object(&priv->sort_model);
+    priv->sort_model = gtk_sort_list_model_new(g_object_ref(model), sorter);
+    gtk_multi_selection_set_model(GTK_MULTI_SELECTION(priv->selection),
+                                  G_LIST_MODEL(priv->sort_model));
+}
+
+GListModel *trg_tree_view_get_model(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    return priv->model;
+}
+
+GtkSelectionModel *trg_tree_view_get_selection(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    return priv->selection;
+}
+
+/* The selected items, in the view's order. The list doesn't hold references. */
+GList *trg_tree_view_get_selected_items(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkBitset *selected = gtk_selection_model_get_selection(priv->selection);
+    GtkBitsetIter iter;
+    GList *items = NULL;
+    guint position;
+
+    if (gtk_bitset_iter_init_first(&iter, selected, &position)) {
+        do {
+            GObject *row = g_list_model_get_item(G_LIST_MODEL(priv->selection), position);
+            items = g_list_prepend(items, trg_tree_view_row_item(row));
+            g_object_unref(row);
+        } while (gtk_bitset_iter_next(&iter, &position));
     }
-    g_list_free(selectionList);
 
-    return refList;
+    gtk_bitset_unref(selected);
+
+    return g_list_reverse(items);
+}
+
+guint trg_tree_view_count_selected(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkBitset *selected = gtk_selection_model_get_selection(priv->selection);
+    guint n = (guint)gtk_bitset_get_size(selected);
+
+    gtk_bitset_unref(selected);
+
+    return n;
+}
+
+gpointer trg_tree_view_get_first_selected(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkBitset *selected = gtk_selection_model_get_selection(priv->selection);
+    gpointer item = NULL;
+
+    if (!gtk_bitset_is_empty(selected)) {
+        GObject *row = g_list_model_get_item(G_LIST_MODEL(priv->selection),
+                                             gtk_bitset_get_minimum(selected));
+        item = trg_tree_view_row_item(row);
+        g_object_unref(row);
+    }
+
+    gtk_bitset_unref(selected);
+
+    return item;
+}
+
+void trg_tree_view_select_item(TrgTreeView *tv, gpointer item)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    guint position = trg_tree_view_find_position(tv, item);
+
+    if (position != GTK_INVALID_LIST_POSITION) {
+        gtk_selection_model_select_item(priv->selection, position, TRUE);
+        trg_tree_view_scroll_to(tv, position);
+    }
+}
+
+static GtkListItem *trg_tree_view_list_item_for(GtkWidget *widget, GtkWidget *stop)
+{
+    for (; widget && widget != stop; widget = gtk_widget_get_parent(widget)) {
+        GtkListItem *list_item = g_object_get_data(G_OBJECT(widget), GDATA_KEY_LIST_ITEM);
+        if (list_item)
+            return list_item;
+    }
+
+    return NULL;
+}
+
+gboolean trg_tree_view_point_in_header(TrgTreeView *tv, gdouble x, gdouble y)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkWidget *widget = gtk_widget_pick(GTK_WIDGET(tv), x, y, GTK_PICK_DEFAULT);
+
+    for (; widget && widget != priv->column_view; widget = gtk_widget_get_parent(widget)) {
+        if (!g_strcmp0(gtk_widget_get_css_name(widget), "header")
+            && gtk_widget_get_parent(widget) == priv->column_view)
+            return TRUE;
+    }
+
+    return FALSE;
+}
+
+/* The item of the row at x, y (in the view's coordinates) */
+gpointer trg_tree_view_get_item_at(TrgTreeView *tv, gdouble x, gdouble y, guint *position)
+{
+    /* cells may not be targetable, like a text cell that can't be edited */
+    GtkWidget *widget
+        = gtk_widget_pick(GTK_WIDGET(tv), x, y, GTK_PICK_INSENSITIVE | GTK_PICK_NON_TARGETABLE);
+    GtkListItem *list_item = trg_tree_view_list_item_for(widget, GTK_WIDGET(tv));
+    gpointer row;
+
+    if (!list_item || !(row = gtk_list_item_get_item(list_item)))
+        return NULL;
+
+    if (position)
+        *position = gtk_list_item_get_position(list_item);
+
+    return trg_tree_view_row_item(row);
+}
+
+/* For a context menu: select the row at x, y unless it's already selected.
+ * Returns whether there was a row. */
+gboolean trg_tree_view_select_at(TrgTreeView *tv, gdouble x, gdouble y)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    guint position;
+
+    if (!trg_tree_view_get_item_at(tv, x, y, &position))
+        return FALSE;
+
+    if (!gtk_selection_model_is_selected(priv->selection, position))
+        gtk_selection_model_select_item(priv->selection, position, TRUE);
+
+    return TRUE;
+}
+
+static GtkListItem *trg_tree_view_find_marked(GtkWidget *widget)
+{
+    GtkListItem *list_item = g_object_get_data(G_OBJECT(widget), GDATA_KEY_LIST_ITEM);
+    GtkWidget *child;
+
+    for (child = gtk_widget_get_first_child(widget); child && !list_item;
+         child = gtk_widget_get_next_sibling(child))
+        list_item = trg_tree_view_find_marked(child);
+
+    return list_item;
+}
+
+/* The bounds of the row with the keyboard focus, for a context menu opened
+ * from the keyboard. */
+gboolean trg_tree_view_get_focus_rect(TrgTreeView *tv, graphene_rect_t *rect)
+{
+    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tv));
+    GtkWidget *focus = root ? gtk_root_get_focus(root) : NULL;
+
+    if (!focus || !gtk_widget_is_ancestor(focus, GTK_WIDGET(tv)))
+        return FALSE;
+
+    /* the focus is on the row widget, or in one of its cells */
+    if (!trg_tree_view_find_marked(focus)) {
+        GtkListItem *list_item = trg_tree_view_list_item_for(focus, GTK_WIDGET(tv));
+        if (!list_item)
+            return FALSE;
+    }
+
+    return gtk_widget_compute_bounds(focus, GTK_WIDGET(tv), rect);
+}
+
+void trg_tree_view_expand_all(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkTreeListModel *model;
+    guint i;
+
+    if (!GTK_IS_TREE_LIST_MODEL(priv->model))
+        return;
+
+    model = GTK_TREE_LIST_MODEL(priv->model);
+
+    /* expanding inserts the children after the row, so they're seen too */
+    for (i = 0; i < g_list_model_get_n_items(G_LIST_MODEL(model)); i++) {
+        GtkTreeListRow *row = gtk_tree_list_model_get_row(model, i);
+        if (row) {
+            gtk_tree_list_row_set_expanded(row, TRUE);
+            g_object_unref(row);
+        }
+    }
+}
+
+void trg_tree_view_collapse_all(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkTreeListModel *model;
+    guint i;
+
+    if (!GTK_IS_TREE_LIST_MODEL(priv->model))
+        return;
+
+    model = GTK_TREE_LIST_MODEL(priv->model);
+
+    for (i = 0; i < g_list_model_get_n_items(G_LIST_MODEL(model)); i++) {
+        GtkTreeListRow *row = gtk_tree_list_model_get_row(model, i);
+        if (row) {
+            gtk_tree_list_row_set_expanded(row, FALSE);
+            g_object_unref(row);
+        }
+    }
+}
+
+/***
+ * Type ahead search, like GtkTreeView's: typing selects the first row whose
+ * search column starts with (or else contains) the typed text.
+ */
+
+void trg_tree_view_set_search_column(TrgTreeView *tv, gint column)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    priv->search_column = column;
+}
+
+static gboolean trg_tree_view_search(TrgTreeView *tv, const gchar *key)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GListModel *model = G_LIST_MODEL(priv->selection);
+    guint i, n = g_list_model_get_n_items(model);
+    guint found = GTK_INVALID_LIST_POSITION;
+    gchar *needle = g_utf8_casefold(key, -1);
+    gint pass;
+
+    for (pass = 0; pass < 2 && found == GTK_INVALID_LIST_POSITION; pass++) {
+        for (i = 0; i < n && found == GTK_INVALID_LIST_POSITION; i++) {
+            g_autoptr(GObject) row = g_list_model_get_item(model, i);
+            TrgItem *item = trg_tree_view_row_item(row);
+            gchar *text = trg_value_to_string(trg_item_peek_value(item, priv->search_column));
+            gchar *folded = text ? g_utf8_casefold(text, -1) : NULL;
+
+            if (folded
+                && (pass == 0 ? g_str_has_prefix(folded, needle) : strstr(folded, needle) != NULL))
+                found = i;
+
+            g_free(folded);
+            g_free(text);
+        }
+    }
+
+    g_free(needle);
+
+    if (found != GTK_INVALID_LIST_POSITION) {
+        gtk_selection_model_select_item(priv->selection, found, TRUE);
+        trg_tree_view_scroll_to(tv, found);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+static gboolean trg_tree_view_key_pressed(GtkEventControllerKey *controller, guint keyval,
+                                          guint keycode, GdkModifierType state, TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    gunichar c = gdk_keyval_to_unicode(keyval);
+    gint64 now = g_get_monotonic_time();
+
+    if (priv->search_column < 0 || !c || !g_unichar_isprint(c)
+        || (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_META_MASK | GDK_SUPER_MASK)))
+        return FALSE;
+
+    /* a pause starts a new search */
+    if (now - priv->search_time > G_USEC_PER_SEC)
+        g_string_truncate(priv->search, 0);
+    priv->search_time = now;
+
+    g_string_append_unichar(priv->search, c);
+
+    trg_tree_view_search(tv, priv->search->str);
+
+    return TRUE;
+}
+
+/***
+ * Showing the rows in a GtkListView
+ */
+
+static void trg_tree_view_activate_cb(GtkWidget *view, guint position, TrgTreeView *tv)
+{
+    g_signal_emit(tv, signals[SIGNAL_ROW_ACTIVATED], 0, position);
+}
+
+void trg_tree_view_set_list_factory(TrgTreeView *tv, GtkListItemFactory *factory)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    if (factory) {
+        if (!priv->list_view) {
+            priv->list_view = g_object_ref_sink(gtk_list_view_new(NULL, NULL));
+            g_signal_connect(priv->list_view, "activate", G_CALLBACK(trg_tree_view_activate_cb),
+                             tv);
+        }
+        gtk_list_view_set_factory(GTK_LIST_VIEW(priv->list_view), factory);
+        gtk_list_view_set_model(GTK_LIST_VIEW(priv->list_view), priv->selection);
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(priv->scrolled), priv->list_view);
+    } else {
+        if (priv->list_view) {
+            gtk_list_view_set_model(GTK_LIST_VIEW(priv->list_view), NULL);
+            gtk_list_view_set_factory(GTK_LIST_VIEW(priv->list_view), NULL);
+        }
+        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(priv->scrolled), priv->column_view);
+    }
+}
+
+/***
+ * GtkWidget
+ */
+
+static void trg_tree_view_measure(GtkWidget *widget, GtkOrientation orientation, int for_size,
+                                  int *minimum, int *natural, int *minimum_baseline,
+                                  int *natural_baseline)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(widget));
+
+    gtk_widget_measure(priv->scrolled, orientation, for_size, minimum, natural, minimum_baseline,
+                       natural_baseline);
+}
+
+/* The context menus are popovers of the view */
+static void trg_tree_view_size_allocate(GtkWidget *widget, int width, int height, int baseline)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(widget));
+    GtkWidget *child;
+
+    gtk_widget_allocate(priv->scrolled, width, height, baseline, NULL);
+
+    for (child = gtk_widget_get_first_child(widget); child;
+         child = gtk_widget_get_next_sibling(child)) {
+        if (GTK_IS_POPOVER(child))
+            gtk_popover_present(GTK_POPOVER(child));
+    }
+}
+
+static gboolean trg_tree_view_focus(GtkWidget *widget, GtkDirectionType direction)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(widget));
+
+    return gtk_widget_child_focus(priv->scrolled, direction);
+}
+
+static gboolean trg_tree_view_grab_focus(GtkWidget *widget)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(widget));
+
+    return gtk_widget_grab_focus(
+        gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(priv->scrolled)));
 }
 
 static void trg_tree_view_dispose(GObject *object)
 {
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(object));
+    GtkWidget *child;
+    GList *li;
+
+    for (li = priv->columns; li; li = g_list_next(li))
+        g_clear_object(&((trg_column_description *)li->data)->column);
+
+    while ((child = gtk_widget_get_first_child(GTK_WIDGET(object))))
+        gtk_widget_unparent(child);
+    priv->scrolled = NULL;
+
+    g_clear_object(&priv->column_view);
+    g_clear_object(&priv->list_view);
+    g_clear_object(&priv->selection);
+    g_clear_object(&priv->sort_model);
+    g_clear_object(&priv->model);
+    g_clear_object(&priv->sorter);
+    g_clear_object(&priv->actions);
+
     G_OBJECT_CLASS(trg_tree_view_parent_class)->dispose(object);
 }
 
@@ -708,6 +1618,7 @@ static void trg_tree_view_finalize(GObject *object)
 
     g_list_free_full(priv->columns, (GDestroyNotify)trg_column_description_free);
     g_free(priv->configId);
+    g_string_free(priv->search, TRUE);
 
     G_OBJECT_CLASS(trg_tree_view_parent_class)->finalize(object);
 }
@@ -715,36 +1626,77 @@ static void trg_tree_view_finalize(GObject *object)
 static void trg_tree_view_class_init(TrgTreeViewClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 
     object_class->get_property = trg_tree_view_get_property;
     object_class->set_property = trg_tree_view_set_property;
-    object_class->constructor = trg_tree_view_constructor;
     object_class->dispose = trg_tree_view_dispose;
     object_class->finalize = trg_tree_view_finalize;
+
+    widget_class->measure = trg_tree_view_measure;
+    widget_class->size_allocate = trg_tree_view_size_allocate;
+    widget_class->focus = trg_tree_view_focus;
+    widget_class->grab_focus = trg_tree_view_grab_focus;
 
     g_object_class_install_property(
         object_class, PROP_PREFS,
         g_param_spec_object("prefs", "Trg Prefs", "Trg Prefs", TRG_TYPE_PREFS,
-                            G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_NAME
-                                | G_PARAM_STATIC_NICK | G_PARAM_STATIC_BLURB));
+                            G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
 
     g_object_class_install_property(
         object_class, PROP_CONFIGID,
         g_param_spec_string("config-id", "config-id", "config-id", NULL,
-                            G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_NAME
-                                | G_PARAM_STATIC_NICK | G_PARAM_STATIC_BLURB));
+                            G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
 
-    signals[SIGNAL_COLUMN_ADDED] = g_signal_new(
-        "column-added", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0,
-        NULL, NULL, g_cclosure_marshal_VOID__STRING, G_TYPE_NONE, 1, G_TYPE_STRING);
+    signals[SIGNAL_SORT_CHANGED]
+        = g_signal_new("sort-changed", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST, 0, NULL,
+                       NULL, NULL, G_TYPE_NONE, 0);
+
+    signals[SIGNAL_ROW_ACTIVATED]
+        = g_signal_new("row-activated", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST, 0, NULL,
+                       NULL, NULL, G_TYPE_NONE, 1, G_TYPE_UINT);
 }
 
 static void trg_tree_view_init(TrgTreeView *tv)
 {
-    gtk_tree_view_set_rubber_banding(GTK_TREE_VIEW(tv), TRUE);
-    gtk_tree_view_set_headers_clickable(GTK_TREE_VIEW(tv), TRUE);
-    gtk_tree_selection_set_mode(gtk_tree_view_get_selection(GTK_TREE_VIEW(tv)),
-                                GTK_SELECTION_MULTIPLE);
+    static const GActionEntry entries[] = {
+        { "show-after", trg_tree_view_column_show_after_activate, "(ss)", NULL, NULL, { 0 } },
+    };
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkEventController *keys;
+
+    priv->sort_column = -1;
+    priv->sort_order = GTK_SORT_ASCENDING;
+    priv->sortable = TRUE;
+    priv->column_menus = TRUE;
+    priv->search_column = -1;
+    priv->search = g_string_new(NULL);
+
+    priv->sorter = GTK_SORTER(gtk_custom_sorter_new(trg_tree_view_sort_func, tv, NULL));
+    priv->selection = GTK_SELECTION_MODEL(gtk_multi_selection_new(NULL));
+
+    priv->column_view = g_object_ref_sink(gtk_column_view_new(g_object_ref(priv->selection)));
+    gtk_column_view_set_reorderable(GTK_COLUMN_VIEW(priv->column_view), TRUE);
+    gtk_column_view_set_enable_rubberband(GTK_COLUMN_VIEW(priv->column_view), TRUE);
+    g_signal_connect(gtk_column_view_get_sorter(GTK_COLUMN_VIEW(priv->column_view)), "changed",
+                     G_CALLBACK(trg_tree_view_column_sorter_changed), tv);
+    g_signal_connect(priv->column_view, "activate", G_CALLBACK(trg_tree_view_activate_cb), tv);
+
+    priv->scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(priv->scrolled), GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(priv->scrolled), TRUE);
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(priv->scrolled), priv->column_view);
+    gtk_widget_set_parent(priv->scrolled, GTK_WIDGET(tv));
+
+    priv->actions = g_simple_action_group_new();
+    g_action_map_add_action_entries(G_ACTION_MAP(priv->actions), entries, G_N_ELEMENTS(entries),
+                                    tv);
+    gtk_widget_insert_action_group(GTK_WIDGET(tv), "tvcol", G_ACTION_GROUP(priv->actions));
+
+    keys = gtk_event_controller_key_new();
+    g_signal_connect(keys, "key-pressed", G_CALLBACK(trg_tree_view_key_pressed), tv);
+    gtk_widget_add_controller(GTK_WIDGET(tv), keys);
 
     gtk_widget_set_sensitive(GTK_WIDGET(tv), FALSE);
 }

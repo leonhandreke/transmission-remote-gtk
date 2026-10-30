@@ -37,6 +37,7 @@
 #include <gdk/macos/gdkmacos.h>
 #endif
 
+#include "trg-tree-view.h"
 #include "util.h"
 
 /***
@@ -443,6 +444,17 @@ void trg_popover_menu_popup(GtkWidget *parent, GMenuModel *model, gdouble x, gdo
 
     if (actions)
         gtk_widget_insert_action_group(popover, prefix, actions);
+
+    /* A TrgTreeView presents its popovers. From the keyboard, point at the
+     * row with the focus if there is one. */
+    if (TRG_IS_TREE_VIEW(parent) && (x < 0 || y < 0)) {
+        graphene_rect_t bounds;
+
+        if (trg_tree_view_get_focus_rect(TRG_TREE_VIEW(parent), &bounds)) {
+            x = bounds.origin.x + 20;
+            y = bounds.origin.y + bounds.size.height / 2;
+        }
+    }
 
     /* A GtkTreeView keeps the CSS nodes of its header buttons under a
      * "header" node, so adding another child to it upsets GTK. Attach the

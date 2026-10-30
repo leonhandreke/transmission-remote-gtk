@@ -18,8 +18,9 @@
  */
 #pragma once
 
+#include "trg-model.h"
+
 #include <glib-object.h>
-#include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
 
 typedef enum {
@@ -60,7 +61,7 @@ enum {
 };
 
 #define TRG_TYPE_TRACKERS_MODEL trg_trackers_model_get_type()
-G_DECLARE_FINAL_TYPE(TrgTrackersModel, trg_trackers_model, TRG, TRACKERS_MODEL, GtkListStore)
+G_DECLARE_FINAL_TYPE(TrgTrackersModel, trg_trackers_model, TRG, TRACKERS_MODEL, TrgListModel)
 
 TrgTrackersModel *trg_trackers_model_new(void);
 void trg_trackers_model_update(TrgTrackersModel *model, gint64 updateSerial, JsonObject *t,
@@ -68,3 +69,5 @@ void trg_trackers_model_update(TrgTrackersModel *model, gint64 updateSerial, Jso
 void trg_trackers_model_set_accept(TrgTrackersModel *model, gboolean accept);
 gint64 trg_trackers_model_get_torrent_id(TrgTrackersModel *model);
 void trg_trackers_model_set_no_selection(TrgTrackersModel *model);
+void trg_trackers_model_clear(TrgTrackersModel *model);
+gpointer trg_trackers_model_add_new(TrgTrackersModel *model);

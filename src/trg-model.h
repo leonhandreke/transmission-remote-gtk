@@ -20,11 +20,26 @@
 #ifndef TRG_MODEL_H_
 #define TRG_MODEL_H_
 
-#include <gtk/gtk.h>
+#include <gio/gio.h>
 
-guint trg_model_remove_removed(GtkListStore *model, gint serial_column, gint64 currentSerial);
+#include "trg-item.h"
 
-gboolean find_existing_model_item(GtkTreeModel *model, gint search_column, gint64 id,
-                                  GtkTreeIter *iter);
+/* Helpers for list stores of TrgItems which are updated from a response:
+ * each item updated gets the update serial, the ones that weren't are
+ * removed afterwards. */
+
+/* A GListModel of a GListStore of TrgItems, for subclassing */
+#define TRG_TYPE_LIST_MODEL trg_list_model_get_type()
+G_DECLARE_DERIVABLE_TYPE(TrgListModel, trg_list_model, TRG, LIST_MODEL, GObject)
+
+struct _TrgListModelClass {
+    GObjectClass parent_class;
+};
+
+GListStore *trg_list_model_get_store(TrgListModel *model);
+
+guint trg_model_remove_removed(GListStore *store, gint serial_column, gint64 currentSerial);
+
+gpointer trg_model_find_item(GListModel *model, gint search_column, gint64 id, guint *position);
 
 #endif /* TRG_MODEL_H_ */

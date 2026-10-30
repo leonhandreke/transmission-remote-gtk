@@ -33,6 +33,7 @@ src_files = files(
   'trg-gtk-app.c',
   'trg-item.c',
   'trg-json-widgets.c',
+  'trg-legacy-tree-view.c',
   'trg-main-window.c',
   'trg-menu-bar.c',
   'trg-model.c',

@@ -21,181 +21,141 @@
 
 #include <gio/gio.h>
 #include <glib.h>
-#include <glib/gstdio.h>
-#include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
 
+#include "protocol-constants.h"
 #include "torrent.h"
 #include "trg-client.h"
+#include "trg-item.h"
 #include "trg-model.h"
 #include "trg-peers-model.h"
 #include "trg-tree-view.h"
-#include "util.h"
 
-G_DEFINE_TYPE(TrgPeersModel, trg_peers_model, GTK_TYPE_LIST_STORE)
-#define TRG_PEERS_MODEL_GET_PRIVATE(o)                                                             \
-    (G_TYPE_INSTANCE_GET_PRIVATE((o), TRG_TYPE_PEERS_MODEL, TrgPeersModelPrivate))
+/* The peers of the selected torrent, updated by IP. The host names are
+ * looked up asynchronously if the column is showing. */
 
-static void trg_peers_model_class_init(TrgPeersModelClass *klass G_GNUC_UNUSED)
-{
-}
-
-static gboolean find_existing_peer_item_foreachfunc(GtkTreeModel *model,
-                                                    GtkTreePath *path G_GNUC_UNUSED,
-                                                    GtkTreeIter *iter, gpointer data)
-{
-    struct peerAndIter *pi = (struct peerAndIter *)data;
-    gchar *ip;
-
-    gtk_tree_model_get(model, iter, PEERSCOL_IP, &ip, -1);
-
-    if (g_strcmp0(ip, pi->ip) == 0) {
-        pi->iter = *iter;
-        pi->found = TRUE;
-    }
-
-    g_free(ip);
-
-    return pi->found;
-}
-
-static gboolean find_existing_peer_item(TrgPeersModel *model, JsonObject *p, GtkTreeIter *iter)
-{
-    struct peerAndIter pi;
-    pi.ip = peer_get_address(p);
-    pi.found = FALSE;
-
-    gtk_tree_model_foreach(GTK_TREE_MODEL(model), find_existing_peer_item_foreachfunc, &pi);
-
-    if (pi.found == TRUE)
-        *iter = pi.iter;
-
-    return pi.found;
-}
-
-struct ResolvedDnsIdleData {
-    GtkTreeRowReference *rowRef;
-    gchar *rdns;
+static const TrgItemColumn peer_item_columns[] = {
+    { "icon", G_TYPE_STRING },    { "ip", G_TYPE_STRING },       { "host", G_TYPE_STRING },
+    { "flags", G_TYPE_STRING },   { "progress", G_TYPE_DOUBLE }, { "down-speed", G_TYPE_INT64 },
+    { "up-speed", G_TYPE_INT64 }, { "client", G_TYPE_STRING },   { "update-serial", G_TYPE_INT64 },
 };
 
-static gboolean resolved_dns_idle_cb(gpointer data)
+#define TRG_TYPE_PEER_ITEM trg_peer_item_get_type()
+TRG_DEFINE_ITEM_TYPE(TrgPeerItem, trg_peer_item, TRG, PEER_ITEM, peer_item_columns)
+
+struct _TrgPeersModel {
+    TrgListModel parent;
+
+    /* IP -> item */
+    GHashTable *peers;
+};
+
+G_DEFINE_TYPE(TrgPeersModel, trg_peers_model, TRG_TYPE_LIST_MODEL)
+
+static void trg_peers_model_dispose(GObject *object)
 {
-    struct ResolvedDnsIdleData *idleData = data;
-    GtkTreeModel *model = gtk_tree_row_reference_get_model(idleData->rowRef);
-    GtkTreePath *path = gtk_tree_row_reference_get_path(idleData->rowRef);
+    g_clear_pointer(&TRG_PEERS_MODEL(object)->peers, g_hash_table_destroy);
 
-    if (path != NULL) {
-        GtkTreeIter iter;
-        if (gtk_tree_model_get_iter(model, &iter, path) == TRUE) {
-            gtk_list_store_set(GTK_LIST_STORE(model), &iter, PEERSCOL_HOST, idleData->rdns, -1);
-        }
-        gtk_tree_path_free(path);
-    }
+    G_OBJECT_CLASS(trg_peers_model_parent_class)->dispose(object);
+}
 
-    gtk_tree_row_reference_free(idleData->rowRef);
-    g_free(idleData->rdns);
-    g_free(idleData);
+static void trg_peers_model_class_init(TrgPeersModelClass *klass)
+{
+    G_OBJECT_CLASS(klass)->dispose = trg_peers_model_dispose;
+}
 
-    return FALSE;
+static void trg_peers_model_init(TrgPeersModel *self)
+{
+    self->peers = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_object_unref);
 }
 
 static void resolved_dns_cb(GObject *source_object, GAsyncResult *res, gpointer data)
 {
-
+    GWeakRef *ref = data;
+    TrgItem *item = g_weak_ref_get(ref);
     gchar *rdns = g_resolver_lookup_by_address_finish(G_RESOLVER(source_object), res, NULL);
-    GtkTreeRowReference *rowRef = data;
 
-    if (rdns != NULL) {
-        struct ResolvedDnsIdleData *idleData = g_new(struct ResolvedDnsIdleData, 1);
-        idleData->rdns = rdns;
-        idleData->rowRef = rowRef;
-        g_idle_add(resolved_dns_idle_cb, idleData);
-    } else {
-        gtk_tree_row_reference_free(rowRef);
-    }
+    if (rdns && item)
+        trg_item_set(item, PEERSCOL_HOST, rdns, -1);
+
+    g_clear_object(&item);
+    g_free(rdns);
+    g_weak_ref_clear(ref);
+    g_free(ref);
+}
+
+void trg_peers_model_clear(TrgPeersModel *model)
+{
+    g_hash_table_remove_all(model->peers);
+    g_list_store_remove_all(trg_list_model_get_store(TRG_LIST_MODEL(model)));
 }
 
 void trg_peers_model_update(TrgPeersModel *model, TrgTreeView *tv, gint64 updateSerial,
                             JsonObject *t, gint mode)
 {
+    GListStore *store = trg_list_model_get_store(TRG_LIST_MODEL(model));
     gboolean doHostLookup = trg_tree_view_is_column_showing(tv, PEERSCOL_HOST);
-    JsonArray *peers;
-    GtkTreeIter peerIter;
+    GPtrArray *added = g_ptr_array_new_with_free_func(g_object_unref);
     GList *li, *peersList;
-    gboolean isNew;
-
-    peers = torrent_get_peers(t);
 
     if (mode == TORRENT_GET_MODE_FIRST)
-        gtk_list_store_clear(GTK_LIST_STORE(model));
+        trg_peers_model_clear(model);
 
-    peersList = json_array_get_elements(peers);
+    peersList = json_array_get_elements(torrent_get_peers(t));
     for (li = peersList; li; li = g_list_next(li)) {
         JsonObject *peer = json_node_get_object((JsonNode *)li->data);
-        const gchar *address = NULL, *flagStr;
+        const gchar *address = peer_get_address(peer);
+        TrgItem *item = g_hash_table_lookup(model->peers, address);
 
-        if (mode == TORRENT_GET_MODE_FIRST
-            || find_existing_peer_item(model, peer, &peerIter) == FALSE) {
-            gtk_list_store_append(GTK_LIST_STORE(model), &peerIter);
+        if (!item) {
+            item = g_object_new(TRG_TYPE_PEER_ITEM, NULL);
+            trg_item_set(item, PEERSCOL_ICON, "network-workgroup", PEERSCOL_IP, address,
+                         PEERSCOL_CLIENT, peer_get_client_name(peer), -1);
+            g_hash_table_insert(model->peers, g_strdup(address), g_object_ref(item));
+            g_ptr_array_add(added, item);
 
-            address = peer_get_address(peer);
+            if (doHostLookup) {
+                GInetAddress *inetAddr = g_inet_address_new_from_string(address);
+                GResolver *resolver = g_resolver_get_default();
+                GWeakRef *ref = g_new0(GWeakRef, 1);
 
-            gtk_list_store_set(GTK_LIST_STORE(model), &peerIter, PEERSCOL_ICON, "network-workgroup",
-                               PEERSCOL_IP, address, PEERSCOL_CLIENT, peer_get_client_name(peer),
-                               -1);
-
-            isNew = TRUE;
-        } else {
-            isNew = FALSE;
+                g_weak_ref_init(ref, item);
+                if (inetAddr)
+                    g_resolver_lookup_by_address_async(resolver, inetAddr, NULL, resolved_dns_cb,
+                                                       ref);
+                g_object_unref(resolver);
+                g_clear_object(&inetAddr);
+            }
         }
 
-        flagStr = peer_get_flagstr(peer);
-        gtk_list_store_set(GTK_LIST_STORE(model), &peerIter, PEERSCOL_FLAGS, flagStr,
-                           PEERSCOL_PROGRESS, peer_get_progress(peer), PEERSCOL_DOWNSPEED,
-                           peer_get_rate_to_client(peer), PEERSCOL_UPSPEED,
-                           peer_get_rate_to_peer(peer), PEERSCOL_UPDATESERIAL, updateSerial, -1);
-
-        if (doHostLookup && isNew == TRUE) {
-            GtkTreePath *path = gtk_tree_model_get_path(GTK_TREE_MODEL(model), &peerIter);
-            GtkTreeRowReference *treeRef = gtk_tree_row_reference_new(GTK_TREE_MODEL(model), path);
-            GInetAddress *inetAddr;
-            GResolver *resolver;
-
-            gtk_tree_path_free(path);
-
-            inetAddr = g_inet_address_new_from_string(address);
-            resolver = g_resolver_get_default();
-            g_resolver_lookup_by_address_async(resolver, inetAddr, NULL, resolved_dns_cb, treeRef);
-            g_object_unref(resolver);
-            g_object_unref(inetAddr);
-        }
+        trg_item_set(item, PEERSCOL_FLAGS, peer_get_flagstr(peer), PEERSCOL_PROGRESS,
+                     peer_get_progress(peer), PEERSCOL_DOWNSPEED, peer_get_rate_to_client(peer),
+                     PEERSCOL_UPSPEED, peer_get_rate_to_peer(peer), PEERSCOL_UPDATESERIAL,
+                     updateSerial, -1);
     }
 
     g_list_free(peersList);
 
-    if (mode != TORRENT_GET_MODE_FIRST)
-        trg_model_remove_removed(GTK_LIST_STORE(model), PEERSCOL_UPDATESERIAL, updateSerial);
-}
+    if (added->len > 0)
+        g_list_store_splice(store, g_list_model_get_n_items(G_LIST_MODEL(store)), 0, added->pdata,
+                            added->len);
+    g_ptr_array_unref(added);
 
-static void trg_peers_model_init(TrgPeersModel *self)
-{
+    if (mode != TORRENT_GET_MODE_FIRST) {
+        GListModel *list = G_LIST_MODEL(store);
+        guint i, n = g_list_model_get_n_items(list);
 
-    GType column_types[PEERSCOL_COLUMNS];
+        for (i = 0; i < n; i++) {
+            g_autoptr(TrgItem) item = g_list_model_get_item(list, i);
+            if (trg_item_get_int64(item, PEERSCOL_UPDATESERIAL) != updateSerial)
+                g_hash_table_remove(model->peers, trg_item_get_string(item, PEERSCOL_IP));
+        }
 
-    column_types[PEERSCOL_ICON] = G_TYPE_STRING;
-    column_types[PEERSCOL_IP] = G_TYPE_STRING;
-    column_types[PEERSCOL_HOST] = G_TYPE_STRING;
-    column_types[PEERSCOL_FLAGS] = G_TYPE_STRING;
-    column_types[PEERSCOL_PROGRESS] = G_TYPE_DOUBLE;
-    column_types[PEERSCOL_DOWNSPEED] = G_TYPE_INT64;
-    column_types[PEERSCOL_UPSPEED] = G_TYPE_INT64;
-    column_types[PEERSCOL_CLIENT] = G_TYPE_STRING;
-    column_types[PEERSCOL_UPDATESERIAL] = G_TYPE_INT64;
-
-    gtk_list_store_set_column_types(GTK_LIST_STORE(self), PEERSCOL_COLUMNS, column_types);
+        trg_model_remove_removed(store, PEERSCOL_UPDATESERIAL, updateSerial);
+    }
 }
 
 TrgPeersModel *trg_peers_model_new(void)
 {
-    return g_object_new(TRG_TYPE_PEERS_MODEL, NULL);
+    return g_object_new(TRG_TYPE_PEERS_MODEL, "item-type", TRG_TYPE_PEER_ITEM, NULL);
 }
