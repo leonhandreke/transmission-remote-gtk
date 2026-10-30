@@ -1,2 +1,3 @@
 option('libappindicator', type: 'feature', value: 'auto', description: 'libappindicator (unsupported with GTK 4, must not be enabled)')
 option('nl_langinfo', type: 'feature', value: 'auto', description: 'nl_langinfo() support')
+option('macos_bundle', type: 'feature', value: 'auto', description: 'Build a macOS application bundle in the build directory (macOS only)')

@@ -69,6 +69,9 @@ conf_data.set_quoted('PACKAGE_VERSION', project_version)
 conf_data.set_quoted('GETTEXT_PACKAGE', project_name)
 conf_data.set_quoted('APPLICATION_ID', app_id)
 conf_data.set_quoted('LOCALEDIR', get_option('prefix') / get_option('localedir'))
+if host_machine.system() == 'darwin'
+  conf_data.set_quoted('DATADIR', get_option('prefix') / datadir)
+endif
 
 # debug options
 debug = get_option('debug')
@@ -139,3 +142,61 @@ endif
 subdir('po')
 subdir('data')
 subdir('src')
+
+# macOS application bundle
+macos_bundle = get_option('macos_bundle').require(
+  host_machine.system() == 'darwin',
+  error_message: 'macOS application bundles can only be built on macOS',
+)
+if macos_bundle.allowed()
+  python = import('python').find_installation()
+  rsvg_convert = find_program('rsvg-convert', required: macos_bundle)
+  iconutil = find_program('iconutil', required: macos_bundle)
+  macos_bundle = macos_bundle.require(
+    rsvg_convert.found() and iconutil.found(),
+    error_message: 'rsvg-convert (librsvg) and iconutil are needed for the macOS application bundle',
+  )
+endif
+if macos_bundle.allowed()
+  # A bundle for development, which runs the executable from this build and
+  # uses the data of the prefix (usually Homebrew).
+  bundle_py = files('macos/bundle.py')
+  app_svg = files('data/icons/@0@.svg'.format(project_name))
+  app_name = pretty_name + '.app'
+
+  app_icns = custom_target(
+    'macos-icns',
+    input: app_svg,
+    output: project_name + '.icns',
+    command: [python, bundle_py, 'icns', rsvg_convert, iconutil, '@INPUT@', '@OUTPUT@'],
+  )
+
+  app_bundle = custom_target(
+    'macos-app',
+    input: [trg_exe, info_plist, app_icns, app_svg],
+    output: app_name,
+    command: [python, bundle_py, 'app', '@INPUT@', '@OUTPUT@'],
+    build_by_default: true,
+  )
+
+  # A self-contained, relocatable bundle including the libraries and data,
+  # for distribution: 'meson compile macos-bundle' or 'meson compile macos-dmg'
+  dist_dir = meson.current_build_dir() / 'macos-dist'
+  arch = host_machine.cpu_family() == 'aarch64' ? 'arm64' : host_machine.cpu_family()
+  dmg_name = '@0@-@1@-macos-@2@.dmg'.format(project_name, project_version, arch)
+  standalone_cmd = [
+    python,
+    bundle_py,
+    'standalone',
+    '--po-dir', meson.current_build_dir() / 'po',
+    app_bundle,
+    dist_dir / app_name,
+  ]
+  standalone_deps = [app_bundle, po_targets[0]]
+  run_target('macos-bundle', command: standalone_cmd, depends: standalone_deps)
+  run_target(
+    'macos-dmg',
+    command: standalone_cmd + ['--dmg', dist_dir / dmg_name],
+    depends: standalone_deps,
+  )
+endif

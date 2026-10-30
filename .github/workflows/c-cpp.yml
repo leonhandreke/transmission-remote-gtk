@@ -44,6 +44,9 @@ jobs:
                        json-glib \
                        libsoup \
                        gettext\
+                       librsvg \
+                       adwaita-icon-theme \
+                       glib-networking \
                        \
                        appstream \
                        desktop-file-utils
@@ -53,6 +56,12 @@ jobs:
         run: meson compile -C build
       - name: dist
         run: meson dist -C build
+      - name: application bundle
+        run: meson compile -C build macos-dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: build/macos-dist/*.dmg
 
   build-windows:
     runs-on: windows-latest

@@ -66,7 +66,7 @@ configure_file(output: 'config.h', configuration: conf_data)
 # Add gresources
 src_files += gresources
 
-executable(
+trg_exe = executable(
   project_name,
   sources: src_files,
   dependencies: trg_deps,
