@@ -749,6 +749,9 @@ static void trg_tree_view_sync_sort_indicator(TrgTreeView *tv)
     TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
     trg_column_description *desc = trg_tree_view_find_model_column(tv, priv->sort_column);
 
+    if (!priv->column_view)
+        return;
+
     priv->updating_sort = TRUE;
     gtk_column_view_sort_by_column(GTK_COLUMN_VIEW(priv->column_view), desc ? desc->column : NULL,
                                    priv->sort_order);
@@ -1310,12 +1313,21 @@ void trg_tree_view_select_item(TrgTreeView *tv, gpointer item)
     }
 }
 
+static GtkListItem *trg_tree_view_find_marked(GtkWidget *widget);
+
 static GtkListItem *trg_tree_view_list_item_for(GtkWidget *widget, GtkWidget *stop)
 {
     for (; widget && widget != stop; widget = gtk_widget_get_parent(widget)) {
         GtkListItem *list_item = g_object_get_data(G_OBJECT(widget), GDATA_KEY_LIST_ITEM);
+        GtkWidget *parent = gtk_widget_get_parent(widget);
+
         if (list_item)
             return list_item;
+
+        /* the padding of a row (a child of the list view) is outside its
+         * row widget or cells */
+        if (parent && GTK_IS_LIST_VIEW(parent))
+            return trg_tree_view_find_marked(widget);
     }
 
     return NULL;
@@ -1593,6 +1605,12 @@ static void trg_tree_view_dispose(GObject *object)
     TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(TRG_TREE_VIEW(object));
     GtkWidget *child;
     GList *li;
+
+    /* destroying the column view changes its sorter, which isn't a choice of
+     * the user's to sort by */
+    if (priv->column_view)
+        g_signal_handlers_disconnect_by_data(
+            gtk_column_view_get_sorter(GTK_COLUMN_VIEW(priv->column_view)), object);
 
     for (li = priv->columns; li; li = g_list_next(li))
         g_clear_object(&((trg_column_description *)li->data)->column);
