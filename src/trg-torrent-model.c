@@ -27,30 +27,111 @@
 #include "json.h"
 #include "protocol-constants.h"
 #include "torrent.h"
-#include "trg-model.h"
+#include "trg-item.h"
 #include "trg-torrent-model.h"
 #include "util.h"
 
-/* An extension of TrgModel (which is an extension of GtkListStore) which
- * updates from a JSON torrent-get response. It handles a number of different
- * update modes.
+/* A GListModel of TrgTorrentItems which updates from a JSON torrent-get
+ * response. It handles a number of different update modes.
  *   1) The first update.
  *   2) A full update.
  *   3) An active-only update.
  *   4) Individual torrent updates.
+ *
+ * The items are updated in place (only the values that changed notify), and
+ * looked up by ID in a hash table, so an update is linear in the number of
+ * torrents.
  *
  * Other stuff it does.
  *   1) Populates a stats struct with speeds/state counts as it works through the
  *      response.
  *   2) Emits signals if something is added or removed. This is used by the state
  *      selector so it doesn't have to refresh itself on every update.
- *   3) Added or completed signals, for libnotify notifications.
+ *   3) Added or completed signals, for notifications.
  *   4) Maintains the torrent hash table (by ID).
- *      (and provide a lookup function which outputs an iter and/or JSON object.)
+ *      (and provide a lookup function which outputs an item and/or JSON object.)
  *   5) If the download directory is new/changed, create a short version if there
  *      is one (duplicate it not) for the state selector to filter/populate against.
  *   6) Shorten the tracker announce URL.
  */
+
+static const TrgItemColumn torrent_item_columns[TORRENT_COLUMN_COLUMNS] = {
+    [TORRENT_COLUMN_ICON] = { "icon", G_TYPE_STRING },
+    [TORRENT_COLUMN_NAME] = { "name", G_TYPE_STRING },
+    [TORRENT_COLUMN_SIZEWHENDONE] = { "size-when-done", G_TYPE_INT64 },
+    [TORRENT_COLUMN_PERCENTDONE] = { "percent-done", G_TYPE_DOUBLE },
+    [TORRENT_COLUMN_METADATAPERCENTCOMPLETE] = { "metadata-percent-complete", G_TYPE_DOUBLE },
+    [TORRENT_COLUMN_STATUS] = { "status", G_TYPE_STRING },
+    [TORRENT_COLUMN_SEEDS] = { "seeds", G_TYPE_INT64 },
+    [TORRENT_COLUMN_LEECHERS] = { "leechers", G_TYPE_INT64 },
+    [TORRENT_COLUMN_DOWNLOADS] = { "downloads", G_TYPE_INT64 },
+    [TORRENT_COLUMN_PEERS_CONNECTED] = { "peers-connected", G_TYPE_INT64 },
+    [TORRENT_COLUMN_PEERS_FROM_US] = { "peers-from-us", G_TYPE_INT64 },
+    [TORRENT_COLUMN_WEB_SEEDS_TO_US] = { "web-seeds-to-us", G_TYPE_INT64 },
+    [TORRENT_COLUMN_PEERS_TO_US] = { "peers-to-us", G_TYPE_INT64 },
+    [TORRENT_COLUMN_DOWNSPEED] = { "down-speed", G_TYPE_INT64 },
+    [TORRENT_COLUMN_UPSPEED] = { "up-speed", G_TYPE_INT64 },
+    [TORRENT_COLUMN_ETA] = { "eta", G_TYPE_INT64 },
+    [TORRENT_COLUMN_UPLOADED] = { "uploaded", G_TYPE_INT64 },
+    [TORRENT_COLUMN_DOWNLOADED] = { "downloaded", G_TYPE_INT64 },
+    [TORRENT_COLUMN_TOTALSIZE] = { "total-size", G_TYPE_INT64 },
+    [TORRENT_COLUMN_HAVE_UNCHECKED] = { "have-unchecked", G_TYPE_INT64 },
+    [TORRENT_COLUMN_HAVE_VALID] = { "have-valid", G_TYPE_INT64 },
+    [TORRENT_COLUMN_RATIO] = { "ratio", G_TYPE_DOUBLE },
+    [TORRENT_COLUMN_ADDED] = { "added", G_TYPE_INT64 },
+    [TORRENT_COLUMN_ID] = { "id", G_TYPE_INT64 },
+    [TORRENT_COLUMN_JSON] = { "json", G_TYPE_INVALID },
+    [TORRENT_COLUMN_UPDATESERIAL] = { "update-serial", G_TYPE_INT64 },
+    [TORRENT_COLUMN_FLAGS] = { "flags", G_TYPE_UINT },
+    [TORRENT_COLUMN_DOWNLOADDIR] = { "download-dir", G_TYPE_STRING },
+    [TORRENT_COLUMN_DOWNLOADDIR_SHORT] = { "download-dir-short", G_TYPE_STRING },
+    [TORRENT_COLUMN_BANDWIDTH_PRIORITY] = { "bandwidth-priority", G_TYPE_INT64 },
+    [TORRENT_COLUMN_DONE_DATE] = { "done-date", G_TYPE_INT64 },
+    [TORRENT_COLUMN_FROMPEX] = { "from-pex", G_TYPE_INT64 },
+    [TORRENT_COLUMN_FROMDHT] = { "from-dht", G_TYPE_INT64 },
+    [TORRENT_COLUMN_FROMTRACKERS] = { "from-trackers", G_TYPE_INT64 },
+    [TORRENT_COLUMN_FROMLTEP] = { "from-ltep", G_TYPE_INT64 },
+    [TORRENT_COLUMN_FROMRESUME] = { "from-resume", G_TYPE_INT64 },
+    [TORRENT_COLUMN_FROMINCOMING] = { "from-incoming", G_TYPE_INT64 },
+    [TORRENT_COLUMN_PEER_SOURCES] = { "peer-sources", G_TYPE_STRING },
+    [TORRENT_COLUMN_TRACKERHOST] = { "tracker-host", G_TYPE_STRING },
+    [TORRENT_COLUMN_QUEUE_POSITION] = { "queue-position", G_TYPE_INT64 },
+    [TORRENT_COLUMN_LASTACTIVE] = { "last-active", G_TYPE_INT64 },
+    [TORRENT_COLUMN_FILECOUNT] = { "file-count", G_TYPE_UINT },
+    [TORRENT_COLUMN_ERROR] = { "error", G_TYPE_INT64 },
+    [TORRENT_COLUMN_SEED_RATIO_MODE] = { "seed-ratio-mode", G_TYPE_INT64 },
+    [TORRENT_COLUMN_SEED_RATIO_LIMIT] = { "seed-ratio-limit", G_TYPE_DOUBLE },
+};
+
+struct _TrgTorrentItem {
+    TrgItem parent;
+};
+
+G_DEFINE_TYPE(TrgTorrentItem, trg_torrent_item, TRG_TYPE_ITEM)
+
+static void trg_torrent_item_class_init(TrgTorrentItemClass *klass)
+{
+    TrgItemColumn columns[TORRENT_COLUMN_COLUMNS];
+
+    memcpy(columns, torrent_item_columns, sizeof(columns));
+    columns[TORRENT_COLUMN_JSON].type = JSON_TYPE_OBJECT;
+
+    trg_item_class_install_columns(klass, columns, TORRENT_COLUMN_COLUMNS);
+}
+
+static void trg_torrent_item_init(TrgTorrentItem *self)
+{
+}
+
+JsonObject *trg_torrent_item_get_json(TrgTorrentItem *item)
+{
+    return trg_item_get_boxed(item, TORRENT_COLUMN_JSON);
+}
+
+gint64 trg_torrent_item_get_id(TrgTorrentItem *item)
+{
+    return trg_item_get_int64(item, TORRENT_COLUMN_ID);
+}
 
 enum {
     TMODEL_TORRENT_COMPLETED,
@@ -60,29 +141,32 @@ enum {
     TMODEL_SIGNAL_COUNT
 };
 
-#define PROP_REMOVE_IN_PROGRESS "remove-in-progress"
-
 static guint signals[TMODEL_SIGNAL_COUNT] = { 0 };
 
 struct _TrgTorrentModel {
-    GtkListStore parent;
+    TrgListModel parent;
 
     GHashTable *ht;
     GRegex *urlHostRegex;
     trg_torrent_model_update_stats stats;
 };
 
-G_DEFINE_TYPE(TrgTorrentModel, trg_torrent_model, GTK_TYPE_LIST_STORE)
+G_DEFINE_TYPE(TrgTorrentModel, trg_torrent_model, TRG_TYPE_LIST_MODEL)
+
+static GListStore *trg_torrent_model_store(TrgTorrentModel *model)
+{
+    return trg_list_model_get_store(TRG_LIST_MODEL(model));
+}
 
 static void trg_torrent_model_dispose(GObject *object)
 {
-    g_hash_table_destroy(TRG_TORRENT_MODEL(object)->ht);
+    TrgTorrentModel *self = TRG_TORRENT_MODEL(object);
+
+    g_clear_pointer(&self->ht, g_hash_table_destroy);
+    g_clear_pointer(&self->urlHostRegex, g_regex_unref);
+
     G_OBJECT_CLASS(trg_torrent_model_parent_class)->dispose(object);
 }
-
-static void update_torrent_iter(TrgTorrentModel *model, TrgClient *tc, gint64 rpcv, gint64 serial,
-                                GtkTreeIter *iter, JsonObject *t,
-                                trg_torrent_model_update_stats *stats, guint *whatsChanged);
 
 static void trg_torrent_model_class_init(TrgTorrentModelClass *klass)
 {
@@ -90,22 +174,20 @@ static void trg_torrent_model_class_init(TrgTorrentModelClass *klass)
 
     object_class->dispose = trg_torrent_model_dispose;
 
-    signals[TMODEL_TORRENT_COMPLETED] = g_signal_new(
-        "torrent-completed", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
-        0, NULL, NULL, g_cclosure_marshal_VOID__POINTER, G_TYPE_NONE, 1, G_TYPE_POINTER);
+    signals[TMODEL_TORRENT_COMPLETED]
+        = g_signal_new("torrent-completed", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST, 0,
+                       NULL, NULL, NULL, G_TYPE_NONE, 1, TRG_TYPE_TORRENT_ITEM);
 
     signals[TMODEL_UPDATE] = g_signal_new("update", G_TYPE_FROM_CLASS(object_class),
-                                          G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL,
-                                          g_cclosure_marshal_VOID__VOID, G_TYPE_NONE, 0);
+                                          G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 
-    signals[TMODEL_TORRENT_ADDED] = g_signal_new(
-        "torrent-added", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0,
-        NULL, NULL, g_cclosure_marshal_VOID__POINTER, G_TYPE_NONE, 1, G_TYPE_POINTER);
+    signals[TMODEL_TORRENT_ADDED]
+        = g_signal_new("torrent-added", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST, 0, NULL,
+                       NULL, NULL, G_TYPE_NONE, 1, TRG_TYPE_TORRENT_ITEM);
 
     signals[TMODEL_STATE_CHANGED]
-        = g_signal_new("torrents-state-change", G_TYPE_FROM_CLASS(object_class),
-                       G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL,
-                       g_cclosure_marshal_VOID__UINT, G_TYPE_NONE, 1, G_TYPE_UINT);
+        = g_signal_new("torrents-state-change", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST,
+                       0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_UINT);
 }
 
 trg_torrent_model_update_stats *trg_torrent_model_get_stats(TrgTorrentModel *model)
@@ -113,7 +195,7 @@ trg_torrent_model_update_stats *trg_torrent_model_get_stats(TrgTorrentModel *mod
     return &(model->stats);
 }
 
-static void trg_torrent_model_count_peers(TrgTorrentModel *model, GtkTreeIter *iter, JsonObject *t)
+static void trg_torrent_model_count_peers(TrgTorrentItem *item, JsonObject *t)
 {
     GList *trackersList = json_array_get_elements(torrent_get_tracker_stats(t));
     gint64 seeders = 0;
@@ -131,167 +213,83 @@ static void trg_torrent_model_count_peers(TrgTorrentModel *model, GtkTreeIter *i
 
     g_list_free(trackersList);
 
-    gtk_list_store_set(GTK_LIST_STORE(model), iter, TORRENT_COLUMN_SEEDS, seeders,
-                       TORRENT_COLUMN_LEECHERS, leechers, TORRENT_COLUMN_DOWNLOADS, downloads, -1);
-}
-
-static void trg_torrent_model_ref_free(gpointer data)
-{
-    GtkTreeRowReference *rr = (GtkTreeRowReference *)data;
-    GtkTreeModel *model = gtk_tree_row_reference_get_model(rr);
-    GtkTreePath *path = gtk_tree_row_reference_get_path(rr);
-    if (path) {
-        GtkTreeIter iter;
-        JsonObject *json;
-        if (gtk_tree_model_get_iter(model, &iter, path)) {
-            gtk_tree_model_get(model, &iter, TORRENT_COLUMN_JSON, &json, -1);
-            g_clear_pointer(&json, json_object_unref);
-            g_object_set_data(G_OBJECT(model), PROP_REMOVE_IN_PROGRESS, GINT_TO_POINTER(TRUE));
-            gtk_list_store_remove(GTK_LIST_STORE(model), &iter);
-            g_object_set_data(G_OBJECT(model), PROP_REMOVE_IN_PROGRESS, GINT_TO_POINTER(FALSE));
-        }
-
-        gtk_tree_path_free(path);
-    }
-
-    gtk_tree_row_reference_free(rr);
+    trg_item_set(item, TORRENT_COLUMN_SEEDS, seeders, TORRENT_COLUMN_LEECHERS, leechers,
+                 TORRENT_COLUMN_DOWNLOADS, downloads, -1);
 }
 
 static void trg_torrent_model_init(TrgTorrentModel *self)
 {
-    GType column_types[TORRENT_COLUMN_COLUMNS];
-
-    column_types[TORRENT_COLUMN_ICON] = G_TYPE_STRING;
-    column_types[TORRENT_COLUMN_NAME] = G_TYPE_STRING;
-    column_types[TORRENT_COLUMN_ERROR] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_SIZEWHENDONE] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_TOTALSIZE] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_HAVE_UNCHECKED] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_PERCENTDONE] = G_TYPE_DOUBLE;
-    column_types[TORRENT_COLUMN_METADATAPERCENTCOMPLETE] = G_TYPE_DOUBLE;
-    column_types[TORRENT_COLUMN_STATUS] = G_TYPE_STRING;
-    column_types[TORRENT_COLUMN_SEEDS] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_LEECHERS] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_DOWNLOADS] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_DOWNSPEED] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_ADDED] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_UPSPEED] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_ETA] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_UPLOADED] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_DOWNLOADED] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_HAVE_VALID] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_RATIO] = G_TYPE_DOUBLE;
-    column_types[TORRENT_COLUMN_ID] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_JSON] = G_TYPE_POINTER;
-    column_types[TORRENT_COLUMN_UPDATESERIAL] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_FLAGS] = G_TYPE_INT;
-    column_types[TORRENT_COLUMN_DOWNLOADDIR] = G_TYPE_STRING;
-    column_types[TORRENT_COLUMN_DOWNLOADDIR_SHORT] = G_TYPE_STRING;
-    column_types[TORRENT_COLUMN_BANDWIDTH_PRIORITY] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_DONE_DATE] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_FROMPEX] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_FROMDHT] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_FROMTRACKERS] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_FROMLTEP] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_FROMRESUME] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_FROMINCOMING] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_PEER_SOURCES] = G_TYPE_STRING;
-    column_types[TORRENT_COLUMN_SEED_RATIO_LIMIT] = G_TYPE_DOUBLE;
-    column_types[TORRENT_COLUMN_SEED_RATIO_MODE] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_PEERS_CONNECTED] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_PEERS_FROM_US] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_WEB_SEEDS_TO_US] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_PEERS_TO_US] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_TRACKERHOST] = G_TYPE_STRING;
-    column_types[TORRENT_COLUMN_QUEUE_POSITION] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_LASTACTIVE] = G_TYPE_INT64;
-    column_types[TORRENT_COLUMN_FILECOUNT] = G_TYPE_UINT;
-
-    gtk_list_store_set_column_types(GTK_LIST_STORE(self), TORRENT_COLUMN_COLUMNS, column_types);
-
-    self->ht = g_hash_table_new_full(g_int64_hash, g_int64_equal, (GDestroyNotify)g_free,
-                                     trg_torrent_model_ref_free);
-
-    g_object_set_data(G_OBJECT(self), PROP_REMOVE_IN_PROGRESS, GINT_TO_POINTER(FALSE));
+    self->ht = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, g_object_unref);
 
     self->urlHostRegex = trg_uri_host_regex_new();
 }
 
-gboolean trg_torrent_model_is_remove_in_progress(TrgTorrentModel *model)
+void trg_torrent_model_reload_dir_aliases(TrgClient *tc, TrgTorrentModel *model)
 {
-    return (gboolean)GPOINTER_TO_INT(g_object_get_data(G_OBJECT(model), PROP_REMOVE_IN_PROGRESS));
-}
+    GListModel *list = G_LIST_MODEL(model);
+    guint i, n = g_list_model_get_n_items(list);
 
-static gboolean trg_torrent_model_reload_dir_aliases_foreachfunc(GtkTreeModel *model,
-                                                                 GtkTreePath *path G_GNUC_UNUSED,
-                                                                 GtkTreeIter *iter, gpointer gdata)
-{
-    gchar *downloadDir, *shortDownloadDir;
+    for (i = 0; i < n; i++) {
+        g_autoptr(TrgItem) item = g_list_model_get_item(list, i);
+        gchar *shortDownloadDir
+            = shorten_download_dir(tc, trg_item_get_string(item, TORRENT_COLUMN_DOWNLOADDIR));
 
-    gtk_tree_model_get(model, iter, TORRENT_COLUMN_DOWNLOADDIR, &downloadDir, -1);
+        trg_item_set(item, TORRENT_COLUMN_DOWNLOADDIR_SHORT, shortDownloadDir, -1);
+        g_free(shortDownloadDir);
+    }
 
-    shortDownloadDir = shorten_download_dir((TrgClient *)gdata, downloadDir);
-
-    gtk_list_store_set(GTK_LIST_STORE(model), iter, TORRENT_COLUMN_DOWNLOADDIR_SHORT,
-                       shortDownloadDir, -1);
-
-    g_free(downloadDir);
-    g_free(shortDownloadDir);
-
-    return FALSE;
-}
-
-void trg_torrent_model_reload_dir_aliases(TrgClient *tc, GtkTreeModel *model)
-{
-    gtk_tree_model_foreach(model, trg_torrent_model_reload_dir_aliases_foreachfunc, tc);
     g_signal_emit(model, signals[TMODEL_STATE_CHANGED], 0, TORRENT_UPDATE_PATH_CHANGE);
 }
 
-static gboolean trg_torrent_model_stats_scan_foreachfunc(GtkTreeModel *model,
-                                                         GtkTreePath *path G_GNUC_UNUSED,
-                                                         GtkTreeIter *iter, gpointer gdata)
+static void trg_torrent_model_stats_scan(TrgTorrentModel *model)
 {
-    trg_torrent_model_update_stats *stats = (trg_torrent_model_update_stats *)gdata;
-    guint flags;
+    trg_torrent_model_update_stats *stats = &model->stats;
+    GListModel *list = G_LIST_MODEL(model);
+    guint i, n = g_list_model_get_n_items(list);
 
-    gtk_tree_model_get(model, iter, TORRENT_COLUMN_FLAGS, &flags, -1);
+    stats->count = stats->down = stats->error = stats->paused = stats->seeding = stats->complete
+        = stats->incomplete = stats->active = stats->checking = stats->seed_wait = stats->down_wait
+        = 0;
 
-    if (flags & TORRENT_FLAG_SEEDING)
-        stats->seeding++;
-    else if (flags & TORRENT_FLAG_DOWNLOADING)
-        stats->down++;
-    else if (flags & TORRENT_FLAG_PAUSED)
-        stats->paused++;
+    for (i = 0; i < n; i++) {
+        g_autoptr(TrgItem) item = g_list_model_get_item(list, i);
+        guint flags = trg_item_get_uint(item, TORRENT_COLUMN_FLAGS);
 
-    if (flags & TORRENT_FLAG_ERROR)
-        stats->error++;
+        if (flags & TORRENT_FLAG_SEEDING)
+            stats->seeding++;
+        else if (flags & TORRENT_FLAG_DOWNLOADING)
+            stats->down++;
+        else if (flags & TORRENT_FLAG_PAUSED)
+            stats->paused++;
 
-    if (flags & TORRENT_FLAG_COMPLETE)
-        stats->complete++;
-    else
-        stats->incomplete++;
+        if (flags & TORRENT_FLAG_ERROR)
+            stats->error++;
 
-    if (flags & TORRENT_FLAG_CHECKING_ANY)
-        stats->checking++;
+        if (flags & TORRENT_FLAG_COMPLETE)
+            stats->complete++;
+        else
+            stats->incomplete++;
 
-    if (flags & TORRENT_FLAG_ACTIVE)
-        stats->active++;
+        if (flags & TORRENT_FLAG_CHECKING_ANY)
+            stats->checking++;
 
-    if (flags & TORRENT_FLAG_SEEDING_WAIT)
-        stats->seed_wait++;
+        if (flags & TORRENT_FLAG_ACTIVE)
+            stats->active++;
 
-    if (flags & TORRENT_FLAG_DOWNLOADING_WAIT)
-        stats->down_wait++;
+        if (flags & TORRENT_FLAG_SEEDING_WAIT)
+            stats->seed_wait++;
 
-    stats->count++;
+        if (flags & TORRENT_FLAG_DOWNLOADING_WAIT)
+            stats->down_wait++;
 
-    return FALSE;
+        stats->count++;
+    }
 }
 
 void trg_torrent_model_remove_all(TrgTorrentModel *model)
 {
     g_hash_table_remove_all(model->ht);
-    gtk_list_store_clear(GTK_LIST_STORE(model));
+    g_list_store_remove_all(trg_torrent_model_store(model));
 }
 
 gchar *shorten_download_dir(TrgClient *tc, const gchar *downloadDir)
@@ -341,20 +339,19 @@ gchar *shorten_download_dir(TrgClient *tc, const gchar *downloadDir)
     return g_strdup(downloadDir);
 }
 
-static void update_torrent_iter(TrgTorrentModel *model, TrgClient *tc, gint64 rpcv, gint64 serial,
-                                GtkTreeIter *iter, JsonObject *t,
+static void update_torrent_item(TrgTorrentModel *model, TrgClient *tc, gint64 rpcv, gint64 serial,
+                                TrgTorrentItem *item, JsonObject *t,
                                 trg_torrent_model_update_stats *stats, guint *whatsChanged)
 {
-    GtkListStore *ls = GTK_LIST_STORE(model);
     guint lastFlags, newFlags;
-    JsonObject *lastJson, *pf;
+    JsonObject *pf;
     JsonArray *trackerStats;
     gchar *statusString, *statusIcon, *downloadDir;
     gint64 downRate, upRate, haveValid, uploaded, downloaded, id, status, lpd;
     guint fileCount;
     gchar *firstTrackerHost = NULL;
     gchar *peerSources = NULL;
-    gchar *lastDownloadDir = NULL;
+    gchar *lastDownloadDir;
 
     downRate = torrent_get_rate_down(t);
     stats->downRateTotal += downRate;
@@ -378,11 +375,8 @@ static void update_torrent_iter(TrgTorrentModel *model, TrgClient *tc, gint64 rp
     pf = torrent_get_peersfrom(t);
     trackerStats = torrent_get_tracker_stats(t);
 
-    gtk_tree_model_get(GTK_TREE_MODEL(model), iter, TORRENT_COLUMN_FLAGS, &lastFlags,
-                       TORRENT_COLUMN_JSON, &lastJson, TORRENT_COLUMN_DOWNLOADDIR, &lastDownloadDir,
-                       -1);
-
-    json_object_ref(t);
+    lastFlags = trg_item_get_uint(item, TORRENT_COLUMN_FLAGS);
+    lastDownloadDir = g_strdup(trg_item_get_string(item, TORRENT_COLUMN_DOWNLOADDIR));
 
     if (json_array_get_length(trackerStats) > 0) {
         JsonObject *firstTracker = json_array_get_object_element(trackerStats, 0);
@@ -407,53 +401,13 @@ static void update_torrent_iter(TrgTorrentModel *model, TrgClient *tc, gint64 rp
                 peerfrom_get_dht(pf), peerfrom_get_pex(pf), peerfrom_get_resume(pf));
         }
     }
-#ifdef TRG_DEBUG
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_ICON, statusIcon, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_NAME, torrent_get_name(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_SIZEWHENDONE, torrent_get_size_when_done(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_PERCENTDONE,
-                       (newFlags & TORRENT_FLAG_CHECKING) ? torrent_get_recheck_progress(t)
-                                                          : torrent_get_percent_done(t),
-                       -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_STATUS, statusString, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_DOWNSPEED, downRate, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_FLAGS, newFlags, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_UPSPEED, upRate, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_ETA, torrent_get_eta(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_UPLOADED, uploaded, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_DOWNLOADED, downloaded, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_RATIO,
-                       uploaded > 0 && downloaded > 0 ? (double)uploaded / (double)downloaded : 0,
-                       -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_ID, id, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_JSON, t, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_UPDATESERIAL, serial, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_ADDED, torrent_get_added_date(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_DOWNLOADDIR, downloadDir, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_PEERS_CONNECTED, torrent_get_peers_connected(t),
-                       -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_ETA, torrent_get_eta(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_BANDWIDTH_PRIORITY,
-                       torrent_get_bandwidth_priority(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_TOTALSIZE, torrent_get_total_size(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_HAVE_UNCHECKED, torrent_get_have_unchecked(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_METADATAPERCENTCOMPLETE,
-                       torrent_get_metadata_percent_complete(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_PEERS_TO_US, torrent_get_peers_sending_to_us(t),
-                       -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_PEERS_FROM_US, torrent_get_peers_getting_from_us(t),
-                       -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_WEB_SEEDS_TO_US,
-                       torrent_get_web_seeds_sending_to_us(t), -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_SEED_RATIO_LIMIT, torrent_get_seed_ratio_limit(t),
-                       -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_SEED_RATIO_MODE, torrent_get_seed_ratio_mode(t),
-                       -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_FILECOUNT, fileCount, -1);
-    gtk_list_store_set(ls, iter, TORRENT_COLUMN_HAVE_VALID, haveValid, -1);
-#else
-    gtk_list_store_set(
-        ls, iter, TORRENT_COLUMN_ICON, statusIcon, TORRENT_COLUMN_ADDED, torrent_get_added_date(t),
+
+    /* Only the values which changed notify, all together when it's done. The
+     * update serial is set last, so a cell watching it sees all the changes. */
+    g_object_freeze_notify(G_OBJECT(item));
+
+    trg_item_set(
+        item, TORRENT_COLUMN_ICON, statusIcon, TORRENT_COLUMN_ADDED, torrent_get_added_date(t),
         TORRENT_COLUMN_FILECOUNT, fileCount, TORRENT_COLUMN_DONE_DATE, torrent_get_done_date(t),
         TORRENT_COLUMN_NAME, torrent_get_name(t), TORRENT_COLUMN_ERROR, torrent_get_error(t),
         TORRENT_COLUMN_SIZEWHENDONE, torrent_get_size_when_done(t), TORRENT_COLUMN_PERCENTDONE,
@@ -481,32 +435,30 @@ static void update_torrent_iter(TrgTorrentModel *model, TrgClient *tc, gint64 rp
         uploaded > 0 && haveValid > 0 ? (double)uploaded / (double)haveValid : 0,
         TORRENT_COLUMN_DOWNLOADDIR, downloadDir, TORRENT_COLUMN_BANDWIDTH_PRIORITY,
         torrent_get_bandwidth_priority(t), TORRENT_COLUMN_ID, id, TORRENT_COLUMN_JSON, t,
-        TORRENT_COLUMN_TRACKERHOST, firstTrackerHost ? firstTrackerHost : "",
-        TORRENT_COLUMN_UPDATESERIAL, serial, -1);
-#endif
+        TORRENT_COLUMN_TRACKERHOST, firstTrackerHost ? firstTrackerHost : "", -1);
 
     if (!lastDownloadDir || g_strcmp0(downloadDir, lastDownloadDir)) {
         gchar *shortDownloadDir = shorten_download_dir(tc, downloadDir);
-        gtk_list_store_set(ls, iter, TORRENT_COLUMN_DOWNLOADDIR_SHORT, shortDownloadDir, -1);
+        trg_item_set(item, TORRENT_COLUMN_DOWNLOADDIR_SHORT, shortDownloadDir, -1);
         g_free(shortDownloadDir);
         *whatsChanged |= TORRENT_UPDATE_PATH_CHANGE;
     }
 
-    g_clear_pointer(&lastJson, json_object_unref);
+    trg_torrent_model_count_peers(item, t);
+
+    trg_item_set(item, TORRENT_COLUMN_UPDATESERIAL, serial, -1);
+
+    g_object_thaw_notify(G_OBJECT(item));
 
     if ((lastFlags & TORRENT_FLAG_DOWNLOADING) && (!(newFlags & TORRENT_FLAG_DOWNLOADING))
         && (newFlags & TORRENT_FLAG_COMPLETE))
-        g_signal_emit(model, signals[TMODEL_TORRENT_COMPLETED], 0, iter);
+        g_signal_emit(model, signals[TMODEL_TORRENT_COMPLETED], 0, item);
 
     if (lastFlags != newFlags)
         *whatsChanged |= TORRENT_UPDATE_STATE_CHANGE;
 
-    trg_torrent_model_count_peers(model, iter, t);
-
     g_free(firstTrackerHost);
-
     g_free(peerSources);
-
     g_free(lastDownloadDir);
     g_free(statusString);
     g_free(statusIcon);
@@ -514,46 +466,12 @@ static void update_torrent_iter(TrgTorrentModel *model, TrgClient *tc, gint64 rp
 
 TrgTorrentModel *trg_torrent_model_new(void)
 {
-    return g_object_new(TRG_TYPE_TORRENT_MODEL, NULL);
+    return g_object_new(TRG_TYPE_TORRENT_MODEL, "item-type", TRG_TYPE_TORRENT_ITEM, NULL);
 }
-
-struct TrgModelRemoveData {
-    GList *toRemove;
-    gint64 currentSerial;
-};
 
 GHashTable *get_torrent_table(TrgTorrentModel *model)
 {
     return model->ht;
-}
-
-static gboolean trg_model_find_removed_foreachfunc(GtkTreeModel *model,
-                                                   GtkTreePath *path G_GNUC_UNUSED,
-                                                   GtkTreeIter *iter, gpointer gdata)
-{
-    struct TrgModelRemoveData *args = (struct TrgModelRemoveData *)gdata;
-    gint64 rowSerial;
-
-    gtk_tree_model_get(model, iter, TORRENT_COLUMN_UPDATESERIAL, &rowSerial, -1);
-
-    if (rowSerial != args->currentSerial) {
-        gint64 *id = g_new(gint64, 1);
-        gtk_tree_model_get(model, iter, TORRENT_COLUMN_ID, id, -1);
-        args->toRemove = g_list_append(args->toRemove, id);
-    }
-
-    return FALSE;
-}
-
-static GList *trg_torrent_model_find_removed(GtkTreeModel *model, gint64 currentSerial)
-{
-    struct TrgModelRemoveData args;
-    args.toRemove = NULL;
-    args.currentSerial = currentSerial;
-
-    gtk_tree_model_foreach(GTK_TREE_MODEL(model), trg_model_find_removed_foreachfunc, &args);
-
-    return args.toRemove;
 }
 
 /* The download directories of all the torrents, newly allocated */
@@ -564,18 +482,9 @@ GList *trg_torrent_model_get_download_dirs(GHashTable *table)
     GList *li;
 
     for (li = values; li; li = g_list_next(li)) {
-        GtkTreeRowReference *rr = (GtkTreeRowReference *)li->data;
-        GtkTreeModel *model = gtk_tree_row_reference_get_model(rr);
-        GtkTreePath *path = gtk_tree_row_reference_get_path(rr);
-        GtkTreeIter iter;
-
-        if (path && gtk_tree_model_get_iter(model, &iter, path)) {
-            gchar *dd = NULL;
-            gtk_tree_model_get(model, &iter, TORRENT_COLUMN_DOWNLOADDIR, &dd, -1);
-            if (dd)
-                dirs = g_list_prepend(dirs, dd);
-        }
-        gtk_tree_path_free(path);
+        const gchar *dd = trg_item_get_string(li->data, TORRENT_COLUMN_DOWNLOADDIR);
+        if (dd)
+            dirs = g_list_prepend(dirs, g_strdup(dd));
     }
 
     g_list_free(values);
@@ -583,35 +492,59 @@ GList *trg_torrent_model_get_download_dirs(GHashTable *table)
     return dirs;
 }
 
-gboolean get_torrent_data(GHashTable *table, gint64 id, JsonObject **t, GtkTreeIter *out_iter)
+/* Looks up a torrent by ID, giving its JSON object and/or item (not new
+ * references). */
+gboolean get_torrent_data(GHashTable *table, gint64 id, JsonObject **t, TrgTorrentItem **out_item)
 {
-    gpointer result = g_hash_table_lookup(table, &id);
-    gboolean found = FALSE;
+    TrgTorrentItem *item = g_hash_table_lookup(table, &id);
 
-    if (result) {
-        GtkTreeRowReference *rr = (GtkTreeRowReference *)result;
-        GtkTreePath *path = gtk_tree_row_reference_get_path(rr);
-        GtkTreeIter iter;
-        if (path) {
-            GtkTreeModel *model = gtk_tree_row_reference_get_model(rr);
-            gtk_tree_model_get_iter(model, &iter, path);
-            if (out_iter)
-                *out_iter = iter;
-            if (t)
-                gtk_tree_model_get(model, &iter, TORRENT_COLUMN_JSON, t, -1);
-            found = TRUE;
-            gtk_tree_path_free(path);
+    if (!item)
+        return FALSE;
+
+    if (out_item)
+        *out_item = item;
+    if (t)
+        *t = trg_torrent_item_get_json(item);
+
+    return TRUE;
+}
+
+/* Removes the stale torrents: those marked with the update serial -1, and if
+ * serial isn't -1, those which weren't updated with it. They're removed in
+ * runs, from the end, so this is linear in the number of torrents. Returns
+ * whether any were removed. */
+static gboolean trg_torrent_model_remove_stale(TrgTorrentModel *model, gint64 serial)
+{
+    GListStore *store = trg_torrent_model_store(model);
+    GListModel *list = G_LIST_MODEL(store);
+    guint i = g_list_model_get_n_items(list);
+    gboolean removed = FALSE;
+
+    while (i > 0) {
+        guint end = i;
+
+        while (i > 0) {
+            g_autoptr(TrgItem) item = g_list_model_get_item(list, i - 1);
+            gint64 itemSerial = trg_item_get_int64(item, TORRENT_COLUMN_UPDATESERIAL);
+            gint64 id;
+
+            if (itemSerial != -1 && (serial == -1 || itemSerial == serial))
+                break;
+
+            id = trg_item_get_int64(item, TORRENT_COLUMN_ID);
+            g_hash_table_remove(model->ht, &id);
+            i--;
+        }
+
+        if (i < end) {
+            g_list_store_splice(store, i, end - i, NULL, 0);
+            removed = TRUE;
+        } else {
+            i--;
         }
     }
 
-    return found;
-}
-
-static void trg_torrent_model_stat_counts_clear(trg_torrent_model_update_stats *stats)
-{
-    stats->count = stats->down = stats->error = stats->paused = stats->seeding = stats->complete
-        = stats->incomplete = stats->active = stats->checking = stats->seed_wait = stats->down_wait
-        = 0;
+    return removed;
 }
 
 trg_torrent_model_update_stats *trg_torrent_model_update(TrgTorrentModel *model, TrgClient *tc,
@@ -623,11 +556,9 @@ trg_torrent_model_update_stats *trg_torrent_model_update(TrgTorrentModel *model,
     gint64 id;
     gint64 serial = trg_client_get_serial(tc);
     JsonArray *removedTorrents;
-    GtkTreeIter iter;
-    GtkTreePath *path;
-    GtkTreeRowReference *rr;
-    gpointer *result;
+    GPtrArray *added = g_ptr_array_new_with_free_func(g_object_unref);
     guint whatsChanged = 0;
+    guint i;
 
     gint64 rpcv = trg_client_get_rpc_version(tc);
 
@@ -638,71 +569,68 @@ trg_torrent_model_update_stats *trg_torrent_model_update(TrgTorrentModel *model,
     model->stats.upRateTotal = 0;
 
     for (li = torrentList; li; li = g_list_next(li)) {
+        TrgTorrentItem *item;
+
         t = json_node_get_object((JsonNode *)li->data);
         id = torrent_get_id(t);
 
-        result = mode == TORRENT_GET_MODE_FIRST ? NULL : g_hash_table_lookup(model->ht, &id);
+        item = g_hash_table_lookup(model->ht, &id);
 
-        if (!result) {
-            gint64 *idCopy;
-            gtk_list_store_append(GTK_LIST_STORE(model), &iter);
-            whatsChanged |= TORRENT_UPDATE_ADDREMOVE;
+        if (!item) {
+            gint64 *idCopy = g_new(gint64, 1);
 
-            update_torrent_iter(model, tc, rpcv, serial, &iter, t, &(model->stats), &whatsChanged);
+            item = g_object_new(TRG_TYPE_TORRENT_ITEM, NULL);
+            update_torrent_item(model, tc, rpcv, serial, item, t, &(model->stats), &whatsChanged);
 
-            path = gtk_tree_model_get_path(GTK_TREE_MODEL(model), &iter);
-            rr = gtk_tree_row_reference_new(GTK_TREE_MODEL(model), path);
-            idCopy = g_new(gint64, 1);
             *idCopy = id;
-            g_hash_table_insert(model->ht, idCopy, rr);
-            gtk_tree_path_free(path);
-
-            if (mode != TORRENT_GET_MODE_FIRST)
-                g_signal_emit(model, signals[TMODEL_TORRENT_ADDED], 0, &iter);
+            g_hash_table_insert(model->ht, idCopy, g_object_ref(item));
+            g_ptr_array_add(added, item);
+            whatsChanged |= TORRENT_UPDATE_ADDREMOVE;
         } else {
-            path = gtk_tree_row_reference_get_path((GtkTreeRowReference *)result);
-            if (path) {
-                if (gtk_tree_model_get_iter(GTK_TREE_MODEL(model), &iter, path)) {
-                    update_torrent_iter(model, tc, rpcv, serial, &iter, t, &(model->stats),
-                                        &whatsChanged);
-                }
-                gtk_tree_path_free(path);
-            }
+            update_torrent_item(model, tc, rpcv, serial, item, t, &(model->stats), &whatsChanged);
         }
     }
 
     g_list_free(torrentList);
 
+    /* all the new torrents in one go */
+    if (added->len > 0) {
+        GListStore *store = trg_torrent_model_store(model);
+        g_list_store_splice(store, g_list_model_get_n_items(G_LIST_MODEL(store)), 0, added->pdata,
+                            added->len);
+    }
+
+    if (mode != TORRENT_GET_MODE_FIRST)
+        for (i = 0; i < added->len; i++)
+            g_signal_emit(model, signals[TMODEL_TORRENT_ADDED], 0, added->pdata[i]);
+
+    g_ptr_array_unref(added);
+
     if (mode == TORRENT_GET_MODE_UPDATE) {
-        GList *hitlist = trg_torrent_model_find_removed(GTK_TREE_MODEL(model), serial);
-        if (hitlist) {
-            for (li = hitlist; li; li = g_list_next(li)) {
-                g_hash_table_remove(model->ht, li->data);
-                g_free(li->data);
-            }
+        if (trg_torrent_model_remove_stale(model, serial))
             whatsChanged |= TORRENT_UPDATE_ADDREMOVE;
-            g_list_free(hitlist);
-        }
     } else if (mode > TORRENT_GET_MODE_FIRST) {
         removedTorrents = get_torrents_removed(args);
-        if (removedTorrents) {
+        if (removedTorrents && json_array_get_length(removedTorrents) > 0) {
             GList *hitlist = json_array_get_elements(removedTorrents);
             for (li = hitlist; li; li = g_list_next(li)) {
+                TrgItem *item;
                 id = json_node_get_int((JsonNode *)li->data);
-                g_hash_table_remove(model->ht, &id);
-                whatsChanged |= TORRENT_UPDATE_ADDREMOVE;
+                /* mark it, the stale ones are removed below */
+                if ((item = g_hash_table_lookup(model->ht, &id)))
+                    trg_item_set(item, TORRENT_COLUMN_UPDATESERIAL, (gint64)-1, -1);
             }
             g_list_free(hitlist);
+
+            trg_torrent_model_remove_stale(model, -1);
+            whatsChanged |= TORRENT_UPDATE_ADDREMOVE;
         }
     }
 
     if (whatsChanged != 0) {
         if ((whatsChanged & TORRENT_UPDATE_ADDREMOVE)
-            || (whatsChanged & TORRENT_UPDATE_STATE_CHANGE)) {
-            trg_torrent_model_stat_counts_clear(&model->stats);
-            gtk_tree_model_foreach(GTK_TREE_MODEL(model), trg_torrent_model_stats_scan_foreachfunc,
-                                   &(model->stats));
-        }
+            || (whatsChanged & TORRENT_UPDATE_STATE_CHANGE))
+            trg_torrent_model_stats_scan(model);
         g_signal_emit(model, signals[TMODEL_STATE_CHANGED], 0, whatsChanged);
     }
 

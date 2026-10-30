@@ -13,15 +13,19 @@
 
 #include <gtk/gtk.h>
 
+#include "trg-client.h"
+#include "trg-torrent-model.h"
+
 #define GTR_UNICODE_UP      "\xE2\x86\x91"
 #define GTR_UNICODE_DOWN    "\xE2\x86\x93"
 #define DIRECTORY_MIME_TYPE "folder"
 #define FILE_MIME_TYPE      "file"
 #define UNKNOWN_MIME_TYPE   "unknown"
 
-#define TORRENT_CELL_RENDERER_TYPE (torrent_cell_renderer_get_type())
-G_DECLARE_FINAL_TYPE(TorrentCellRenderer, torrent_cell_renderer, TORRENT, CELL_RENDERER,
-                     GtkCellRenderer)
+/* The row of a torrent in the Transmission styles of the torrent list: its
+ * icon, name, progress and status, on several lines, or on one when compact. */
+#define TORRENT_TYPE_ROW (torrent_row_get_type())
+G_DECLARE_FINAL_TYPE(TorrentRow, torrent_row, TORRENT, ROW, GtkWidget)
 
-GtkCellRenderer *torrent_cell_renderer_new(void);
-GtkTreeView *torrent_cell_renderer_get_owner(TorrentCellRenderer *r);
+GtkWidget *torrent_row_new(TrgClient *client, gboolean compact);
+void torrent_row_set_item(TorrentRow *row, TrgTorrentItem *item);

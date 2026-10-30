@@ -270,23 +270,20 @@ static GtkWidget *info_page_new(TrgTorrentPropsDialog *dialog)
     return t;
 }
 
-static void info_page_update(TrgTorrentPropsDialog *dialog, JsonObject *t,
-                             TrgTorrentModel *torrentModel, GtkTreeIter *iter)
+static void info_page_update(TrgTorrentPropsDialog *dialog, JsonObject *t, TrgTorrentItem *item)
 {
-    GtkTreeModel *model = GTK_TREE_MODEL(torrentModel);
-    gint64 sizeWhenDone, haveValid, downloaded, uploaded, percentDone, eta, activityDate, error;
+    gint64 sizeWhenDone, haveValid, downloaded, uploaded, eta, activityDate, error;
     gchar *statusString;
     guint flags;
     const gchar *str;
 
     char buf[512];
 
-    gtk_tree_model_get(model, iter, TORRENT_COLUMN_SIZEWHENDONE, &sizeWhenDone,
-                       TORRENT_COLUMN_UPLOADED, &uploaded, TORRENT_COLUMN_DOWNLOADED, &downloaded,
-                       TORRENT_COLUMN_HAVE_VALID, &haveValid, TORRENT_COLUMN_PERCENTDONE,
-                       &percentDone, TORRENT_COLUMN_ETA, &eta, TORRENT_COLUMN_LASTACTIVE,
-                       &activityDate, TORRENT_COLUMN_STATUS, &statusString, TORRENT_COLUMN_FLAGS,
-                       &flags, TORRENT_COLUMN_ERROR, &error, -1);
+    trg_item_get(item, TORRENT_COLUMN_SIZEWHENDONE, &sizeWhenDone, TORRENT_COLUMN_UPLOADED,
+                 &uploaded, TORRENT_COLUMN_DOWNLOADED, &downloaded, TORRENT_COLUMN_HAVE_VALID,
+                 &haveValid, TORRENT_COLUMN_ETA, &eta, TORRENT_COLUMN_LASTACTIVE, &activityDate,
+                 TORRENT_COLUMN_STATUS, &statusString, TORRENT_COLUMN_FLAGS, &flags,
+                 TORRENT_COLUMN_ERROR, &error, -1);
 
     if (torrent_get_is_private(t))
         str = _("Private to this tracker -- DHT and PEX disabled");
@@ -421,9 +418,9 @@ static void models_updated(TrgTorrentModel *model, gpointer data)
     GHashTable *ht = get_torrent_table(model);
     gint64 serial = trg_client_get_serial(dlg->client);
     JsonObject *t = NULL;
-    GtkTreeIter iter;
+    TrgTorrentItem *item;
     gboolean exists
-        = get_torrent_data(ht, json_array_get_int_element(dlg->targetIds, 0), &t, &iter);
+        = get_torrent_data(ht, json_array_get_int_element(dlg->targetIds, 0), &t, &item);
 
     if (exists && dlg->lastJson != t) {
         trg_files_model_update(dlg->filesModel, GTK_TREE_VIEW(dlg->filesTv), serial, t,
@@ -431,7 +428,7 @@ static void models_updated(TrgTorrentModel *model, gpointer data)
         trg_peers_model_update(dlg->peersModel, TRG_TREE_VIEW(dlg->peersTv), serial, t,
                                TORRENT_GET_MODE_UPDATE);
         trg_trackers_model_update(dlg->trackersModel, serial, t, TORRENT_GET_MODE_UPDATE);
-        info_page_update(TRG_TORRENT_PROPS_DIALOG(data), t, model, &iter);
+        info_page_update(TRG_TORRENT_PROPS_DIALOG(data), t, item);
     }
 
     gtk_widget_set_sensitive(GTK_WIDGET(dlg->filesTv), exists);
@@ -450,8 +447,7 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
     TrgTorrentPropsDialog *propsDialog = TRG_TORRENT_PROPS_DIALOG(object);
     GtkWindow *window = GTK_WINDOW(object);
 
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(propsDialog->tv));
-    gint rowCount = gtk_tree_selection_count_selected_rows(selection);
+    gint rowCount = trg_tree_view_count_selected(TRG_TREE_VIEW(propsDialog->tv));
     TrgPrefs *prefs = trg_client_get_prefs(propsDialog->client);
     propsDialog->show_details
         = trg_prefs_get_int(prefs, TRG_PREFS_KEY_STYLE, TRG_PREFS_GLOBAL) != TRG_STYLE_CLASSIC
@@ -459,12 +455,12 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
 
     gint64 width, height;
 
-    JsonObject *json;
-    GtkTreeIter iter;
+    JsonObject *json = NULL;
+    TrgTorrentItem *item = NULL;
     GtkWidget *notebook, *contentvbox;
 
     get_torrent_data(trg_client_get_torrent_table(propsDialog->client),
-                     trg_mw_get_selected_torrent_id(propsDialog->parent_win), &json, &iter);
+                     trg_mw_get_selected_torrent_id(propsDialog->parent_win), &json, &item);
     propsDialog->targetIds = build_json_id_array(propsDialog->tv);
 
     if (rowCount > 1) {
@@ -496,7 +492,7 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
 
         gtk_notebook_append_page(GTK_NOTEBOOK(notebook), info_page_new(propsDialog),
                                  gtk_label_new(_("Information")));
-        info_page_update(propsDialog, json, propsDialog->torrentModel, &iter);
+        info_page_update(propsDialog, json, item);
 
         /* Files */
 

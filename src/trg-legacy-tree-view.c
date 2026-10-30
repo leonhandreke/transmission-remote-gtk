@@ -224,107 +224,6 @@ static void trg_legacy_tree_view_user_add_column_cb(GtkTreeViewColumn *col,
     g_signal_emit(tv, signals[SIGNAL_COLUMN_ADDED], 0, desc->id);
 }
 
-static void trg_legacy_tree_view_sort_type_change_state(GSimpleAction *action, GVariant *value,
-                                                        gpointer data)
-{
-    GtkTreeSortable *model = GTK_TREE_SORTABLE(data);
-    gint sortColumn;
-
-    gtk_tree_sortable_get_sort_column_id(model, &sortColumn, NULL);
-    gtk_tree_sortable_set_sort_column_id(model, sortColumn, g_variant_get_int32(value));
-}
-
-static void trg_legacy_tree_view_sort_column_change_state(GSimpleAction *action, GVariant *value,
-                                                          gpointer data)
-{
-    GtkTreeSortable *model = GTK_TREE_SORTABLE(data);
-    GtkSortType sortType;
-
-    gtk_tree_sortable_get_sort_column_id(model, NULL, &sortType);
-    gtk_tree_sortable_set_sort_column_id(model, g_variant_get_int32(value), sortType);
-}
-
-/* Keep the radio items in sync when sorting changes elsewhere, eg. by
- * clicking a column header. */
-static void trg_legacy_tree_view_sort_changed_cb(GtkTreeSortable *model, gpointer data)
-{
-    GActionMap *map = G_ACTION_MAP(data);
-    gint sort;
-    GtkSortType sortType;
-
-    gtk_tree_sortable_get_sort_column_id(model, &sort, &sortType);
-    g_simple_action_set_state(
-        G_SIMPLE_ACTION(g_action_map_lookup_action(map, TRG_LEGACY_TREE_VIEW_SORT_TYPE_ACTION)),
-        g_variant_new_int32(sortType));
-    g_simple_action_set_state(
-        G_SIMPLE_ACTION(g_action_map_lookup_action(map, TRG_LEGACY_TREE_VIEW_SORT_COLUMN_ACTION)),
-        g_variant_new_int32(sort));
-}
-
-GMenu *trg_legacy_tree_view_sort_menu(TrgLegacyTreeView *tv, GActionMap *map)
-{
-    TrgLegacyTreeViewPrivate *priv = trg_legacy_tree_view_get_instance_private(tv);
-    GtkTreeModel *treeViewModel = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
-    GtkTreeSortable *sortableModel
-        = GTK_TREE_SORTABLE(gtk_tree_model_filter_get_model(GTK_TREE_MODEL_FILTER(treeViewModel)));
-    GMenu *menu = g_menu_new();
-    GMenu *section;
-    GMenuItem *item;
-    GSimpleAction *action;
-    GList *li;
-    gint sort;
-    GtkSortType sortType;
-
-    gtk_tree_sortable_get_sort_column_id(sortableModel, &sort, &sortType);
-
-    action = g_simple_action_new_stateful(TRG_LEGACY_TREE_VIEW_SORT_TYPE_ACTION,
-                                          G_VARIANT_TYPE_INT32, g_variant_new_int32(sortType));
-    g_signal_connect(action, "change-state",
-                     G_CALLBACK(trg_legacy_tree_view_sort_type_change_state), sortableModel);
-    g_action_map_add_action(map, G_ACTION(action));
-    g_object_unref(action);
-
-    action = g_simple_action_new_stateful(TRG_LEGACY_TREE_VIEW_SORT_COLUMN_ACTION,
-                                          G_VARIANT_TYPE_INT32, g_variant_new_int32(sort));
-    g_signal_connect(action, "change-state",
-                     G_CALLBACK(trg_legacy_tree_view_sort_column_change_state), sortableModel);
-    g_action_map_add_action(map, G_ACTION(action));
-    g_object_unref(action);
-
-    g_signal_connect_object(sortableModel, "sort-column-changed",
-                            G_CALLBACK(trg_legacy_tree_view_sort_changed_cb), map, 0);
-
-    section = g_menu_new();
-    item = g_menu_item_new(_("Ascending"), NULL);
-    g_menu_item_set_action_and_target(item, "win." TRG_LEGACY_TREE_VIEW_SORT_TYPE_ACTION, "i",
-                                      GTK_SORT_ASCENDING);
-    g_menu_append_item(section, item);
-    g_object_unref(item);
-    item = g_menu_item_new(_("Descending"), NULL);
-    g_menu_item_set_action_and_target(item, "win." TRG_LEGACY_TREE_VIEW_SORT_TYPE_ACTION, "i",
-                                      GTK_SORT_DESCENDING);
-    g_menu_append_item(section, item);
-    g_object_unref(item);
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    section = g_menu_new();
-    for (li = priv->columns; li; li = g_list_next(li)) {
-        trg_legacy_column_description *desc = (trg_legacy_column_description *)li->data;
-        if (!(desc->flags & TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU)) {
-            item = g_menu_item_new(desc->header, NULL);
-            g_menu_item_set_action_and_target(item, "win." TRG_LEGACY_TREE_VIEW_SORT_COLUMN_ACTION,
-                                              "i", desc->model_column);
-            g_menu_append_item(section, item);
-            g_object_unref(item);
-        }
-    }
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    return menu;
-}
-
 static void column_menu_hide_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
 {
     trg_legacy_tree_view_hide_column(NULL, GTK_TREE_VIEW_COLUMN(data));
@@ -571,17 +470,6 @@ static void trg_legacy_tree_view_add_column_after(TrgLegacyTreeView *tv,
     desc->flags |= TRG_LEGACY_COLUMN_SHOWING;
 }
 
-void trg_legacy_tree_view_remove_all_columns(TrgLegacyTreeView *tv)
-{
-    GtkTreeView *gtv = GTK_TREE_VIEW(tv);
-    GList *cols = gtk_tree_view_get_columns(gtv);
-    GList *li;
-    for (li = cols; li; li = g_list_next(li)) {
-        gtk_tree_view_remove_column(gtv, GTK_TREE_VIEW_COLUMN(li->data));
-    }
-    g_list_free(cols);
-}
-
 void trg_legacy_tree_view_persist(TrgLegacyTreeView *tv, guint flags)
 {
     JsonObject *props = trg_prefs_get_tree_view_props(tv);
@@ -592,11 +480,7 @@ void trg_legacy_tree_view_persist(TrgLegacyTreeView *tv, guint flags)
     GtkSortType sort_type;
 
     if (flags & TRG_LEGACY_TREE_VIEW_PERSIST_SORT) {
-        gtk_tree_sortable_get_sort_column_id(
-            GTK_TREE_SORTABLE((flags & TRG_LEGACY_TREE_VIEW_SORTABLE_PARENT)
-                                  ? gtk_tree_model_filter_get_model(GTK_TREE_MODEL_FILTER(model))
-                                  : model),
-            &sort_column_id, &sort_type);
+        gtk_tree_sortable_get_sort_column_id(GTK_TREE_SORTABLE(model), &sort_column_id, &sort_type);
 
         if (json_object_has_member(props, TRG_PREFS_KEY_TV_SORT_COL))
             json_object_remove_member(props, TRG_PREFS_KEY_TV_SORT_COL);
@@ -633,23 +517,6 @@ void trg_legacy_tree_view_persist(TrgLegacyTreeView *tv, guint flags)
         }
 
         g_list_free(cols);
-    }
-}
-
-void trg_legacy_tree_view_restore_sort(TrgLegacyTreeView *tv, guint flags)
-{
-    JsonObject *props = trg_prefs_get_tree_view_props(tv);
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
-
-    if (json_object_has_member(props, TRG_PREFS_KEY_TV_SORT_COL)
-        && json_object_has_member(props, TRG_PREFS_KEY_TV_SORT_TYPE)) {
-        gint64 sort_col = json_object_get_int_member(props, TRG_PREFS_KEY_TV_SORT_COL);
-        gint64 sort_type = json_object_get_int_member(props, TRG_PREFS_KEY_TV_SORT_TYPE);
-        gtk_tree_sortable_set_sort_column_id(
-            GTK_TREE_SORTABLE((flags & TRG_LEGACY_TREE_VIEW_SORTABLE_PARENT)
-                                  ? gtk_tree_model_filter_get_model(GTK_TREE_MODEL_FILTER(model))
-                                  : model),
-            sort_col, (GtkSortType)sort_type);
     }
 }
 

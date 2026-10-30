@@ -22,11 +22,11 @@
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
 
-#include "trg-legacy-tree-view.h"
 #include "trg-main-window.h"
 #include "trg-menu-bar.h"
 #include "trg-prefs.h"
 #include "trg-torrent-tree-view.h"
+#include "trg-tree-view.h"
 #include "util.h"
 
 /* The main menu, as a GMenuModel. The menu items activate actions installed
@@ -278,8 +278,8 @@ static GMenu *trg_menu_bar_view_menu_new(TrgMenuBar *mb)
     trg_menu_bar_view_radio_item_new(mb, viewMenu, TRG_PREFS_KEY_STYLE, TRG_STYLE_CLASSIC,
                                      _("Classic Style"));
 
-    sortMenu = trg_legacy_tree_view_sort_menu(TRG_LEGACY_TREE_VIEW(mb->torrent_tree_view),
-                                              G_ACTION_MAP(mb->main_window));
+    sortMenu = trg_tree_view_sort_menu(TRG_TREE_VIEW(mb->torrent_tree_view),
+                                       G_ACTION_MAP(mb->main_window));
     g_menu_append_submenu(viewMenu, _("Sort"), G_MENU_MODEL(sortMenu));
     g_object_unref(sortMenu);
 

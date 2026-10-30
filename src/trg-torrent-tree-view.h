@@ -21,15 +21,14 @@
 #include <glib-object.h>
 #include <json-glib/json-glib.h>
 
-#include "trg-legacy-tree-view.h"
 #include "trg-prefs.h"
 #include "trg-state-selector.h"
 #include "trg-torrent-model.h"
+#include "trg-tree-view.h"
 
 G_BEGIN_DECLS
 #define TRG_TYPE_TORRENT_TREE_VIEW trg_torrent_tree_view_get_type()
-G_DECLARE_FINAL_TYPE(TrgTorrentTreeView, trg_torrent_tree_view, TRG, TORRENT_TREE_VIEW,
-                     TrgLegacyTreeView)
+G_DECLARE_FINAL_TYPE(TrgTorrentTreeView, trg_torrent_tree_view, TRG, TORRENT_TREE_VIEW, TrgTreeView)
 
-TrgTorrentTreeView *trg_torrent_tree_view_new(TrgClient *tc, GtkTreeModel *model);
+TrgTorrentTreeView *trg_torrent_tree_view_new(TrgClient *tc, GListModel *model);
 JsonArray *build_json_id_array(TrgTorrentTreeView *tv);

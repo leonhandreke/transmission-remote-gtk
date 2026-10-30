@@ -119,8 +119,7 @@ static GObject *trg_torrent_move_dialog_constructor(GType type, guint n_construc
     gtk_widget_set_vexpand(t, TRUE);
     gtk_box_append(GTK_BOX(trg_dialog_get_content_area(TRG_DIALOG(object))), t);
 
-    count = gtk_tree_selection_count_selected_rows(
-        gtk_tree_view_get_selection(GTK_TREE_VIEW(self->treeview)));
+    count = trg_tree_view_count_selected(TRG_TREE_VIEW(self->treeview));
     self->ids = build_json_id_array(self->treeview);
 
     if (count == 1) {

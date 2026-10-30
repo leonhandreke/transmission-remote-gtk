@@ -62,7 +62,6 @@ struct _TrgGeneralPanel {
     GtkLabel *gen_comment_label;
     GtkLabel *gen_hash_label;
     GtkLabel *gen_error_label;
-    GtkTreeModel *model;
     TrgClient *tc;
 };
 
@@ -107,7 +106,7 @@ static void trg_general_panel_class_init(TrgGeneralPanelClass *klass)
 {
 }
 
-void trg_general_panel_update(TrgGeneralPanel *panel, JsonObject *t, GtkTreeIter *iter)
+void trg_general_panel_update(TrgGeneralPanel *panel, JsonObject *t, TrgTorrentItem *item)
 {
     gchar buf[32], buf1[32]; // TODO: do it better
     gchar *statusString, *fullStatusString, *completedAtString, *speed, *comment, *markup;
@@ -116,9 +115,8 @@ void trg_general_panel_update(TrgGeneralPanel *panel, JsonObject *t, GtkTreeIter
     GtkLabel *keyLabel;
     gint64 seeders = 0, leechers = 0;
 
-    gtk_tree_model_get(GTK_TREE_MODEL(panel->model), iter, TORRENT_COLUMN_SEEDS, &seeders,
-                       TORRENT_COLUMN_LEECHERS, &leechers, TORRENT_COLUMN_STATUS, &statusString,
-                       -1);
+    trg_item_get(item, TORRENT_COLUMN_SEEDS, &seeders, TORRENT_COLUMN_LEECHERS, &leechers,
+                 TORRENT_COLUMN_STATUS, &statusString, -1);
 
     trg_strlsize(buf, torrent_get_size_when_done(t));
     gtk_label_set_text(GTK_LABEL(panel->gen_size_label), buf);
@@ -308,13 +306,12 @@ static void trg_general_panel_init(TrgGeneralPanel *self)
     gtk_widget_set_sensitive(GTK_WIDGET(self), FALSE);
 }
 
-TrgGeneralPanel *trg_general_panel_new(GtkTreeModel *model, TrgClient *tc)
+TrgGeneralPanel *trg_general_panel_new(TrgClient *tc)
 {
     TrgGeneralPanel *obj
         = TRG_GENERAL_PANEL(g_object_new(TRG_TYPE_GENERAL_PANEL, "row-homogeneous", FALSE,
                                          "row-spacing", 6, "column-spacing", 8, NULL));
 
-    obj->model = model;
     obj->tc = tc;
 
     return obj;

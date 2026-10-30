@@ -18,11 +18,13 @@
  */
 #pragma once
 
+#include <gio/gio.h>
 #include <glib-object.h>
-#include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
 
 #include "trg-client.h"
+#include "trg-item.h"
+#include "trg-model.h"
 
 enum {
     TORRENT_COLUMN_ICON,
@@ -73,8 +75,17 @@ enum {
     TORRENT_COLUMN_COLUMNS
 };
 
+/* A torrent, with the columns above as properties. The JSON column holds
+ * the torrent's JsonObject from the last update. */
+#define TRG_TYPE_TORRENT_ITEM trg_torrent_item_get_type()
+G_DECLARE_FINAL_TYPE(TrgTorrentItem, trg_torrent_item, TRG, TORRENT_ITEM, TrgItem)
+
+JsonObject *trg_torrent_item_get_json(TrgTorrentItem *item);
+gint64 trg_torrent_item_get_id(TrgTorrentItem *item);
+
+/* A GListModel of TrgTorrentItems, updated from torrent-get responses */
 #define TRG_TYPE_TORRENT_MODEL trg_torrent_model_get_type()
-G_DECLARE_FINAL_TYPE(TrgTorrentModel, trg_torrent_model, TRG, TORRENT_MODEL, GtkListStore)
+G_DECLARE_FINAL_TYPE(TrgTorrentModel, trg_torrent_model, TRG, TORRENT_MODEL, TrgListModel)
 
 typedef struct {
     gint64 downRateTotal;
@@ -98,14 +109,12 @@ typedef struct {
 
 TrgTorrentModel *trg_torrent_model_new(void);
 
-gboolean find_existing_peer_item(GtkListStore *model, JsonObject *p, GtkTreeIter *iter);
 trg_torrent_model_update_stats *trg_torrent_model_update(TrgTorrentModel *model, TrgClient *tc,
                                                          JsonObject *response, gint mode);
 trg_torrent_model_update_stats *trg_torrent_model_get_stats(TrgTorrentModel *model);
 GHashTable *get_torrent_table(TrgTorrentModel *model);
 void trg_torrent_model_remove_all(TrgTorrentModel *model);
-gboolean trg_torrent_model_is_remove_in_progress(TrgTorrentModel *model);
 GList *trg_torrent_model_get_download_dirs(GHashTable *table);
-gboolean get_torrent_data(GHashTable *table, gint64 id, JsonObject **t, GtkTreeIter *out_iter);
+gboolean get_torrent_data(GHashTable *table, gint64 id, JsonObject **t, TrgTorrentItem **out_item);
 gchar *shorten_download_dir(TrgClient *tc, const gchar *downloadDir);
-void trg_torrent_model_reload_dir_aliases(TrgClient *tc, GtkTreeModel *model);
+void trg_torrent_model_reload_dir_aliases(TrgClient *tc, TrgTorrentModel *model);

@@ -68,9 +68,8 @@ typedef struct {
 #define TRG_LEGACY_COLUMN_EXTRA              (1 << 2) /* 0x04 */
 #define TRG_LEGACY_COLUMN_HIDE_FROM_TOP_MENU (1 << 3) /* 0x08 */
 
-#define TRG_LEGACY_TREE_VIEW_PERSIST_SORT    (1 << 0)
-#define TRG_LEGACY_TREE_VIEW_PERSIST_LAYOUT  (1 << 1)
-#define TRG_LEGACY_TREE_VIEW_SORTABLE_PARENT (1 << 2)
+#define TRG_LEGACY_TREE_VIEW_PERSIST_SORT   (1 << 0)
+#define TRG_LEGACY_TREE_VIEW_PERSIST_LAYOUT (1 << 1)
 
 trg_legacy_column_description *trg_legacy_tree_view_reg_column(TrgLegacyTreeView *tv, gint type,
                                                                gint model_column,
@@ -79,12 +78,4 @@ trg_legacy_column_description *trg_legacy_tree_view_reg_column(TrgLegacyTreeView
 void trg_legacy_tree_view_setup_columns(TrgLegacyTreeView *tv);
 void trg_legacy_tree_view_set_prefs(TrgLegacyTreeView *tv, TrgPrefs *prefs);
 void trg_legacy_tree_view_persist(TrgLegacyTreeView *tv, guint flags);
-void trg_legacy_tree_view_remove_all_columns(TrgLegacyTreeView *tv);
-void trg_legacy_tree_view_restore_sort(TrgLegacyTreeView *tv, guint flags);
-#define TRG_LEGACY_TREE_VIEW_SORT_TYPE_ACTION   "sort-type"
-#define TRG_LEGACY_TREE_VIEW_SORT_COLUMN_ACTION "sort-column"
-
-/* Creates the stateful sort actions in map (a window, so "win." actions) and
- * returns a menu using them. */
-GMenu *trg_legacy_tree_view_sort_menu(TrgLegacyTreeView *tv, GActionMap *map);
 gboolean trg_legacy_tree_view_is_column_showing(TrgLegacyTreeView *tv, gint index);

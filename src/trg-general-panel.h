@@ -29,6 +29,6 @@
 #define TRG_TYPE_GENERAL_PANEL trg_general_panel_get_type()
 G_DECLARE_FINAL_TYPE(TrgGeneralPanel, trg_general_panel, TRG, GENERAL_PANEL, GtkGrid)
 
-TrgGeneralPanel *trg_general_panel_new(GtkTreeModel *model, TrgClient *tc);
-void trg_general_panel_update(TrgGeneralPanel *panel, JsonObject *t, GtkTreeIter *iter);
+TrgGeneralPanel *trg_general_panel_new(TrgClient *tc);
+void trg_general_panel_update(TrgGeneralPanel *panel, JsonObject *t, TrgTorrentItem *item);
 void trg_general_panel_clear(TrgGeneralPanel *panel);
