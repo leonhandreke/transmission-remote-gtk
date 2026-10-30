@@ -68,6 +68,7 @@ executable(
   project_name,
   sources: src_files,
   dependencies: trg_deps,
+  link_depends: trg_link_depends,
   install: true,
   pie: true,
 )

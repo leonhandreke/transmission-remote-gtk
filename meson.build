@@ -48,6 +48,11 @@ cc = meson.get_compiler('c')
 # compiler deps
 trg_deps += cc.find_library('m', required: false)
 
+# macOS: following the system's dark mode uses CoreFoundation directly
+if host_machine.system() == 'darwin'
+  trg_deps += dependency('appleframeworks', modules: ['CoreFoundation'])
+endif
+
 # nl_langinfo check
 nl_langinfo = cc.has_function('nl_langinfo', prefix: '#include <langinfo.h>')
 nl_li_feature = get_option('nl_langinfo')
@@ -98,6 +103,29 @@ add_project_arguments(cflags, language: 'c')
 # link arguments
 ldflags = cc.get_supported_link_arguments('-Wl,-z,relro', '-Wl,-z,now')
 add_project_link_arguments(ldflags, language: 'c')
+
+trg_link_depends = []
+
+# macOS: embed the Info.plist (also used for an application bundle) in the
+# executable, so it has the right name in the application menu even when it
+# isn't run from a bundle.
+if host_machine.system() == 'darwin'
+  info_plist = configure_file(
+    input: 'macos/Info.plist.in',
+    output: 'Info.plist',
+    configuration: {
+      'PRETTY_NAME': pretty_name,
+      'APP_ID': app_id,
+      'PROJECT_NAME': project_name,
+      'VERSION': project_version,
+    },
+  )
+  add_project_link_arguments(
+    '-Wl,-sectcreate,__TEXT,__info_plist,' + meson.current_build_dir() / 'Info.plist',
+    language: 'c',
+  )
+  trg_link_depends += info_plist
+endif
 
 # Windows compiler options
 if host_machine.system() == 'windows' or host_machine.system() == 'cygwin'

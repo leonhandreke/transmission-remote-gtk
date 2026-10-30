@@ -22,6 +22,10 @@
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
 
+#ifdef GDK_WINDOWING_MACOS
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 #include "trg-gtk-app.h"
 #include "trg-main-window.h"
 #include "trg-menu-bar.h"
@@ -81,6 +85,128 @@ static void trg_gtk_app_quit_cb(GSimpleAction *action, GVariant *parameter, gpoi
         g_application_quit(G_APPLICATION(data));
 }
 
+static TrgMainWindow *trg_gtk_app_get_main_window(GtkApplication *app)
+{
+    GList *li;
+
+    for (li = gtk_application_get_windows(app); li; li = g_list_next(li))
+        if (TRG_IS_MAIN_WINDOW(li->data))
+            return TRG_MAIN_WINDOW(li->data);
+
+    return NULL;
+}
+
+#ifdef GDK_WINDOWING_MACOS
+/* macOS: About and Preferences in the application menu. */
+static void trg_gtk_app_about_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
+{
+    TrgMainWindow *window = trg_gtk_app_get_main_window(GTK_APPLICATION(data));
+
+    if (window)
+        gtk_widget_activate_action(GTK_WIDGET(window), "win.about", NULL);
+}
+
+static void trg_gtk_app_preferences_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
+{
+    TrgMainWindow *window = trg_gtk_app_get_main_window(GTK_APPLICATION(data));
+
+    if (window)
+        gtk_widget_activate_action(GTK_WIDGET(window), "win.local-prefs", NULL);
+}
+
+/* macOS: Close Window, Minimize and Zoom act on the focused window, which
+ * can be a dialog. (The "window." actions in the menu bar would always act on
+ * the main window, the only one that belongs to the application.) */
+static GtkWindow *trg_gtk_app_get_focused_window(GtkApplication *app)
+{
+    GListModel *toplevels = gtk_window_get_toplevels();
+    GtkWindow *focused = NULL;
+    guint i;
+
+    for (i = 0; !focused && i < g_list_model_get_n_items(toplevels); i++) {
+        GtkWindow *window = g_list_model_get_item(toplevels, i);
+
+        if (gtk_window_is_active(window))
+            focused = window;
+        g_object_unref(window);
+    }
+
+    return focused ? focused : GTK_WINDOW(trg_gtk_app_get_main_window(app));
+}
+
+static void trg_gtk_app_window_action_cb(GSimpleAction *action, GVariant *parameter, gpointer data)
+{
+    const gchar *name = g_action_get_name(G_ACTION(action));
+    GtkWindow *window = trg_gtk_app_get_focused_window(GTK_APPLICATION(data));
+
+    if (!window)
+        return;
+
+    if (!g_strcmp0(name, "close-window"))
+        gtk_window_close(window);
+    else if (!g_strcmp0(name, "minimize"))
+        gtk_window_minimize(window);
+    else if (gtk_window_is_maximized(window))
+        gtk_window_unmaximize(window);
+    else
+        gtk_window_maximize(window);
+}
+
+/* GTK's macOS backend doesn't pass on the system's light/dark appearance, so
+ * follow it here: AppleInterfaceStyle is "Dark" in dark mode, and changes are
+ * announced with a distributed notification. */
+static void trg_gtk_app_macos_update_color_scheme(void)
+{
+    CFPropertyListRef style;
+    gboolean dark;
+
+    CFPreferencesAppSynchronize(kCFPreferencesAnyApplication);
+    style = CFPreferencesCopyAppValue(CFSTR("AppleInterfaceStyle"), kCFPreferencesAnyApplication);
+    dark = style && CFGetTypeID(style) == CFStringGetTypeID()
+        && CFStringCompare(style, CFSTR("Dark"), 0) == kCFCompareEqualTo;
+    if (style)
+        CFRelease(style);
+
+#if GTK_CHECK_VERSION(4, 20, 0)
+    g_object_set(gtk_settings_get_default(), "gtk-interface-color-scheme",
+                 dark ? GTK_INTERFACE_COLOR_SCHEME_DARK : GTK_INTERFACE_COLOR_SCHEME_LIGHT, NULL);
+#else
+    g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", dark, NULL);
+#endif
+}
+
+static void trg_gtk_app_macos_appearance_changed(CFNotificationCenterRef center, void *observer,
+                                                 CFNotificationName name, const void *object,
+                                                 CFDictionaryRef user_info)
+{
+    trg_gtk_app_macos_update_color_scheme();
+}
+
+/* macOS conventions: the menu in the system menu bar, with About and
+ * Preferences in the application menu, window actions, and following dark
+ * mode. */
+static void trg_gtk_app_macos_startup(GtkApplication *app, TrgMainWindow *window)
+{
+    static const GActionEntry macos_entries[] = {
+        { "about", trg_gtk_app_about_cb, NULL, NULL, NULL, { 0 } },
+        { "preferences", trg_gtk_app_preferences_cb, NULL, NULL, NULL, { 0 } },
+        { "close-window", trg_gtk_app_window_action_cb, NULL, NULL, NULL, { 0 } },
+        { "minimize", trg_gtk_app_window_action_cb, NULL, NULL, NULL, { 0 } },
+        { "zoom", trg_gtk_app_window_action_cb, NULL, NULL, NULL, { 0 } },
+    };
+
+    g_action_map_add_action_entries(G_ACTION_MAP(app), macos_entries, G_N_ELEMENTS(macos_entries),
+                                    app);
+    gtk_application_set_menubar(app, trg_main_window_get_menu_model(window));
+
+    trg_gtk_app_macos_update_color_scheme();
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDistributedCenter(), NULL,
+                                    trg_gtk_app_macos_appearance_changed,
+                                    CFSTR("AppleInterfaceThemeChangedNotification"), NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+}
+#endif
+
 static void trg_gtk_app_startup(GApplication *app, gpointer userdata)
 {
     static const GActionEntry app_entries[] = {
@@ -94,7 +220,33 @@ static void trg_gtk_app_startup(GApplication *app, gpointer userdata)
     window = trg_main_window_new(self->client);
     gtk_window_set_application(GTK_WINDOW(window), GTK_APPLICATION(app));
     trg_menu_bar_set_accels(GTK_APPLICATION(app));
+#ifdef GDK_WINDOWING_MACOS
+    if (trg_is_macos())
+        trg_gtk_app_macos_startup(GTK_APPLICATION(app), window);
+#endif
     gtk_window_present(GTK_WINDOW(window));
+}
+
+/* Files opened from the Finder or dropped on the Dock icon on macOS, whether
+ * or not the application was already running. */
+static void trg_gtk_app_open(GApplication *application, GFile **files, gint n_files,
+                             const gchar *hint)
+{
+    TrgMainWindow *window = trg_gtk_app_get_main_window(GTK_APPLICATION(application));
+    gchar **uris;
+    gint i, j;
+
+    if (!window)
+        return;
+
+    uris = g_new0(gchar *, n_files + 1);
+    for (i = 0, j = 0; i < n_files; i++) {
+        gchar *path = g_file_get_path(files[i]);
+        if (path)
+            uris[j++] = path;
+    }
+
+    trg_main_window_open(window, uris);
 }
 
 static int trg_gtk_app_command_line(GApplication *application, GApplicationCommandLine *cmdline)
@@ -170,6 +322,7 @@ static void trg_gtk_app_class_init(TrgGtkAppClass *klass)
     app_class->local_command_line = test_local_cmdline;
     // app_class->startup = trg_gtk_app_startup;
     app_class->command_line = trg_gtk_app_command_line;
+    app_class->open = trg_gtk_app_open;
 
     g_object_class_install_property(
         object_class, PROP_CLIENT,
@@ -186,6 +339,13 @@ static void trg_gtk_app_init(TrgGtkApp *self)
 
 TrgGtkApp *trg_gtk_app_new(TrgClient *client)
 {
-    return g_object_new(TRG_TYPE_GTK_APP, "application-id", APPLICATION_ID, "flags",
-                        G_APPLICATION_HANDLES_COMMAND_LINE, "trg-client", client, NULL);
+    GApplicationFlags flags = G_APPLICATION_HANDLES_COMMAND_LINE;
+
+#ifdef GDK_WINDOWING_MACOS
+    /* The macOS backend passes on files opened from the Finder as "open" */
+    flags |= G_APPLICATION_HANDLES_OPEN;
+#endif
+
+    return g_object_new(TRG_TYPE_GTK_APP, "application-id", APPLICATION_ID, "flags", flags,
+                        "trg-client", client, NULL);
 }

@@ -27,13 +27,16 @@
 #include "trg-prefs.h"
 #include "trg-torrent-tree-view.h"
 #include "trg-tree-view.h"
+#include "util.h"
 
 /* The main menu, as a GMenuModel. The menu items activate actions installed
  * on the main window ("win." prefix, see trg-main-window.c), apart from the
  * stateful view actions (check and radio items) which are created here as
  * they're backed by preferences. This is shown in the window with a
- * GtkPopoverMenuBar, but the same model can be given to
- * gtk_application_set_menubar().
+ * GtkPopoverMenuBar, or on macOS in the system menu bar with
+ * gtk_application_set_menubar(). There GTK provides the application menu,
+ * with About, Preferences and Quit (app.about, app.preferences and app.quit),
+ * so those aren't repeated in the other menus.
  */
 
 enum {
@@ -305,7 +308,8 @@ static GMenu *trg_menu_bar_options_menu_new(TrgMenuBar *mb)
 {
     GMenu *optsMenu = g_menu_new();
 
-    g_menu_append(optsMenu, _("_Local Preferences"), "win.local-prefs");
+    if (!trg_is_macos())
+        g_menu_append(optsMenu, _("_Local Preferences"), "win.local-prefs");
     g_menu_append(optsMenu, _("_Remote Preferences"), "win.remote-prefs");
 
     return optsMenu;
@@ -399,7 +403,11 @@ static GMenu *trg_menu_bar_file_file_menu_new(TrgMenuBar *mb)
     g_menu_append(fileMenu, _("_Disconnect"), "win.disconnect");
     g_menu_append(fileMenu, _("_Add"), "win.add");
     g_menu_append(fileMenu, _("Add from _URL"), "win.add-url");
-    g_menu_append(fileMenu, _("_Quit"), "app.quit");
+    /* macOS has Quit in the application menu */
+    if (trg_is_macos())
+        g_menu_append(fileMenu, _("Close Window"), "app.close-window");
+    else
+        g_menu_append(fileMenu, _("_Quit"), "app.quit");
 
     return fileMenu;
 }
@@ -444,6 +452,29 @@ static GMenu *trg_menu_bar_help_menu_new(TrgMenuBar *menuBar)
     return helpMenu;
 }
 
+/* macOS: this replaces GTK's default Edit menu, which is what makes the
+ * standard editing shortcuts work in native dialogs (file choosers) too. */
+static GMenu *trg_menu_bar_edit_menu_new(void)
+{
+    GMenu *editMenu = g_menu_new();
+    GMenu *section = g_menu_new();
+
+    g_menu_append(section, _("Undo"), "text.undo");
+    g_menu_append(section, _("Redo"), "text.redo");
+    g_menu_append_section(editMenu, NULL, G_MENU_MODEL(section));
+    g_object_unref(section);
+
+    section = g_menu_new();
+    g_menu_append(section, _("Cut"), "clipboard.cut");
+    g_menu_append(section, _("Copy"), "clipboard.copy");
+    g_menu_append(section, _("Paste"), "clipboard.paste");
+    g_menu_append(section, _("Select All"), "selection.select-all");
+    g_menu_append_section(editMenu, NULL, G_MENU_MODEL(section));
+    g_object_unref(section);
+
+    return editMenu;
+}
+
 static void trg_menu_bar_append_submenu(GMenu *menu, const gchar *label, GMenu *submenu)
 {
     g_menu_append_submenu(menu, label, G_MENU_MODEL(submenu));
@@ -466,10 +497,27 @@ static void trg_menu_bar_constructed(GObject *object)
 
     mb->menu = g_menu_new();
     trg_menu_bar_append_submenu(mb->menu, _("_File"), trg_menu_bar_file_file_menu_new(mb));
+    if (trg_is_macos())
+        trg_menu_bar_append_submenu(mb->menu, _("_Edit"), trg_menu_bar_edit_menu_new());
     trg_menu_bar_append_submenu(mb->menu, _("_Torrent"), trg_menu_bar_torrent_menu_new(mb));
     trg_menu_bar_append_submenu(mb->menu, _("_Options"), trg_menu_bar_options_menu_new(mb));
     trg_menu_bar_append_submenu(mb->menu, _("_View"), trg_menu_bar_view_menu_new(mb));
-    trg_menu_bar_append_submenu(mb->menu, _("_Help"), trg_menu_bar_help_menu_new(mb));
+
+    if (trg_is_macos()) {
+        /* macOS adds the window list and tiling items to the Window menu */
+        GMenu *windowMenu = g_menu_new();
+        GMenuItem *item = g_menu_item_new_submenu(_("_Window"), G_MENU_MODEL(windowMenu));
+
+        g_menu_append(windowMenu, _("Minimize"), "app.minimize");
+        g_menu_append(windowMenu, _("Zoom"), "app.zoom");
+
+        g_menu_item_set_attribute(item, "gtk-macos-special", "s", "window-submenu");
+        g_menu_append_item(mb->menu, item);
+        g_object_unref(item);
+        g_object_unref(windowMenu);
+    } else {
+        trg_menu_bar_append_submenu(mb->menu, _("_Help"), trg_menu_bar_help_menu_new(mb));
+    }
 
     trg_menu_bar_connected_change(mb, FALSE);
     trg_menu_bar_torrent_actions_sensitive(mb, FALSE);
@@ -525,30 +573,50 @@ GMenuModel *trg_menu_bar_get_model(TrgMenuBar *mb)
     return G_MENU_MODEL(mb->menu);
 }
 
+/* On macOS, <Primary> means Command, which GTK itself doesn't do (it's
+ * <Meta> there). Returns a newly allocated list. */
+static gchar **trg_menu_bar_platform_accels(const gchar *const *accels, gboolean macos)
+{
+    gchar **result = g_new0(gchar *, g_strv_length((gchar **)accels) + 1);
+    guint i;
+
+    for (i = 0; accels[i]; i++) {
+        if (macos) {
+            g_auto(GStrv) parts = g_strsplit(accels[i], "<Primary>", -1);
+            result[i] = g_strjoinv("<Meta>", parts);
+        } else {
+            result[i] = g_strdup(accels[i]);
+        }
+    }
+
+    return result;
+}
+
 /* Keyboard shortcuts for the menu actions. These are application wide, which
  * is also what makes the menus display them. */
 void trg_menu_bar_set_accels(GtkApplication *app)
 {
-    static const struct {
+    typedef struct {
         const gchar *action;
-        const gchar *accels[2];
-    } accels[] = {
-        { "win.disconnect", { "<Control>d", NULL } },
-        { "win.add", { "<Control>o", NULL } },
-        { "win.add-url", { "<Control>u", NULL } },
-        { "app.quit", { "<Control>q", NULL } },
-        { "win.properties", { "<Control>i", NULL } },
-        { "win.copy-magnet", { "<Control>c", NULL } },
-        { "win.resume", { "<Control>r", NULL } },
-        { "win.pause", { "<Control>p", NULL } },
-        { "win.verify", { "<Control>h", NULL } },
+        const gchar *accels[3];
+    } trg_accel;
+    static const trg_accel accels[] = {
+        { "win.disconnect", { "<Primary>d", NULL } },
+        { "win.add", { "<Primary>o", NULL } },
+        { "win.add-url", { "<Primary>u", NULL } },
+        { "app.quit", { "<Primary>q", NULL } },
+        { "win.properties", { "<Primary>i", NULL } },
+        { "win.copy-magnet", { "<Primary>c", NULL } },
+        { "win.resume", { "<Primary>r", NULL } },
+        { "win.pause", { "<Primary>p", NULL } },
+        { "win.verify", { "<Primary>h", NULL } },
         /* Re-announce also had Ctrl+Q in GTK 3, clashing with Quit */
-        { "win.move", { "<Control>m", NULL } },
+        { "win.move", { "<Primary>m", NULL } },
         { "win.remove", { "Delete", NULL } },
         { "win.delete", { "<Shift>Delete", NULL } },
-        { "win.resume-all", { "<Shift><Control>r", NULL } },
-        { "win.pause-all", { "<Shift><Control>p", NULL } },
-        { "win.local-prefs", { "<Control>s", NULL } },
+        { "win.resume-all", { "<Shift><Primary>r", NULL } },
+        { "win.pause-all", { "<Shift><Primary>p", NULL } },
+        { "win.local-prefs", { "<Primary>s", NULL } },
         { "win.remote-prefs", { "<Alt>s", NULL } },
         { "win.view-states", { "F2", NULL } },
         { "win.filter-dirs", { "F3", NULL } },
@@ -556,10 +624,33 @@ void trg_menu_bar_set_accels(GtkApplication *app)
         { "win.view-notebook", { "F5", NULL } },
         { "win.view-stats", { "F7", NULL } },
     };
+    /* macOS conventions, and moving shortcuts that clash with the standard
+     * ones: Command-C is Copy, Command-H Hide, Command-M Minimize and
+     * Preferences is Command-comma (app.preferences, set by GTK). */
+    static const trg_accel macos_accels[] = {
+        { "win.copy-magnet", { "<Shift><Primary>c", NULL } },
+        { "win.verify", { "<Shift><Primary>v", NULL } },
+        { "win.move", { "<Shift><Primary>m", NULL } },
+        { "win.remove", { "<Primary>BackSpace", "Delete", NULL } },
+        { "win.delete", { "<Alt><Primary>BackSpace", "<Shift>Delete", NULL } },
+        { "win.local-prefs", { NULL } },
+        { "app.close-window", { "<Primary>w", NULL } },
+        { "app.minimize", { "<Primary>m", NULL } },
+    };
+    gboolean macos = trg_is_macos();
     guint i;
 
-    for (i = 0; i < G_N_ELEMENTS(accels); i++)
-        gtk_application_set_accels_for_action(app, accels[i].action, accels[i].accels);
+    for (i = 0; i < G_N_ELEMENTS(accels); i++) {
+        g_auto(GStrv) platform_accels = trg_menu_bar_platform_accels(accels[i].accels, macos);
+        gtk_application_set_accels_for_action(app, accels[i].action,
+                                              (const gchar *const *)platform_accels);
+    }
+
+    for (i = 0; macos && i < G_N_ELEMENTS(macos_accels); i++) {
+        g_auto(GStrv) platform_accels = trg_menu_bar_platform_accels(macos_accels[i].accels, TRUE);
+        gtk_application_set_accels_for_action(app, macos_accels[i].action,
+                                              (const gchar *const *)platform_accels);
+    }
 }
 
 TrgMenuBar *trg_menu_bar_new(TrgMainWindow *win, TrgPrefs *prefs, TrgTorrentTreeView *ttv)

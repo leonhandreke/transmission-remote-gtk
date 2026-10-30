@@ -1749,8 +1749,9 @@ static gboolean window_key_press_handler(GtkEventControllerKey *controller, guin
                                          guint keycode, GdkModifierType state, gpointer user_data)
 {
     TrgMainWindow *win = TRG_MAIN_WINDOW(user_data);
+    GdkModifierType primary = trg_is_macos() ? GDK_META_MASK : GDK_CONTROL_MASK;
 
-    if ((state & GDK_CONTROL_MASK) && (keyval == GDK_KEY_k || keyval == GDK_KEY_f)) {
+    if ((state & primary) && (keyval == GDK_KEY_k || keyval == GDK_KEY_f)) {
         gtk_widget_grab_focus(win->filterEntry);
         return TRUE;
     }
@@ -1785,7 +1786,8 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
     g_signal_connect(G_OBJECT(self), "close-request", G_CALLBACK(close_request), NULL);
     g_signal_connect(G_OBJECT(self), "destroy", G_CALLBACK(destroy_window), NULL);
 
-    /* Ctrl+K/Ctrl+F, before the focus widget gets them like "key-press-event" did */
+    /* Ctrl+K/Ctrl+F (Command-K/F on macOS), before the focus widget gets
+     * them like "key-press-event" did */
     keyController = gtk_event_controller_key_new();
     gtk_event_controller_set_propagation_phase(keyController, GTK_PHASE_CAPTURE);
     g_signal_connect(keyController, "key-pressed", G_CALLBACK(window_key_press_handler), self);
@@ -1816,10 +1818,12 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
 
     gtk_window_set_child(GTK_WINDOW(self), outerVbox);
 
-    /* The menu is a GMenuModel, shown here with a GtkPopoverMenuBar. */
+    /* The menu is a GMenuModel, shown here with a GtkPopoverMenuBar, or in
+     * the macOS menu bar (see trg_gtk_app_startup()). */
     self->menuBar = trg_main_window_menu_bar_new(self);
-    gtk_box_append(GTK_BOX(outerVbox),
-                   gtk_popover_menu_bar_new_from_model(trg_menu_bar_get_model(self->menuBar)));
+    if (!trg_is_macos())
+        gtk_box_append(GTK_BOX(outerVbox),
+                       gtk_popover_menu_bar_new_from_model(trg_menu_bar_get_model(self->menuBar)));
 
     toolbarHbox = trg_hbox_new(FALSE, 0);
     self->toolBar = trg_main_window_toolbar_new(self);
@@ -1925,6 +1929,37 @@ static void trg_main_window_class_init(TrgMainWindowClass *klass)
 void trg_main_window_set_start_args(TrgMainWindow *win, gchar **args)
 {
     win->args = args;
+}
+
+/* Adds torrents (files, URLs or magnet links) opened while running: straight
+ * away if connected, otherwise once connected, like the command line
+ * arguments. Takes ownership of uris. */
+void trg_main_window_open(TrgMainWindow *win, gchar **uris)
+{
+    if (trg_client_is_connected(win->client)) {
+        trg_add_from_filename(win, uris);
+    } else if (win->args) {
+        gchar **args = g_new0(gchar *, g_strv_length(win->args) + g_strv_length(uris) + 1);
+        guint i = 0, j;
+
+        for (j = 0; win->args[j]; j++)
+            args[i++] = win->args[j];
+        for (j = 0; uris[j]; j++)
+            args[i++] = uris[j];
+
+        g_free(win->args);
+        g_free(uris);
+        win->args = args;
+    } else {
+        win->args = uris;
+    }
+
+    gtk_window_present(GTK_WINDOW(win));
+}
+
+GMenuModel *trg_main_window_get_menu_model(TrgMainWindow *win)
+{
+    return trg_menu_bar_get_model(win->menuBar);
 }
 
 void auto_connect_if_required(TrgMainWindow *win)

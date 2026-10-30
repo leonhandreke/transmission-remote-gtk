@@ -40,6 +40,8 @@ void on_generic_interactive_action(TrgMainWindow *win, trg_response *response);
 gboolean on_generic_interactive_action_response(gpointer data);
 void auto_connect_if_required(TrgMainWindow *win);
 void trg_main_window_set_start_args(TrgMainWindow *win, gchar **args);
+void trg_main_window_open(TrgMainWindow *win, gchar **uris);
+GMenuModel *trg_main_window_get_menu_model(TrgMainWindow *win);
 TrgMainWindow *trg_main_window_new(TrgClient *tc);
 TrgStateSelector *trg_main_window_get_state_selector(TrgMainWindow *win);
 gint trg_mw_get_selected_torrent_id(TrgMainWindow *win);

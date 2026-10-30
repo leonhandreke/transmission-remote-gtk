@@ -77,6 +77,7 @@ void rm_trailing_slashes(gchar *str);
 void trg_widget_set_visible(GtkWidget *w, gboolean visible);
 gchar *trg_base64encode(const gchar *filename, GError **error);
 GtkWidget *my_scrolledwin_new(GtkWidget *child);
+gboolean trg_is_macos(void);
 
 /* Returns TRUE if a menu was shown (the click is then consumed). */
 typedef gboolean (*TrgContextMenuFunc)(GtkWidget *widget, gdouble x, gdouble y, gpointer data);

@@ -33,6 +33,10 @@
 #include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
 
+#ifdef GDK_WINDOWING_MACOS
+#include <gdk/macos/gdkmacos.h>
+#endif
+
 #include "util.h"
 
 /***
@@ -351,6 +355,17 @@ static gboolean context_menu_shortcut_cb(GtkWidget *widget, GVariant *args, gpoi
     trg_context_menu_handler *handler = user_data;
 
     return handler->func(widget, -1, -1, handler->data);
+}
+
+/* Whether we're running on GTK's macOS backend, so should follow macOS
+ * conventions (native menu bar, Command key shortcuts, ...). */
+gboolean trg_is_macos(void)
+{
+#ifdef GDK_WINDOWING_MACOS
+    return GDK_IS_MACOS_DISPLAY(gdk_display_get_default());
+#else
+    return FALSE;
+#endif
 }
 
 void trg_widget_add_context_menu(GtkWidget *widget, TrgContextMenuFunc func, gpointer data)
