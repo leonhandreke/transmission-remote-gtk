@@ -25,18 +25,11 @@
 #include "trg-client.h"
 #include "trg-torrent-model.h"
 
-enum {
-    STATE_SELECTOR_ICON,
-    STATE_SELECTOR_NAME,
-    STATE_SELECTOR_COUNT,
-    STATE_SELECTOR_BIT,
-    STATE_SELECTOR_SERIAL,
-    STATE_SELECTOR_INDEX,
-    STATE_SELECTOR_COLUMNS
-};
+/* The filter sidebar: the torrent states with their counts and, after a
+ * separator, the download directories and trackers. */
 
 #define TRG_TYPE_STATE_SELECTOR trg_state_selector_get_type()
-G_DECLARE_FINAL_TYPE(TrgStateSelector, trg_state_selector, TRG, STATE_SELECTOR, GtkTreeView)
+G_DECLARE_FINAL_TYPE(TrgStateSelector, trg_state_selector, TRG, STATE_SELECTOR, GtkWidget)
 
 TrgStateSelector *trg_state_selector_new(TrgClient *client, TrgTorrentModel *tmodel);
 

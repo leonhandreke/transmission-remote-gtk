@@ -140,7 +140,6 @@ struct _TrgMainWindow {
 
     TrgStatusBar *statusBar;
     TrgStateSelector *stateSelector;
-    GtkWidget *stateSelectorScroller;
     TrgGeneralPanel *genDetails;
     GtkWidget *notebook;
 
@@ -737,7 +736,7 @@ static void view_states_toggled_cb(GObject *action, GParamSpec *pspec, gpointer 
 {
     TrgMainWindow *win = TRG_MAIN_WINDOW(data);
 
-    trg_widget_set_visible(win->stateSelectorScroller, action_get_active(action));
+    trg_widget_set_visible(GTK_WIDGET(win->stateSelector), action_get_active(action));
 }
 
 static void view_notebook_toggled_cb(GObject *action, GParamSpec *pspec, gpointer data)
@@ -1797,8 +1796,7 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
     gtk_paned_set_shrink_start_child(GTK_PANED(self->vpaned), TRUE);
 
     self->stateSelector = trg_state_selector_new(self->client, self->torrentModel);
-    self->stateSelectorScroller = my_scrolledwin_new(GTK_WIDGET(self->stateSelector));
-    gtk_paned_set_start_child(GTK_PANED(self->hpaned), self->stateSelectorScroller);
+    gtk_paned_set_start_child(GTK_PANED(self->hpaned), GTK_WIDGET(self->stateSelector));
     gtk_paned_set_resize_start_child(GTK_PANED(self->hpaned), FALSE);
     gtk_paned_set_shrink_start_child(GTK_PANED(self->hpaned), FALSE);
 
@@ -1808,6 +1806,8 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
 
     g_signal_connect(G_OBJECT(self->stateSelector), "torrent-state-changed",
                      G_CALLBACK(torrent_state_selection_changed), self);
+    /* the restored filter */
+    trg_main_window_refilter(self);
 
     self->notebook = trg_main_window_notebook_new(self);
     gtk_paned_set_end_child(GTK_PANED(self->vpaned), self->notebook);
@@ -1838,7 +1838,7 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
         gtk_paned_set_position(GTK_PANED(self->vpaned), pos);
 
     trg_widget_set_visible(
-        self->stateSelectorScroller,
+        GTK_WIDGET(self->stateSelector),
         trg_prefs_get_bool(prefs, TRG_PREFS_KEY_SHOW_STATE_SELECTOR, TRG_PREFS_GLOBAL));
     trg_widget_set_visible(
         self->notebook, trg_prefs_get_bool(prefs, TRG_PREFS_KEY_SHOW_NOTEBOOK, TRG_PREFS_GLOBAL));

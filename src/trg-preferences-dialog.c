@@ -296,9 +296,8 @@ static void menu_bar_toggle_filter_dirs(GtkCheckButton *w, gpointer win)
 
 static void view_states_toggled_cb(GtkCheckButton *w, gpointer data)
 {
-    GtkWidget *scroll = gtk_widget_get_parent(
-        GTK_WIDGET(trg_main_window_get_state_selector(TRG_MAIN_WINDOW(data))));
-    trg_widget_set_visible(scroll, gtk_check_button_get_active(w));
+    trg_widget_set_visible(GTK_WIDGET(trg_main_window_get_state_selector(TRG_MAIN_WINDOW(data))),
+                           gtk_check_button_get_active(w));
 }
 
 static void notebook_toggled_cb(GtkCheckButton *b, gpointer data)

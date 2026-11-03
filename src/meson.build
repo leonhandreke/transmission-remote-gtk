@@ -9,7 +9,6 @@ src_files = files(
   'torrent-row.c',
   'torrent.c',
   'trg-about-window.c',
-  'trg-cell-renderer-counter.c',
   'trg-cell-renderer-epoch.c',
   'trg-cell-renderer-eta.c',
   'trg-cell-renderer-file-icon.c',

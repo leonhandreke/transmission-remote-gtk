@@ -24,7 +24,6 @@
 #include <stdint.h>
 
 #include "protocol-constants.h"
-#include "trg-cell-renderer-counter.h"
 #include "trg-cell-renderer-wanted.h"
 #include "trg-files-model.h"
 #include "util.h"
