@@ -34,13 +34,11 @@
 #include "protocol-constants.h"
 #include "requests.h"
 #include "torrent.h"
-#include "trg-cell-renderer-file-icon.h"
-#include "trg-cell-renderer-priority.h"
-#include "trg-cell-renderer-size.h"
-#include "trg-cell-renderer-wanted.h"
 #include "trg-client.h"
 #include "trg-destination-combo.h"
 #include "trg-file-parser.h"
+#include "trg-files-model.h"
+#include "trg-files-tree-view.h"
 #include "trg-main-window.h"
 #include "trg-prefs.h"
 #include "trg-torrent-add-dialog.h"
@@ -55,15 +53,6 @@ enum {
     PROP_UPLOAD
 };
 
-enum {
-    FC_INDEX,
-    FC_LABEL,
-    FC_SIZE,
-    FC_PRIORITY,
-    FC_ENABLED,
-    N_FILE_COLS
-};
-
 struct _TrgTorrentAddDialog {
     TrgDialog parent;
 
@@ -75,10 +64,9 @@ struct _TrgTorrentAddDialog {
     GtkWidget *dest_combo;
     GtkWidget *priority_combo;
     GtkWidget *file_list;
-    GtkTreeStore *store;
+    TrgFilesModel *files_model;
     GtkWidget *paused_check;
     GtkWidget *delete_check;
-    guint n_files;
 };
 
 G_DEFINE_TYPE(TrgTorrentAddDialog, trg_torrent_add_dialog, TRG_TYPE_DIALOG)
@@ -125,22 +113,24 @@ static void trg_torrent_add_dialog_get_property(GObject *object, guint prop_id, 
     }
 }
 
-static gboolean add_file_indexes_foreachfunc(GtkTreeModel *model, GtkTreePath *path G_GNUC_UNUSED,
-                                             GtkTreeIter *iter, gpointer data)
+/* The wanted state and priority of each file of the torrent */
+static void trg_torrent_add_dialog_get_file_prefs(TrgTorrentAddDialog *d, trg_upload *upload)
 {
-    trg_upload *upload = (trg_upload *)data;
-    gint priority, index, wanted;
+    guint i, n = trg_files_model_get_n_files(d->files_model);
 
-    gtk_tree_model_get(model, iter, FC_PRIORITY, &priority, FC_ENABLED, &wanted, FC_INDEX, &index,
-                       -1);
+    upload->n_files = n;
+    upload->file_priorities = g_new0(gint, n);
+    upload->file_wanted = g_new0(gint, n);
 
-    if (gtk_tree_model_iter_has_child(model, iter) || index < 0)
-        return FALSE;
+    for (i = 0; i < n; i++) {
+        TrgFileItem *item = trg_files_model_get_file(d->files_model, i);
 
-    upload->file_wanted[index] = wanted;
-    upload->file_priorities[index] = priority;
+        if (!item)
+            continue;
 
-    return FALSE;
+        upload->file_wanted[i] = trg_item_get_int(item, FILESCOL_WANTED);
+        upload->file_priorities[i] = trg_item_get_int(item, FILESCOL_PRIORITY);
+    }
 }
 
 static void trg_torrent_add_response_cb(TrgDialog *dlg, gint res_id, gpointer data)
@@ -171,11 +161,7 @@ static void trg_torrent_add_response_cb(TrgDialog *dlg, gint res_id, gpointer da
         upload->flags = flags;
         upload->extra_args = TRUE;
 
-        upload->n_files = d->n_files;
-        upload->file_priorities = g_new0(gint, d->n_files);
-        upload->file_wanted = g_new0(gint, d->n_files);
-
-        gtk_tree_model_foreach(GTK_TREE_MODEL(d->store), add_file_indexes_foreachfunc, upload);
+        trg_torrent_add_dialog_get_file_prefs(d, upload);
 
         trg_do_upload(upload);
 
@@ -185,514 +171,6 @@ static void trg_torrent_add_response_cb(TrgDialog *dlg, gint res_id, gpointer da
     }
 
     gtk_window_destroy(GTK_WINDOW(dlg));
-}
-
-/* The GtkTreeView files helpers, which were shared with the files tree
- * view, until this dialog is ported to TrgFilesTreeView (unit D). */
-
-static void trg_files_tree_model_set_subtree(GtkTreeModel *model, GtkTreePath *path,
-                                             GtkTreeIter *iter, gint column, gint new_value);
-
-struct SubtreeForeachData {
-    gint column;
-    gint new_value;
-    GtkTreePath *path;
-};
-
-static void set_wanted_foreachfunc(GtkTreeModel *model, GtkTreePath *path G_GNUC_UNUSED,
-                                   GtkTreeIter *iter, gpointer data)
-{
-    struct SubtreeForeachData *args = (struct SubtreeForeachData *)data;
-
-    gtk_tree_store_set(GTK_TREE_STORE(model), iter, args->column, args->new_value, -1);
-
-    trg_files_tree_model_set_subtree(model, path, iter, args->column, args->new_value);
-}
-
-static void set_priority_foreachfunc(GtkTreeModel *model, GtkTreePath *path, GtkTreeIter *iter,
-                                     gpointer data)
-{
-    struct SubtreeForeachData *args = (struct SubtreeForeachData *)data;
-    GValue value = { 0 };
-
-    g_value_init(&value, G_TYPE_INT);
-    g_value_set_int(&value, args->new_value);
-
-    gtk_tree_store_set_value(GTK_TREE_STORE(model), iter, args->column, &value);
-
-    trg_files_tree_model_set_subtree(model, path, iter, args->column, args->new_value);
-}
-
-static void trg_files_model_set_wanted(GtkTreeView *tv, gint column, gint new_value)
-{
-    struct SubtreeForeachData args;
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(tv);
-
-    args.column = column;
-    args.new_value = new_value;
-
-    gtk_tree_selection_selected_foreach(selection, set_wanted_foreachfunc, &args);
-}
-
-static void trg_files_tree_model_set_priority(GtkTreeView *tv, gint column, gint new_value)
-{
-    struct SubtreeForeachData args;
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(tv);
-
-    args.column = column;
-    args.new_value = new_value;
-
-    gtk_tree_selection_selected_foreach(selection, set_priority_foreachfunc, &args);
-}
-
-static gboolean setSubtreeForeach(GtkTreeModel *model, GtkTreePath *path, GtkTreeIter *iter,
-                                  gpointer gdata)
-{
-    struct SubtreeForeachData *data = gdata;
-
-    if (!gtk_tree_path_compare(path, data->path) || gtk_tree_path_is_descendant(path, data->path)) {
-        GValue value = { 0 };
-
-        g_value_init(&value, G_TYPE_INT);
-        g_value_set_int(&value, data->new_value);
-
-        gtk_tree_store_set_value(GTK_TREE_STORE(model), iter, data->column, &value);
-    }
-
-    return FALSE; /* keep walking */
-}
-
-static void trg_files_tree_model_propogate_change_up(GtkTreeModel *model, GtkTreeIter *iter,
-                                                     gint column, gint new_value)
-{
-    GtkTreeIter back_iter = *iter;
-    gint result = new_value;
-
-    while (1) {
-        GtkTreeIter tmp_iter;
-        gint n_children, i;
-
-        if (!gtk_tree_model_iter_parent(model, &tmp_iter, &back_iter))
-            break;
-
-        n_children = gtk_tree_model_iter_n_children(model, &tmp_iter);
-
-        for (i = 0; i < n_children; i++) {
-            GtkTreeIter child;
-            gint current_value;
-
-            if (!gtk_tree_model_iter_nth_child(model, &child, &tmp_iter, i))
-                continue;
-
-            gtk_tree_model_get(model, &child, column, &current_value, -1);
-            if (current_value != new_value) {
-                result = TR_PRI_MIXED;
-                break;
-            }
-        }
-
-        gtk_tree_store_set(GTK_TREE_STORE(model), &tmp_iter, column, result, -1);
-
-        back_iter = tmp_iter;
-    }
-}
-
-static void trg_files_tree_model_set_subtree(GtkTreeModel *model, GtkTreePath *path,
-                                             GtkTreeIter *iter, gint column, gint new_value)
-{
-    GtkTreeIter back_iter = *iter;
-
-    if (gtk_tree_model_iter_has_child(model, iter)) {
-        struct SubtreeForeachData tmp;
-
-        tmp.column = column;
-        tmp.new_value = new_value;
-        tmp.path = path;
-
-        gtk_tree_model_foreach(model, setSubtreeForeach, &tmp);
-    } else {
-        gtk_tree_store_set(GTK_TREE_STORE(model), &back_iter, column, new_value, -1);
-    }
-
-    trg_files_tree_model_propogate_change_up(model, iter, column, new_value);
-}
-
-typedef void (*TrgFilesMenuCallback)(GtkWidget *w, gpointer data);
-
-static void expand_all_cb(GtkWidget *w, gpointer data)
-{
-    gtk_tree_view_expand_all(GTK_TREE_VIEW(data));
-}
-
-static void collapse_all_cb(GtkWidget *w, gpointer data)
-{
-    gtk_tree_view_collapse_all(GTK_TREE_VIEW(data));
-}
-
-static unsigned get_selected_rows_count(GtkTreeView *tv)
-{
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(tv);
-    return gtk_tree_selection_count_selected_rows(selection);
-}
-
-static void files_menu_action_cb(GSimpleAction *action, GVariant *parameter, gpointer treeview)
-{
-    TrgFilesMenuCallback cb
-        = (TrgFilesMenuCallback)g_object_get_data(G_OBJECT(action), "trg-files-menu-cb");
-
-    cb(NULL, treeview);
-}
-
-static void files_menu_append(GMenu *menu, GActionMap *actions, const gchar *name,
-                              const gchar *label, GCallback cb, GtkWidget *treeview,
-                              gboolean sensitive)
-{
-    GSimpleAction *action = g_simple_action_new(name, NULL);
-    gchar *detailed = g_strconcat("files.", name, NULL);
-
-    g_object_set_data(G_OBJECT(action), "trg-files-menu-cb", (gpointer)cb);
-    g_signal_connect(action, "activate", G_CALLBACK(files_menu_action_cb), treeview);
-    g_simple_action_set_enabled(action, sensitive);
-    g_action_map_add_action(actions, G_ACTION(action));
-    g_object_unref(action);
-
-    g_menu_append(menu, label, detailed);
-    g_free(detailed);
-}
-
-static void view_popup_menu(GtkWidget *treeview, gdouble x, gdouble y, GCallback rename_cb,
-                            GCallback low_cb, GCallback normal_cb, GCallback high_cb,
-                            GCallback wanted_cb, GCallback unwanted_cb, gpointer data G_GNUC_UNUSED)
-{
-    GSimpleActionGroup *actions = g_simple_action_group_new();
-    GActionMap *map = G_ACTION_MAP(actions);
-    GMenu *menu = g_menu_new();
-    GMenu *section;
-
-    if (rename_cb) {
-        section = g_menu_new();
-        /* Rename on multiple files currently not supported */
-        files_menu_append(section, map, "rename", _("Rename..."), rename_cb, treeview,
-                          get_selected_rows_count(GTK_TREE_VIEW(treeview)) == 1);
-        g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-        g_object_unref(section);
-    }
-
-    section = g_menu_new();
-    files_menu_append(section, map, "priority-high", _("High Priority"), high_cb, treeview, TRUE);
-    files_menu_append(section, map, "priority-normal", _("Normal Priority"), normal_cb, treeview,
-                      TRUE);
-    files_menu_append(section, map, "priority-low", _("Low Priority"), low_cb, treeview, TRUE);
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    section = g_menu_new();
-    files_menu_append(section, map, "wanted", _("Download"), wanted_cb, treeview, TRUE);
-    files_menu_append(section, map, "unwanted", _("Skip"), unwanted_cb, treeview, TRUE);
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    section = g_menu_new();
-    files_menu_append(section, map, "expand-all", _("Expand All"), G_CALLBACK(expand_all_cb),
-                      treeview, TRUE);
-    files_menu_append(section, map, "collapse-all", _("Collapse All"), G_CALLBACK(collapse_all_cb),
-                      treeview, TRUE);
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    trg_popover_menu_popup(treeview, G_MENU_MODEL(menu), x, y, "files", G_ACTION_GROUP(actions));
-
-    g_object_unref(menu);
-    g_object_unref(actions);
-}
-
-static gboolean trg_files_tree_view_viewOnPopupMenu(GtkWidget *treeview, GCallback rename_cb,
-                                                    GCallback low_cb, GCallback normal_cb,
-                                                    GCallback high_cb, GCallback wanted_cb,
-                                                    GCallback unwanted_cb, gpointer userdata)
-{
-    view_popup_menu(treeview, -1, -1, rename_cb, low_cb, normal_cb, high_cb, wanted_cb, unwanted_cb,
-                    userdata);
-    return TRUE;
-}
-
-static gboolean onViewPathToggled(GtkTreeView *view, GtkTreeViewColumn *col, GtkTreePath *path,
-                                  gint pri_id, gint enabled_id, gpointer data)
-{
-    int cid;
-    gboolean handled = FALSE;
-
-    if (!col || !path)
-        return FALSE;
-
-    cid = gtk_tree_view_column_get_sort_column_id(col);
-    if ((cid == pri_id) || (cid == enabled_id)) {
-        GtkTreeIter iter;
-        GtkTreeModel *model = gtk_tree_view_get_model(view);
-
-        gtk_tree_model_get_iter(model, &iter, path);
-
-        if (cid == pri_id) {
-            int priority;
-            gtk_tree_model_get(model, &iter, pri_id, &priority, -1);
-            switch (priority) {
-            case TR_PRI_NORMAL:
-                priority = TR_PRI_HIGH;
-                break;
-            case TR_PRI_HIGH:
-                priority = TR_PRI_LOW;
-                break;
-            default:
-                priority = TR_PRI_NORMAL;
-                break;
-            }
-            trg_files_tree_model_set_subtree(model, path, &iter, pri_id, priority);
-        } else if (cid == enabled_id) {
-            int enabled;
-            gtk_tree_model_get(model, &iter, enabled_id, &enabled, -1);
-            enabled = !enabled;
-
-            trg_files_tree_model_set_subtree(model, path, &iter, enabled_id, enabled);
-        }
-
-        handled = TRUE;
-    }
-
-    return handled;
-}
-
-static gboolean getAndSelectEventPath(GtkTreeView *treeview, gint bx, gint by,
-                                      GtkTreeViewColumn **col, GtkTreePath **path)
-{
-    GtkTreeSelection *sel;
-
-    if (gtk_tree_view_get_path_at_pos(treeview, bx, by, path, col, NULL, NULL)) {
-        sel = gtk_tree_view_get_selection(treeview);
-        if (!gtk_tree_selection_path_is_selected(sel, *path)) {
-            gtk_tree_selection_unselect_all(sel);
-            gtk_tree_selection_select_path(sel, *path);
-        }
-        return TRUE;
-    }
-
-    return FALSE;
-}
-
-static gboolean trg_files_tree_view_onViewButtonPressed(
-    GtkWidget *w, guint button, GdkModifierType state, gdouble x, gdouble y, gint pri_id,
-    gint enabled_id, GCallback rename_cb, GCallback low_cb, GCallback normal_cb, GCallback high_cb,
-    GCallback wanted_cb, GCallback unwanted_cb, gpointer gdata)
-{
-    GtkTreeViewColumn *col = NULL;
-    GtkTreePath *path = NULL;
-    GtkTreeSelection *selection;
-    gboolean handled = FALSE;
-    GtkTreeView *treeview = GTK_TREE_VIEW(w);
-    gint bx, by;
-
-    /* event coordinates are relative to the widget, not the bin window */
-    gtk_tree_view_convert_widget_to_bin_window_coords(treeview, (gint)x, (gint)y, &bx, &by);
-
-    if (button == GDK_BUTTON_PRIMARY && !(state & (GDK_SHIFT_MASK | GDK_CONTROL_MASK))
-        && getAndSelectEventPath(treeview, bx, by, &col, &path)) {
-        handled = onViewPathToggled(treeview, col, path, pri_id, enabled_id, NULL);
-    } else if (button == GDK_BUTTON_SECONDARY) {
-        selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(treeview));
-
-        if (gtk_tree_view_get_path_at_pos(GTK_TREE_VIEW(treeview), bx, by, &path, NULL, NULL,
-                                          NULL)) {
-            if (!gtk_tree_selection_path_is_selected(selection, path)) {
-                gtk_tree_selection_unselect_all(selection);
-                gtk_tree_selection_select_path(selection, path);
-            }
-
-            view_popup_menu(w, x, y, rename_cb, low_cb, normal_cb, high_cb, wanted_cb, unwanted_cb,
-                            gdata);
-            handled = TRUE;
-        }
-    }
-
-    gtk_tree_path_free(path);
-
-    return handled;
-}
-
-static void set_low(GtkWidget *w G_GNUC_UNUSED, gpointer data)
-{
-    trg_files_tree_model_set_priority(GTK_TREE_VIEW(data), FC_PRIORITY, TR_PRI_LOW);
-}
-
-static void set_normal(GtkWidget *w G_GNUC_UNUSED, gpointer data)
-{
-    trg_files_tree_model_set_priority(GTK_TREE_VIEW(data), FC_PRIORITY, TR_PRI_NORMAL);
-}
-
-static void set_high(GtkWidget *w G_GNUC_UNUSED, gpointer data)
-{
-    trg_files_tree_model_set_priority(GTK_TREE_VIEW(data), FC_PRIORITY, TR_PRI_HIGH);
-}
-
-static void set_unwanted(GtkWidget *w G_GNUC_UNUSED, gpointer data)
-{
-    trg_files_model_set_wanted(GTK_TREE_VIEW(data), FC_ENABLED, FALSE);
-}
-
-static void set_wanted(GtkWidget *w G_GNUC_UNUSED, gpointer data)
-{
-    trg_files_model_set_wanted(GTK_TREE_VIEW(data), FC_ENABLED, TRUE);
-}
-
-static void onViewButtonPressed(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
-                                gpointer gdata)
-{
-    GtkWidget *w = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
-
-    if (n_press != 1)
-        return;
-
-    if (trg_files_tree_view_onViewButtonPressed(
-            w, gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture)),
-            gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(gesture)), x, y,
-            FC_PRIORITY, FC_ENABLED, NULL, /* no rename */
-            G_CALLBACK(set_low), G_CALLBACK(set_normal), G_CALLBACK(set_high),
-            G_CALLBACK(set_wanted), G_CALLBACK(set_unwanted), gdata))
-        gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
-}
-
-static gboolean onViewPopupMenu(GtkWidget *w, GVariant *args, gpointer gdata)
-{
-    return trg_files_tree_view_viewOnPopupMenu(w, NULL, /* no rename */
-                                               G_CALLBACK(set_low), G_CALLBACK(set_normal),
-                                               G_CALLBACK(set_high), G_CALLBACK(set_wanted),
-                                               G_CALLBACK(set_unwanted), gdata);
-}
-
-static GtkWidget *gtr_file_list_new(GtkTreeStore **store)
-{
-    int size;
-    int width;
-    GtkWidget *view;
-    GtkWidget *scroll;
-    GtkGesture *gesture;
-    GtkEventController *shortcuts;
-    GtkCellRenderer *rend;
-    GtkTreeSelection *sel;
-    GtkTreeViewColumn *col;
-    GtkTreeView *tree_view;
-    const char *title;
-    PangoLayout *pango_layout;
-    PangoContext *pango_context;
-    PangoFontDescription *pango_font_description;
-
-    /* create the view */
-    view = gtk_tree_view_new();
-    tree_view = GTK_TREE_VIEW(view);
-    gtk_widget_set_margin_start(view, GUI_PAD_BIG);
-    gtk_widget_set_margin_end(view, GUI_PAD_BIG);
-    gtk_widget_set_margin_top(view, GUI_PAD_BIG);
-    gtk_widget_set_margin_bottom(view, GUI_PAD_BIG);
-
-    gesture = gtk_gesture_click_new();
-    gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), 0);
-    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(gesture), GTK_PHASE_CAPTURE);
-    g_signal_connect(gesture, "pressed", G_CALLBACK(onViewButtonPressed), view);
-    gtk_widget_add_controller(view, GTK_EVENT_CONTROLLER(gesture));
-
-    shortcuts = gtk_shortcut_controller_new();
-    gtk_shortcut_controller_add_shortcut(
-        GTK_SHORTCUT_CONTROLLER(shortcuts),
-        gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Shift>F10|Menu"),
-                         gtk_callback_action_new(onViewPopupMenu, view, NULL)));
-    gtk_widget_add_controller(view, shortcuts);
-
-    pango_context = gtk_widget_create_pango_context(view);
-    pango_font_description
-        = pango_font_description_copy(pango_context_get_font_description(pango_context));
-    size = pango_font_description_get_size(pango_font_description);
-    pango_font_description_set_size(pango_font_description, size * 0.8);
-    g_object_unref(G_OBJECT(pango_context));
-
-    /* set up view */
-    sel = gtk_tree_view_get_selection(tree_view);
-    gtk_tree_selection_set_mode(sel, GTK_SELECTION_MULTIPLE);
-    gtk_tree_view_expand_all(tree_view);
-    gtk_tree_view_set_search_column(tree_view, FC_LABEL);
-
-    /* add file column */
-    col = GTK_TREE_VIEW_COLUMN(
-        g_object_new(GTK_TYPE_TREE_VIEW_COLUMN, "expand", TRUE, "title", _("Name"), NULL));
-    gtk_tree_view_column_set_resizable(col, TRUE);
-    rend = trg_cell_renderer_file_icon_new();
-    gtk_tree_view_column_pack_start(col, rend, FALSE);
-    gtk_tree_view_column_set_attributes(col, rend, "file-name", FC_LABEL, "file-id", FC_INDEX,
-                                        NULL);
-
-    /* add text renderer */
-    rend = gtk_cell_renderer_text_new();
-    g_object_set(rend, "ellipsize", PANGO_ELLIPSIZE_END, "font-desc", pango_font_description, NULL);
-    gtk_tree_view_column_pack_start(col, rend, TRUE);
-    gtk_tree_view_column_set_attributes(col, rend, "text", FC_LABEL, NULL);
-    gtk_tree_view_column_set_sort_column_id(col, FC_LABEL);
-    gtk_tree_view_append_column(tree_view, col);
-
-    /* add "size" column */
-
-    title = _("Size");
-    rend = trg_cell_renderer_size_new();
-    g_object_set(rend, "alignment", PANGO_ALIGN_RIGHT, "font-desc", pango_font_description, "xpad",
-                 GUI_PAD, "xalign", 1.0f, "yalign", 0.5f, NULL);
-    col = gtk_tree_view_column_new_with_attributes(title, rend, NULL);
-    gtk_tree_view_column_set_sizing(col, GTK_TREE_VIEW_COLUMN_GROW_ONLY);
-    gtk_tree_view_column_set_sort_column_id(col, FC_SIZE);
-    gtk_tree_view_column_set_attributes(col, rend, "size-value", FC_SIZE, NULL);
-    gtk_tree_view_append_column(tree_view, col);
-
-    /* add "enabled" column */
-    title = _("Download");
-    pango_layout = gtk_widget_create_pango_layout(view, title);
-    pango_layout_get_pixel_size(pango_layout, &width, NULL);
-    width += 30; /* room for the sort indicator */
-    g_object_unref(G_OBJECT(pango_layout));
-    rend = trg_cell_renderer_wanted_new();
-    col = gtk_tree_view_column_new_with_attributes(title, rend, "wanted-value", FC_ENABLED, NULL);
-    gtk_tree_view_column_set_fixed_width(col, width);
-    gtk_tree_view_column_set_sizing(col, GTK_TREE_VIEW_COLUMN_FIXED);
-    gtk_tree_view_column_set_sort_column_id(col, FC_ENABLED);
-    gtk_tree_view_append_column(tree_view, col);
-
-    /* add priority column */
-    title = _("Priority");
-    pango_layout = gtk_widget_create_pango_layout(view, title);
-    pango_layout_get_pixel_size(pango_layout, &width, NULL);
-    width += 30; /* room for the sort indicator */
-    g_object_unref(G_OBJECT(pango_layout));
-    rend = trg_cell_renderer_priority_new();
-    col = gtk_tree_view_column_new_with_attributes(title, rend, "priority-value", FC_PRIORITY,
-                                                   NULL);
-    gtk_tree_view_column_set_fixed_width(col, width);
-    gtk_tree_view_column_set_sizing(col, GTK_TREE_VIEW_COLUMN_FIXED);
-    gtk_tree_view_column_set_sort_column_id(col, FC_PRIORITY);
-    gtk_tree_view_append_column(tree_view, col);
-
-    *store = gtk_tree_store_new(N_FILE_COLS, G_TYPE_INT, /* index */
-                                G_TYPE_STRING, /* label */
-                                G_TYPE_INT64, /* size */
-                                G_TYPE_INT, /* priority */
-                                G_TYPE_INT); /* dl enabled */
-
-    gtk_tree_view_set_model(tree_view, GTK_TREE_MODEL(*store));
-    g_object_unref(G_OBJECT(*store));
-
-    /* create the scrolled window and stick the view in it */
-    scroll = gtk_scrolled_window_new();
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_AUTOMATIC,
-                                   GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_has_frame(GTK_SCROLLED_WINDOW(scroll), TRUE);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), view);
-    gtk_widget_set_size_request(scroll, -1, 200);
-
-    pango_font_description_free(pango_font_description);
-    return scroll;
 }
 
 static void gtr_dialog_set_content(TrgDialog *dialog, GtkWidget *content)
@@ -730,25 +208,6 @@ static void addTorrentFilters(GtkFileDialog *dialog)
     g_object_unref(filters);
 }
 
-static void store_add_node(GtkTreeStore *store, GtkTreeIter *parent, trg_files_tree_node *node,
-                           guint *n_files)
-{
-    GtkTreeIter child;
-    GList *li;
-
-    if (node->name) {
-        gtk_tree_store_append(store, &child, parent);
-        gtk_tree_store_set(store, &child, FC_LABEL, node->name, FC_ENABLED, 1, FC_INDEX,
-                           node->index, FC_PRIORITY, TR_PRI_NORMAL, FC_SIZE, node->length, -1);
-
-        if (!node->children)
-            *n_files = *n_files + 1;
-    }
-
-    for (li = node->children; li; li = g_list_next(li))
-        store_add_node(store, node->name ? &child : NULL, (trg_files_tree_node *)li->data, n_files);
-}
-
 static void torrent_not_found_error(GtkWindow *parent, gchar *file)
 {
     gchar *msg = g_strdup_printf(_("Unable to open torrent file: %s"), file);
@@ -762,7 +221,7 @@ static void trg_torrent_add_dialog_set_filenames(TrgTorrentAddDialog *d, GSList 
     GtkButton *chooser = GTK_BUTTON(d->source_chooser);
     gint nfiles = filenames ? g_slist_length(filenames) : 0;
 
-    gtk_tree_store_clear(d->store);
+    trg_files_model_clear(d->files_model);
 
     if (d->upload) {
         trg_upload_free(d->upload);
@@ -802,11 +261,12 @@ static void trg_torrent_add_dialog_set_filenames(TrgTorrentAddDialog *d, GSList 
                 if (!tor_data) {
                     if (error) {
                         trg_error_dialog(GTK_WINDOW(d->parent_win), error->message);
+                        g_str_slist_free(filenames);
                         d->filenames = NULL;
                         return;
                     }
                 } else {
-                    store_add_node(d->store, NULL, tor_data->top_node, &d->n_files);
+                    trg_files_model_set_tree(d->files_model, tor_data->top_node);
                     trg_torrent_file_free(tor_data);
                 }
             } else {
@@ -905,60 +365,88 @@ static void trg_torrent_add_dialog_source_click_cb(GtkWidget *w, gpointer data)
     g_object_unref(dialog);
 }
 
-static gboolean apply_all_changed_foreachfunc(GtkTreeModel *model, GtkTreePath *path,
-                                              GtkTreeIter *iter, gpointer data)
-{
-    GtkComboBox *combo = GTK_COMBO_BOX(data);
-    GtkTreeModel *combo_model = gtk_combo_box_get_model(combo);
-    GtkTreeIter selection_iter;
-    if (gtk_combo_box_get_active_iter(combo, &selection_iter)) {
-        gint column;
-        gint value;
-        GValue gvalue = { 0 };
-        g_value_init(&gvalue, G_TYPE_INT);
-        gtk_tree_model_get(combo_model, &selection_iter, 2, &column, 3, &value, -1);
-        g_value_set_int(&gvalue, value);
-        gtk_tree_store_set_value(GTK_TREE_STORE(model), iter, column, &gvalue);
-    }
-    return FALSE;
-}
+/* The choices of "Apply to all", in the order of the drop down */
+static const struct {
+    const gchar *label;
+    gint column;
+    gint value;
+} apply_all_choices[] = {
+    { N_("High Priority"), FILESCOL_PRIORITY, TR_PRI_HIGH },
+    { N_("Normal Priority"), FILESCOL_PRIORITY, TR_PRI_NORMAL },
+    { N_("Low Priority"), FILESCOL_PRIORITY, TR_PRI_LOW },
+    { N_("Download"), FILESCOL_WANTED, TRUE },
+    { N_("Skip"), FILESCOL_WANTED, FALSE },
+};
 
-static void trg_torrent_add_dialog_apply_all_changed_cb(GtkWidget *w, gpointer data)
+static void trg_torrent_add_dialog_apply_all_cb(GSimpleAction *action, GVariant *parameter,
+                                                gpointer data)
 {
     TrgTorrentAddDialog *d = TRG_TORRENT_ADD_DIALOG(data);
-    GtkWidget *tv = gtk_scrolled_window_get_child(GTK_SCROLLED_WINDOW(d->file_list));
-    GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(tv));
-    gtk_tree_model_foreach(model, apply_all_changed_foreachfunc, w);
-    gtk_combo_box_set_active(GTK_COMBO_BOX(w), -1);
+    GListModel *top = G_LIST_MODEL(d->files_model);
+    gint choice = g_variant_get_int32(parameter);
+    guint i;
+
+    if (choice < 0 || choice >= (gint)G_N_ELEMENTS(apply_all_choices))
+        return;
+
+    for (i = 0; i < g_list_model_get_n_items(top); i++) {
+        g_autoptr(TrgFileItem) item = g_list_model_get_item(top, i);
+
+        if (apply_all_choices[choice].column == FILESCOL_WANTED)
+            trg_file_item_set_wanted(item, apply_all_choices[choice].value);
+        else
+            trg_file_item_set_priority(item, apply_all_choices[choice].value);
+    }
+
+    trg_tree_view_resort(TRG_TREE_VIEW(d->file_list));
 }
 
-static GtkWidget *trg_torrent_add_dialog_apply_all_combo_new(TrgTorrentAddDialog *dialog)
+/* "Apply to all" is an action rather than a setting, so a menu button */
+static GtkWidget *trg_torrent_add_dialog_apply_all_new(TrgTorrentAddDialog *dialog)
 {
-    GtkListStore *model = gtk_list_store_new(3, G_TYPE_STRING, G_TYPE_UINT, G_TYPE_INT);
-    GtkWidget *combo = gtk_combo_box_new();
-    GtkTreeIter iter;
-    GtkCellRenderer *renderer;
+    static const GActionEntry entries[] = {
+        { "apply-all", trg_torrent_add_dialog_apply_all_cb, "i", NULL, NULL, { 0 } },
+    };
+    GSimpleActionGroup *actions = g_simple_action_group_new();
+    GMenu *menu = g_menu_new();
+    GMenu *section = NULL;
+    GtkWidget *button = gtk_menu_button_new();
+    gint i;
 
-    gtk_list_store_append(model, &iter);
-    gtk_list_store_set(model, &iter, 0, _("High Priority"), 1, FC_PRIORITY, 2, TR_PRI_HIGH, -1);
-    gtk_list_store_append(model, &iter);
-    gtk_list_store_set(model, &iter, 0, _("Normal Priority"), 1, FC_PRIORITY, 2, TR_PRI_NORMAL, -1);
-    gtk_list_store_append(model, &iter);
-    gtk_list_store_set(model, &iter, 0, _("Low Priority"), 1, FC_PRIORITY, 2, TR_PRI_LOW, -1);
-    gtk_list_store_append(model, &iter);
-    gtk_list_store_set(model, &iter, 0, _("Download"), 1, FC_ENABLED, 2, TRUE, -1);
-    gtk_list_store_append(model, &iter);
-    gtk_list_store_set(model, &iter, 0, _("Skip"), 1, FC_ENABLED, 2, FALSE, -1);
+    g_action_map_add_action_entries(G_ACTION_MAP(actions), entries, G_N_ELEMENTS(entries), dialog);
+    gtk_widget_insert_action_group(GTK_WIDGET(dialog), "add", G_ACTION_GROUP(actions));
+    g_object_unref(actions);
 
-    renderer = gtk_cell_renderer_text_new();
-    gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(combo), renderer, FALSE);
-    gtk_cell_layout_add_attribute(GTK_CELL_LAYOUT(combo), renderer, "text", 0);
+    for (i = 0; i < (gint)G_N_ELEMENTS(apply_all_choices); i++) {
+        GMenuItem *item = g_menu_item_new(_(apply_all_choices[i].label), NULL);
 
-    gtk_combo_box_set_model(GTK_COMBO_BOX(combo), GTK_TREE_MODEL(model));
-    g_signal_connect(combo, "changed", G_CALLBACK(trg_torrent_add_dialog_apply_all_changed_cb),
-                     dialog);
+        /* the priorities, then download/skip */
+        if (!section || (i > 0 && apply_all_choices[i].column != apply_all_choices[i - 1].column)) {
+            if (section) {
+                g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+                g_object_unref(section);
+            }
+            section = g_menu_new();
+        }
 
-    return combo;
+        g_menu_item_set_action_and_target_value(item, "add.apply-all", g_variant_new_int32(i));
+        g_menu_append_item(section, item);
+        g_object_unref(item);
+    }
+
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+    g_object_unref(section);
+
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(button), G_MENU_MODEL(menu));
+    gtk_menu_button_set_always_show_arrow(GTK_MENU_BUTTON(button), TRUE);
+    gtk_widget_set_halign(button, GTK_ALIGN_START);
+    g_object_unref(menu);
+
+    /* nothing to apply to without a file list */
+    g_object_bind_property(dialog->file_list, "sensitive", button, "sensitive",
+                           G_BINDING_SYNC_CREATE);
+
+    return button;
 }
 
 static GObject *trg_torrent_add_dialog_constructor(GType type, guint n_construct_properties,
@@ -986,7 +474,8 @@ static GObject *trg_torrent_add_dialog_constructor(GType type, guint n_construct
     t = hig_workarea_create();
     // gtk_container_set_border_width(GTK_CONTAINER(t), GUI_PAD_BIG);
 
-    self->file_list = gtr_file_list_new(&self->store);
+    self->files_model = trg_files_model_new();
+    self->file_list = GTK_WIDGET(trg_files_tree_view_new_local(self->files_model, NULL, NULL));
     gtk_widget_set_sensitive(self->file_list, FALSE);
 
     self->paused_check = gtk_check_button_new_with_mnemonic(_("Start _paused"));
@@ -1020,7 +509,7 @@ static GObject *trg_torrent_add_dialog_constructor(GType type, guint n_construct
 
     hig_workarea_add_wide_tall_control(t, &row, self->file_list);
 
-    applyall_combo = trg_torrent_add_dialog_apply_all_combo_new(TRG_TORRENT_ADD_DIALOG(obj));
+    applyall_combo = trg_torrent_add_dialog_apply_all_new(TRG_TORRENT_ADD_DIALOG(obj));
 
     hig_workarea_add_row(t, &row, _("Apply to all:"), applyall_combo, NULL);
 
@@ -1037,6 +526,13 @@ static GObject *trg_torrent_add_dialog_constructor(GType type, guint n_construct
     return obj;
 }
 
+static void trg_torrent_add_dialog_dispose(GObject *object)
+{
+    g_clear_object(&TRG_TORRENT_ADD_DIALOG(object)->files_model);
+
+    G_OBJECT_CLASS(trg_torrent_add_dialog_parent_class)->dispose(object);
+}
+
 static void trg_torrent_add_dialog_class_init(TrgTorrentAddDialogClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
@@ -1044,6 +540,7 @@ static void trg_torrent_add_dialog_class_init(TrgTorrentAddDialogClass *klass)
     object_class->set_property = trg_torrent_add_dialog_set_property;
     object_class->get_property = trg_torrent_add_dialog_get_property;
     object_class->constructor = trg_torrent_add_dialog_constructor;
+    object_class->dispose = trg_torrent_add_dialog_dispose;
 
     g_object_class_install_property(
         object_class, PROP_FILENAME,
