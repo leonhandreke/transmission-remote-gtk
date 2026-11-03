@@ -534,6 +534,10 @@ static void trg_tree_view_cell_setup(GtkSignalListItemFactory *factory, GtkListI
     case TRG_COLTYPE_WANTED:
         child = cell->widget = gtk_check_button_new();
         gtk_widget_set_halign(child, GTK_ALIGN_CENTER);
+        /* the keyboard focus stays on the row, so Enter activates the row
+         * rather than toggling the check box */
+        gtk_widget_set_focusable(child, FALSE);
+        gtk_widget_set_focus_on_click(child, FALSE);
         g_signal_connect(child, "toggled", G_CALLBACK(trg_tree_view_wanted_toggled), cell);
         break;
     case TRG_COLTYPE_PROG:
@@ -698,6 +702,27 @@ static void trg_tree_view_scroll_to(TrgTreeView *tv, guint position)
 
     if (list && position != GTK_INVALID_LIST_POSITION)
         gtk_widget_activate_action(list, "list.scroll-to-item", "u", position);
+}
+
+/* Selects only the row at position, and moves the keyboard focus to it, so
+ * the cursor keys go on from there (for the type ahead search, which has the
+ * focus already). */
+static void trg_tree_view_select_and_focus(TrgTreeView *tv, guint position)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+#if GTK_CHECK_VERSION(4, 12, 0)
+    GtkListScrollFlags flags = GTK_LIST_SCROLL_FOCUS | GTK_LIST_SCROLL_SELECT;
+
+    if (priv->list_view && gtk_widget_get_parent(priv->list_view))
+        gtk_list_view_scroll_to(GTK_LIST_VIEW(priv->list_view), position, flags, NULL);
+    else
+        gtk_column_view_scroll_to(GTK_COLUMN_VIEW(priv->column_view), position, NULL, flags, NULL);
+#else
+    /* this doesn't move the focus */
+    gtk_selection_model_select_item(priv->selection, position, TRUE);
+    trg_tree_view_scroll_to(tv, position);
+#endif
 }
 
 /* Starts editing the cell of item in the editable column desc, once it's
@@ -1494,12 +1519,107 @@ static gboolean trg_tree_view_search(TrgTreeView *tv, const gchar *key)
     g_free(needle);
 
     if (found != GTK_INVALID_LIST_POSITION) {
-        gtk_selection_model_select_item(priv->selection, found, TRUE);
-        trg_tree_view_scroll_to(tv, found);
+        trg_tree_view_select_and_focus(tv, found);
         return TRUE;
     }
 
     return FALSE;
+}
+
+/* The row (a GtkTreeListRow of a tree) with the keyboard focus */
+static gpointer trg_tree_view_get_focus_row(TrgTreeView *tv)
+{
+    GtkRoot *root = gtk_widget_get_root(GTK_WIDGET(tv));
+    GtkWidget *focus = root ? gtk_root_get_focus(root) : NULL;
+    GtkListItem *list_item;
+
+    if (!focus || !gtk_widget_is_ancestor(focus, GTK_WIDGET(tv)))
+        return NULL;
+
+    /* the focus is on the row widget, or in one of its cells */
+    list_item = trg_tree_view_find_marked(focus);
+    if (!list_item)
+        list_item = trg_tree_view_list_item_for(focus, GTK_WIDGET(tv));
+
+    return list_item ? gtk_list_item_get_item(list_item) : NULL;
+}
+
+static void trg_tree_view_expand_recursive(GtkTreeListRow *row)
+{
+    GListModel *children;
+    guint i, n;
+
+    gtk_tree_list_row_set_expanded(row, TRUE);
+
+    children = gtk_tree_list_row_get_children(row);
+    n = children ? g_list_model_get_n_items(children) : 0;
+
+    for (i = 0; i < n; i++) {
+        GtkTreeListRow *child = gtk_tree_list_row_get_child_row(row, i);
+        if (child) {
+            trg_tree_view_expand_recursive(child);
+            g_object_unref(child);
+        }
+    }
+}
+
+/* The keys of GtkTreeView (and GtkTreeExpander) to expand or collapse the
+ * row with the focus: + and Shift+Right expand, * expands all below, - and
+ * / and Shift+Left collapse. */
+static gboolean trg_tree_view_expand_key(TrgTreeView *tv, guint keyval, GdkModifierType state)
+{
+    GtkTreeListRow *row;
+    gboolean shift = (state & GDK_SHIFT_MASK) != 0;
+
+    row = trg_tree_view_get_focus_row(tv);
+    if (!GTK_IS_TREE_LIST_ROW(row) || !gtk_tree_list_row_is_expandable(row))
+        return FALSE;
+
+    switch (keyval) {
+    case GDK_KEY_plus:
+    case GDK_KEY_KP_Add:
+        gtk_tree_list_row_set_expanded(row, TRUE);
+        return TRUE;
+    case GDK_KEY_asterisk:
+    case GDK_KEY_KP_Multiply:
+        trg_tree_view_expand_recursive(row);
+        return TRUE;
+    case GDK_KEY_minus:
+    case GDK_KEY_KP_Subtract:
+    case GDK_KEY_slash:
+    case GDK_KEY_KP_Divide:
+        gtk_tree_list_row_set_expanded(row, FALSE);
+        return TRUE;
+    case GDK_KEY_Right:
+    case GDK_KEY_KP_Right:
+        if (shift)
+            gtk_tree_list_row_set_expanded(row, TRUE);
+        return shift;
+    case GDK_KEY_Left:
+    case GDK_KEY_KP_Left:
+        if (shift)
+            gtk_tree_list_row_set_expanded(row, FALSE);
+        return shift;
+    default:
+        return FALSE;
+    }
+}
+
+/* Before the list's own keys (Shift+arrows extend the selection) */
+static gboolean trg_tree_view_expand_key_pressed(GtkEventControllerKey *controller, guint keyval,
+                                                 guint keycode, GdkModifierType state,
+                                                 TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    gboolean searching
+        = priv->search->len > 0 && g_get_monotonic_time() - priv->search_time <= G_USEC_PER_SEC;
+
+    /* unless they're part of a search */
+    if (searching || !GTK_IS_TREE_LIST_MODEL(priv->model)
+        || (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_META_MASK | GDK_SUPER_MASK)))
+        return FALSE;
+
+    return trg_tree_view_expand_key(tv, keyval, state);
 }
 
 static gboolean trg_tree_view_key_pressed(GtkEventControllerKey *controller, guint keyval,
@@ -1714,6 +1834,11 @@ static void trg_tree_view_init(TrgTreeView *tv)
 
     keys = gtk_event_controller_key_new();
     g_signal_connect(keys, "key-pressed", G_CALLBACK(trg_tree_view_key_pressed), tv);
+    gtk_widget_add_controller(GTK_WIDGET(tv), keys);
+
+    keys = gtk_event_controller_key_new();
+    gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_CAPTURE);
+    g_signal_connect(keys, "key-pressed", G_CALLBACK(trg_tree_view_expand_key_pressed), tv);
     gtk_widget_add_controller(GTK_WIDGET(tv), keys);
 
     gtk_widget_set_sensitive(GTK_WIDGET(tv), FALSE);
