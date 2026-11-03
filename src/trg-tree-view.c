@@ -1919,8 +1919,6 @@ static void trg_tree_view_init(TrgTreeView *tv)
     gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_CAPTURE);
     g_signal_connect(keys, "key-pressed", G_CALLBACK(trg_tree_view_expand_key_pressed), tv);
     gtk_widget_add_controller(GTK_WIDGET(tv), keys);
-
-    gtk_widget_set_sensitive(GTK_WIDGET(tv), FALSE);
 }
 
 GtkWidget *trg_tree_view_new(void)

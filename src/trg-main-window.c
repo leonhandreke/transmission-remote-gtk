@@ -1810,6 +1810,12 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
     gtk_paned_set_resize_end_child(GTK_PANED(self->vpaned), FALSE);
     gtk_paned_set_shrink_end_child(GTK_PANED(self->vpaned), FALSE);
 
+    /* the lists are enabled once connected (trg_main_window_conn_changed) */
+    gtk_widget_set_sensitive(GTK_WIDGET(self->torrentTreeView), FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(self->peersTreeView), FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(self->filesTreeView), FALSE);
+    gtk_widget_set_sensitive(GTK_WIDGET(self->trackersTreeView), FALSE);
+
     /* There's no system tray (TRG_PREFS_KEY_SYSTEM_TRAY) in GTK 4 */
 
     self->statusBar = trg_status_bar_new(self, self->client);

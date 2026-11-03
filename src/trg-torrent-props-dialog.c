@@ -499,7 +499,6 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
             = trg_files_tree_view_new(propsDialog->filesModel, propsDialog->parent_win,
                                       propsDialog->client, "TrgFilesTreeView-dialog");
         trg_files_model_update(propsDialog->filesModel, serial, json, TORRENT_GET_MODE_FIRST);
-        gtk_widget_set_sensitive(GTK_WIDGET(propsDialog->filesTv), TRUE);
         gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->filesTv),
                                  gtk_label_new(_("Files")));
 
@@ -510,7 +509,6 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
             = trg_peers_tree_view_new(prefs, propsDialog->peersModel, "TrgPeersTreeView-dialog");
         trg_peers_model_update(propsDialog->peersModel, TRG_TREE_VIEW(propsDialog->peersTv), serial,
                                json, TORRENT_GET_MODE_FIRST);
-        gtk_widget_set_sensitive(GTK_WIDGET(propsDialog->peersTv), TRUE);
         gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->peersTv),
                                  gtk_label_new(_("Peers")));
 
@@ -522,7 +520,6 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
                                          propsDialog->parent_win, "TrgTrackersTreeView-dialog");
         trg_trackers_tree_view_new_connection(propsDialog->trackersTv, propsDialog->client);
         trg_trackers_model_update(propsDialog->trackersModel, serial, json, TORRENT_GET_MODE_FIRST);
-        gtk_widget_set_sensitive(GTK_WIDGET(propsDialog->trackersTv), TRUE);
         gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->trackersTv),
                                  gtk_label_new(_("Trackers")));
 

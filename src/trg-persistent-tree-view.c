@@ -328,8 +328,6 @@ static void trg_persistent_tree_view_init(TrgPersistentTreeView *ptv)
 
     /* no prefs: nothing about the view itself is persisted */
     ptv->tv = TRG_TREE_VIEW(trg_tree_view_new());
-    /* tree views start insensitive until connected, this one doesn't wait */
-    gtk_widget_set_sensitive(GTK_WIDGET(ptv->tv), TRUE);
     trg_tree_view_set_sortable(ptv->tv, FALSE);
     trg_tree_view_set_column_menus(ptv->tv, FALSE);
     trg_tree_view_set_model(ptv->tv, G_LIST_MODEL(ptv->store));
