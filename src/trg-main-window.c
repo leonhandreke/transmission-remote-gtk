@@ -981,6 +981,8 @@ static gboolean trg_session_update_timerfunc(gpointer data)
 {
     TrgMainWindow *win = TRG_MAIN_WINDOW(data);
 
+    /* a one-shot timer, so the id is no longer valid */
+    win->sessionTimerId = 0;
     trg_client_update_session(win->client, on_session_get_timer, win);
 
     return FALSE;
@@ -996,6 +998,9 @@ static gboolean trg_update_torrents_timerfunc(gpointer data)
     TrgMainWindow *win = TRG_MAIN_WINDOW(data);
     TrgClient *tc = win->client;
     TrgPrefs *prefs = trg_client_get_prefs(tc);
+
+    /* a one-shot timer, so the id is no longer valid */
+    win->timerId = 0;
 
     if (trg_client_is_connected(tc)) {
         gboolean activeOnly
