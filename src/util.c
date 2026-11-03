@@ -398,7 +398,7 @@ void trg_widget_add_context_menu(GtkWidget *widget, TrgContextMenuFunc func, gpo
         GTK_SHORTCUT_CONTROLLER(shortcuts),
         gtk_shortcut_new(gtk_shortcut_trigger_parse_string("<Shift>F10|Menu"),
                          gtk_callback_action_new(context_menu_shortcut_cb, handler, NULL)));
-    /* capture, so a GtkTreeView's own key handling can't swallow it */
+    /* capture, so the widget's own key handling can't swallow it */
     gtk_event_controller_set_propagation_phase(shortcuts, GTK_PHASE_CAPTURE);
     gtk_widget_add_controller(widget, shortcuts);
 }
@@ -438,9 +438,6 @@ void trg_popover_menu_popup(GtkWidget *parent, GMenuModel *model, gdouble x, gdo
 {
     /* nested submenus, like GTK 3 menus, rather than sliding ones */
     GtkWidget *popover = gtk_popover_menu_new_from_model_full(model, GTK_POPOVER_MENU_NESTED);
-    GtkWidget *anchor = parent;
-    GdkRectangle rect;
-    gboolean have_rect = FALSE;
 
     if (actions)
         gtk_widget_insert_action_group(popover, prefix, actions);
@@ -456,67 +453,22 @@ void trg_popover_menu_popup(GtkWidget *parent, GMenuModel *model, gdouble x, gdo
         }
     }
 
-    /* A GtkTreeView keeps the CSS nodes of its header buttons under a
-     * "header" node, so adding another child to it upsets GTK. Attach the
-     * popover to its parent (the scrolled window) instead. */
-    if (GTK_IS_TREE_VIEW(parent) && gtk_widget_get_parent(parent)) {
-        graphene_rect_t bounds;
-        GtkTreePath *path = NULL;
-
-        anchor = gtk_widget_get_parent(parent);
-
-        /* From the keyboard, point at the cursor row if there is one. */
-        if (x < 0 || y < 0)
-            gtk_tree_view_get_cursor(GTK_TREE_VIEW(parent), &path, NULL);
-        if (path) {
-            GdkRectangle area;
-            gint wx, wy;
-
-            gtk_tree_view_get_background_area(GTK_TREE_VIEW(parent), path, NULL, &area);
-            gtk_tree_view_convert_bin_window_to_widget_coords(GTK_TREE_VIEW(parent), area.x,
-                                                              area.y + area.height / 2, &wx, &wy);
-            x = MAX(wx, 0) + 20;
-            y = wy;
-            gtk_tree_path_free(path);
-        }
-
-        if (x >= 0 && y >= 0) {
-            graphene_point_t p;
-            if (gtk_widget_compute_point(parent, anchor, &GRAPHENE_POINT_INIT((float)x, (float)y),
-                                         &p)) {
-                x = p.x;
-                y = p.y;
-            }
-        } else if (gtk_widget_compute_bounds(parent, anchor, &bounds)) {
-            rect.x = (gint)bounds.origin.x;
-            rect.y = (gint)bounds.origin.y;
-            rect.width = (gint)bounds.size.width;
-            rect.height = (gint)bounds.size.height;
-            have_rect = TRUE;
-        }
-    }
-
-    gtk_widget_set_parent(popover, anchor);
+    gtk_widget_set_parent(popover, parent);
     gtk_popover_set_has_arrow(GTK_POPOVER(popover), FALSE);
     gtk_widget_set_halign(popover, GTK_ALIGN_START);
 
     if (x >= 0 && y >= 0) {
-        rect.x = (gint)x;
-        rect.y = (gint)y;
-        rect.width = rect.height = 1;
-        have_rect = TRUE;
-    }
-
-    if (have_rect)
+        GdkRectangle rect = { (gint)x, (gint)y, 1, 1 };
         gtk_popover_set_pointing_to(GTK_POPOVER(popover), &rect);
+    }
 
     g_signal_connect(popover, "closed", G_CALLBACK(popover_closed_cb), NULL);
     gtk_popover_popup(GTK_POPOVER(popover));
 
-    /* Widgets like GtkTreeView don't present popovers they don't know about
-     * in their size_allocate, so the menu would keep the size it had before
-     * its items were fully set up (eg. accelerator labels). Re-present it
-     * for the first few frames. */
+    /* Most widgets don't present popovers they don't know about in their
+     * size_allocate, so the menu would keep the size it had before its items
+     * were fully set up (eg. accelerator labels). Re-present it for the
+     * first few frames. */
     gtk_widget_add_tick_callback(popover, popover_present_tick, g_new0(guint, 1), g_free);
 }
 

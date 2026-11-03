@@ -10,13 +10,6 @@ src/session-get.c
 src/torrent.c
 src/torrent-row.c
 src/trg-about-window.c
-src/trg-cell-renderer-epoch.c
-src/trg-cell-renderer-eta.c
-src/trg-cell-renderer-numgteqthan.c
-src/trg-cell-renderer-priority.c
-src/trg-cell-renderer-ratio.c
-src/trg-cell-renderer-size.c
-src/trg-cell-renderer-speed.c
 src/trg-client.c
 src/trg-destination-combo.c
 src/trg-file-parser.c

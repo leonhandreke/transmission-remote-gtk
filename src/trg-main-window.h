@@ -45,7 +45,6 @@ GMenuModel *trg_main_window_get_menu_model(TrgMainWindow *win);
 TrgMainWindow *trg_main_window_new(TrgClient *tc);
 TrgStateSelector *trg_main_window_get_state_selector(TrgMainWindow *win);
 gint trg_mw_get_selected_torrent_id(TrgMainWindow *win);
-GtkTreeModel *trg_main_window_get_torrent_model(TrgMainWindow *win);
 void trg_main_window_notebook_set_visible(TrgMainWindow *win, gboolean visible);
 void connect_cb(GSimpleAction *action, GVariant *parameter, gpointer data);
 void trg_main_window_reload_dir_aliases(TrgMainWindow *win);
