@@ -27,8 +27,9 @@
 #include "hig.h"
 #include "requests.h"
 #include "trg-client.h"
-#include "trg-destination-combo.h"
 #include "trg-file-rename-dialog.h"
+#include "trg-files-model.h"
+#include "trg-files-tree-view.h"
 #include "trg-main-window.h"
 #include "util.h"
 
@@ -57,29 +58,6 @@ enum {
     PROP_TREEVIEW
 };
 
-static gchar *trg_file_rename_dialog_get_file_path(GtkTreeModel *model, const GtkTreeIter *iter)
-{
-    GtkTreeIter current = *iter;
-    GtkTreeIter parent;
-    gchar *name;
-    gchar *filepath;
-    gchar *temp_filepath;
-
-    gtk_tree_model_get(model, &current, FILESCOL_NAME, &filepath, -1);
-
-    while (gtk_tree_model_iter_parent(model, &parent, &current)) {
-        gtk_tree_model_get(model, &parent, FILESCOL_NAME, &name, -1);
-        temp_filepath = g_strdup_printf("%s/%s", name, filepath);
-        g_free(name);
-        g_free(filepath);
-        filepath = temp_filepath;
-
-        current = parent;
-    }
-
-    return filepath;
-}
-
 static void trg_file_rename_response_cb(TrgDialog *dlg, gint res_id, gpointer data)
 {
     TrgFileRenameDialog *self = TRG_FILE_RENAME_DIALOG(dlg);
@@ -88,18 +66,17 @@ static void trg_file_rename_response_cb(TrgDialog *dlg, gint res_id, gpointer da
         const gchar *name = gtk_entry_buffer_get_text(self->name_entry_buf);
         JsonNode *request = torrent_rename_path(self->ids, self->orig_path, name);
 
-        GtkTreeModel *model = gtk_tree_view_get_model(GTK_TREE_VIEW(self->treeview));
-        trg_files_model_set_accept(TRG_FILES_MODEL(model), FALSE);
+        trg_files_model_set_accept(trg_files_tree_view_get_files_model(self->treeview), FALSE);
 
-        dispatch_rpc_async(self->client, request, on_files_update, self->treeview);
+        dispatch_rpc_async(self->client, request, on_files_update, g_object_ref(self->treeview));
     } else {
-        g_free(self->orig_path);
         json_array_unref(self->ids);
     }
+    g_clear_pointer(&self->orig_path, g_free);
     gtk_window_destroy(GTK_WINDOW(dlg));
 }
 
-static void location_changed(GtkComboBox *w, gpointer data)
+static void name_changed(GtkEditable *w, gpointer data)
 {
     TrgFileRenameDialog *self = TRG_FILE_RENAME_DIALOG(data);
     gtk_widget_set_sensitive(self->rename_button,
@@ -122,21 +99,15 @@ static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct
 
     /* Get file selection info */
 
-    GtkTreeView *tv = GTK_TREE_VIEW(self->treeview);
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(tv);
-    GtkTreeModel *model;
+    TrgTreeView *tv = TRG_TREE_VIEW(self->treeview);
+    TrgFileItem *item = trg_tree_view_get_first_selected(tv);
     gchar *orig_filename;
 
-    GList *list = gtk_tree_selection_get_selected_rows(selection, &model);
-    count = g_list_length(list);
+    count = trg_tree_view_count_selected(tv);
 
-    if (list) {
-        GtkTreeIter iter;
-
-        gtk_tree_model_get_iter(model, &iter, (GtkTreePath *)list->data);
-        gtk_tree_model_get(model, &iter, FILESCOL_NAME, &orig_filename, -1);
-
-        self->orig_path = trg_file_rename_dialog_get_file_path(model, &iter);
+    if (item) {
+        orig_filename = g_strdup(trg_item_get_string(item, FILESCOL_NAME));
+        self->orig_path = trg_file_item_get_path(item);
     } else {
         orig_filename = g_strdup("error");
         self->orig_path = NULL;
@@ -150,7 +121,7 @@ static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct
     GtkWidget *name_entry = gtk_entry_new_with_buffer(self->name_entry_buf);
     gtk_entry_set_activates_default(GTK_ENTRY(name_entry), TRUE);
 
-    g_signal_connect(name_entry, "changed", G_CALLBACK(location_changed), object);
+    g_signal_connect(name_entry, "changed", G_CALLBACK(name_changed), object);
     hig_workarea_add_row(t, &row, _("Name:"), name_entry, NULL);
 
     gtk_window_set_destroy_with_parent(GTK_WINDOW(object), TRUE);
@@ -171,7 +142,7 @@ static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct
     gtk_widget_set_vexpand(t, TRUE);
     gtk_box_append(GTK_BOX(trg_dialog_get_content_area(TRG_DIALOG(object))), t);
 
-    target_id = trg_files_model_get_torrent_id(TRG_FILES_MODEL(model));
+    target_id = trg_files_model_get_torrent_id(trg_files_tree_view_get_files_model(self->treeview));
     self->ids = json_array_new();
     json_array_add_int_element(self->ids, target_id);
 
@@ -193,7 +164,6 @@ static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct
 
     g_free(msg);
     g_free(orig_filename);
-    g_list_free_full(list, (GDestroyNotify)gtk_tree_path_free);
 
     return object;
 }

@@ -22,25 +22,31 @@
 
 #include "trg-client.h"
 #include "trg-files-model.h"
-#include "trg-legacy-tree-view.h"
 #include "trg-main-window.h"
+#include "trg-prefs.h"
+#include "trg-tree-view.h"
 
+G_BEGIN_DECLS
+
+/* The files of a torrent as a tree, where the user can choose which files
+ * to download and their priorities (for the selected rows from the context
+ * menu, or a row by clicking its Download or Priority cell). */
 #define TRG_TYPE_FILES_TREE_VIEW trg_files_tree_view_get_type()
-G_DECLARE_FINAL_TYPE(TrgFilesTreeView, trg_files_tree_view, TRG, FILES_TREE_VIEW, TrgLegacyTreeView)
+G_DECLARE_FINAL_TYPE(TrgFilesTreeView, trg_files_tree_view, TRG, FILES_TREE_VIEW, TrgTreeView)
 
-enum {
-    NOT_SET = 1000,
-    MIXED = 1001
-};
-
-gboolean on_files_update(gpointer data);
-
+/* Of a torrent: changes are sent to the daemon, files can be renamed */
 TrgFilesTreeView *trg_files_tree_view_new(TrgFilesModel *model, TrgMainWindow *win,
                                           TrgClient *client, const gchar *configId);
 
-void trg_files_tree_view_renderPriority(GtkTreeViewColumn *column G_GNUC_UNUSED,
-                                        GtkCellRenderer *renderer, GtkTreeModel *model,
-                                        GtkTreeIter *iter, gpointer data G_GNUC_UNUSED);
-void trg_files_tree_view_renderDownload(GtkTreeViewColumn *column G_GNUC_UNUSED,
-                                        GtkCellRenderer *renderer, GtkTreeModel *model,
-                                        GtkTreeIter *iter, gpointer data G_GNUC_UNUSED);
+/* Only changes the model, eg. of a torrent about to be added (fill it with
+ * trg_files_model_set_tree()). No progress column, no renaming. */
+TrgFilesTreeView *trg_files_tree_view_new_local(TrgFilesModel *model, TrgPrefs *prefs,
+                                                const gchar *configId);
+
+TrgFilesModel *trg_files_tree_view_get_files_model(TrgFilesTreeView *tv);
+
+/* The response to a change sent by the view (or the rename dialog), with
+ * the view as the callback data */
+gboolean on_files_update(gpointer data);
+
+G_END_DECLS

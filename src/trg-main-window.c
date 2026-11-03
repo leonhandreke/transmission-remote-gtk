@@ -42,7 +42,6 @@
 #include "trg-about-window.h"
 #include "trg-files-model.h"
 #include "trg-files-tree-view.h"
-#include "trg-legacy-tree-view.h"
 #include "trg-main-window.h"
 #include "trg-menu-bar.h"
 #include "trg-peers-model.h"
@@ -208,7 +207,7 @@ static void update_selected_torrent_notebook(TrgMainWindow *win, gint mode, gint
         trg_menu_bar_torrent_actions_sensitive(win->menuBar, TRUE);
         trg_general_panel_update(win->genDetails, t, item);
         trg_trackers_model_update(win->trackersModel, serial, t, mode);
-        trg_files_model_update(win->filesModel, GTK_TREE_VIEW(win->filesTreeView), serial, t, mode);
+        trg_files_model_update(win->filesModel, serial, t, mode);
         trg_peers_model_update(win->peersModel, TRG_TREE_VIEW(win->peersTreeView), serial, t, mode);
     } else {
         trg_main_window_torrent_scrub(win);
@@ -283,9 +282,8 @@ static void save_window_state(TrgMainWindow *win)
 
     trg_tree_view_persist(TRG_TREE_VIEW(win->peersTreeView),
                           TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
-    trg_legacy_tree_view_persist(TRG_LEGACY_TREE_VIEW(win->filesTreeView),
-                                 TRG_LEGACY_TREE_VIEW_PERSIST_SORT
-                                     | TRG_LEGACY_TREE_VIEW_PERSIST_LAYOUT);
+    trg_tree_view_persist(TRG_TREE_VIEW(win->filesTreeView),
+                          TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
     trg_tree_view_persist(TRG_TREE_VIEW(win->torrentTreeView),
                           TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
     trg_tree_view_persist(TRG_TREE_VIEW(win->trackersTreeView),
@@ -771,8 +769,7 @@ static GtkWidget *trg_main_window_notebook_new(TrgMainWindow *win)
 
     win->filesModel = trg_files_model_new();
     win->filesTreeView = trg_files_tree_view_new(win->filesModel, win, win->client, NULL);
-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
-                             my_scrolledwin_new(GTK_WIDGET(win->filesTreeView)),
+    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(win->filesTreeView),
                              gtk_label_new(_("Files")));
 
     win->peersModel = trg_peers_model_new();
@@ -1175,8 +1172,7 @@ gboolean on_generic_interactive_action_response(gpointer data)
 
 static void trg_main_window_torrent_scrub(TrgMainWindow *win)
 {
-
-    gtk_tree_store_clear(GTK_TREE_STORE(win->filesModel));
+    trg_files_model_clear(win->filesModel);
     trg_trackers_model_clear(win->trackersModel);
     trg_peers_model_clear(win->peersModel);
     trg_general_panel_clear(win->genDetails);

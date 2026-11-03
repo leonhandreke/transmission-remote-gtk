@@ -141,9 +141,8 @@ static void trg_torrent_props_response_cb(TrgDialog *dialog, gint res_id,
 
         trg_tree_view_persist(TRG_TREE_VIEW(self->peersTv),
                               TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
-        trg_legacy_tree_view_persist(TRG_LEGACY_TREE_VIEW(self->filesTv),
-                                     TRG_LEGACY_TREE_VIEW_PERSIST_SORT
-                                         | TRG_LEGACY_TREE_VIEW_PERSIST_LAYOUT);
+        trg_tree_view_persist(TRG_TREE_VIEW(self->filesTv),
+                              TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
         trg_tree_view_persist(TRG_TREE_VIEW(self->trackersTv),
                               TRG_TREE_VIEW_PERSIST_SORT | TRG_TREE_VIEW_PERSIST_LAYOUT);
     }
@@ -423,8 +422,7 @@ static void models_updated(TrgTorrentModel *model, gpointer data)
         = get_torrent_data(ht, json_array_get_int_element(dlg->targetIds, 0), &t, &item);
 
     if (exists && dlg->lastJson != t) {
-        trg_files_model_update(dlg->filesModel, GTK_TREE_VIEW(dlg->filesTv), serial, t,
-                               TORRENT_GET_MODE_UPDATE);
+        trg_files_model_update(dlg->filesModel, serial, t, TORRENT_GET_MODE_UPDATE);
         trg_peers_model_update(dlg->peersModel, TRG_TREE_VIEW(dlg->peersTv), serial, t,
                                TORRENT_GET_MODE_UPDATE);
         trg_trackers_model_update(dlg->trackersModel, serial, t, TORRENT_GET_MODE_UPDATE);
@@ -500,11 +498,9 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
         propsDialog->filesTv
             = trg_files_tree_view_new(propsDialog->filesModel, propsDialog->parent_win,
                                       propsDialog->client, "TrgFilesTreeView-dialog");
-        trg_files_model_update(propsDialog->filesModel, GTK_TREE_VIEW(propsDialog->filesTv), serial,
-                               json, TORRENT_GET_MODE_FIRST);
+        trg_files_model_update(propsDialog->filesModel, serial, json, TORRENT_GET_MODE_FIRST);
         gtk_widget_set_sensitive(GTK_WIDGET(propsDialog->filesTv), TRUE);
-        gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
-                                 my_scrolledwin_new(GTK_WIDGET(propsDialog->filesTv)),
+        gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->filesTv),
                                  gtk_label_new(_("Files")));
 
         /* Peers */
