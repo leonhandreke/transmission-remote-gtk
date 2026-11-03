@@ -225,7 +225,8 @@ static GHashTable *trg_client_headers_array_to_table(JsonArray *array)
     if (!nodes)
         return NULL;
 
-    headers = g_hash_table_new(NULL, NULL);
+    /* copies, as saving the preferences replaces the array */
+    headers = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
     for (nodes_iter = g_list_first(nodes); nodes_iter; nodes_iter = g_list_next(nodes_iter)) {
         header_node = nodes_iter->data;
         if (!header_node)
@@ -238,8 +239,10 @@ static GHashTable *trg_client_headers_array_to_table(JsonArray *array)
         key = json_object_get_string_member(header_object, TRG_PREFS_KEY_CUSTOM_HEADER_NAME);
         value = json_object_get_string_member(header_object, TRG_PREFS_KEY_CUSTOM_HEADER_VALUE);
         if (key && value)
-            g_hash_table_insert(headers, (gpointer)key, (gpointer)value);
+            g_hash_table_insert(headers, g_strdup(key), g_strdup(value));
     }
+
+    g_list_free(nodes);
 
     return headers;
 }
