@@ -94,6 +94,7 @@ G_DEFINE_TYPE_WITH_PRIVATE(TrgTreeView, trg_tree_view, GTK_TYPE_WIDGET)
 #define GDATA_KEY_LIST_ITEM   "trg-list-item"
 #define GDATA_KEY_CELL        "trg-cell"
 #define GDATA_KEY_START_EDIT  "trg-start-editing"
+#define GDATA_KEY_EDIT_TRIES  "trg-start-editing-tries"
 
 /* A cell (the widgets of a column of a row) and what it's bound to */
 typedef struct {
@@ -427,7 +428,10 @@ static void trg_tree_view_cell_refresh(TrgTreeViewCell *cell)
         if (GTK_IS_EDITABLE_LABEL(cell->widget)) {
             if (!gtk_editable_label_get_editing(GTK_EDITABLE_LABEL(cell->widget)))
                 gtk_editable_set_text(GTK_EDITABLE(cell->widget), text ? text : "");
-            gtk_widget_set_can_target(cell->widget, desc->editable);
+            /* like a GtkTreeView, a click selects the row, and a click on
+             * a selected row starts editing */
+            gtk_widget_set_can_target(
+                cell->widget, desc->editable && gtk_list_item_get_selected(cell->list_item));
             gtk_editable_set_editable(GTK_EDITABLE(cell->widget), desc->editable);
         } else {
             gtk_label_set_text(GTK_LABEL(cell->widget), text ? text : "");
@@ -444,6 +448,13 @@ static void trg_tree_view_cell_refresh(TrgTreeViewCell *cell)
 static void trg_tree_view_cell_notify(GObject *object, GParamSpec *pspec, TrgTreeViewCell *cell)
 {
     trg_tree_view_cell_refresh(cell);
+}
+
+static void trg_tree_view_cell_selected_cb(GtkListItem *list_item, GParamSpec *pspec,
+                                           TrgTreeViewCell *cell)
+{
+    if (cell->item && !gtk_editable_label_get_editing(GTK_EDITABLE_LABEL(cell->widget)))
+        trg_tree_view_cell_refresh(cell);
 }
 
 static void trg_tree_view_wanted_toggled(GtkCheckButton *button, TrgTreeViewCell *cell)
@@ -550,6 +561,8 @@ static void trg_tree_view_cell_setup(GtkSignalListItemFactory *factory, GtkListI
             child = cell->widget = gtk_editable_label_new("");
             g_signal_connect(child, "notify::editing", G_CALLBACK(trg_tree_view_cell_editing_cb),
                              cell);
+            g_signal_connect(list_item, "notify::selected",
+                             G_CALLBACK(trg_tree_view_cell_selected_cb), cell);
         } else {
             child = cell->widget = gtk_label_new(NULL);
             gtk_label_set_ellipsize(GTK_LABEL(child), PANGO_ELLIPSIZE_END);
@@ -588,19 +601,34 @@ static void trg_tree_view_cell_setup(GtkSignalListItemFactory *factory, GtkListI
     gtk_list_item_set_child(list_item, child);
 }
 
+/* Tries for a while, as a cell that was just bound isn't shown yet */
+#define TRG_START_EDITING_TRIES 20
+
 static gboolean trg_tree_view_start_editing_idle(gpointer data)
 {
     GtkWidget *label = GTK_WIDGET(data);
+    gint tries = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(label), GDATA_KEY_EDIT_TRIES));
 
-    if (gtk_widget_get_mapped(label)) {
+    if (!gtk_widget_get_mapped(label)) {
+        g_object_set_data(G_OBJECT(label), GDATA_KEY_EDIT_TRIES, GINT_TO_POINTER(tries + 1));
+        if (tries < TRG_START_EDITING_TRIES && gtk_widget_get_parent(label))
+            return G_SOURCE_CONTINUE;
+    } else {
         gtk_widget_set_can_target(label, TRUE);
         gtk_editable_label_start_editing(GTK_EDITABLE_LABEL(label));
         gtk_widget_grab_focus(label);
     }
 
+    g_object_set_data(G_OBJECT(label), GDATA_KEY_EDIT_TRIES, NULL);
     g_object_unref(label);
 
     return G_SOURCE_REMOVE;
+}
+
+static void trg_tree_view_queue_start_editing(GtkWidget *label)
+{
+    g_object_set_data(G_OBJECT(label), GDATA_KEY_EDIT_TRIES, NULL);
+    g_timeout_add(20, trg_tree_view_start_editing_idle, g_object_ref(label));
 }
 
 static void trg_tree_view_cell_bind(GtkSignalListItemFactory *factory, GtkListItem *list_item,
@@ -638,7 +666,7 @@ static void trg_tree_view_cell_bind(GtkSignalListItemFactory *factory, GtkListIt
     if (GTK_IS_EDITABLE_LABEL(cell->widget)
         && g_object_get_data(G_OBJECT(item), GDATA_KEY_START_EDIT) == desc) {
         g_object_set_data(G_OBJECT(item), GDATA_KEY_START_EDIT, NULL);
-        g_idle_add(trg_tree_view_start_editing_idle, g_object_ref(cell->widget));
+        trg_tree_view_queue_start_editing(cell->widget);
     }
 }
 
@@ -725,12 +753,63 @@ static void trg_tree_view_select_and_focus(TrgTreeView *tv, guint position)
 #endif
 }
 
-/* Starts editing the cell of item in the editable column desc, once it's
- * shown. */
+/* The editable label of the cell of item in column desc, if it's bound */
+static GtkWidget *trg_tree_view_find_edit_cell(GtkWidget *widget, gpointer item,
+                                               trg_column_description *desc)
+{
+    GtkWidget *child, *found = NULL;
+
+    if (GTK_IS_EDITABLE_LABEL(widget)) {
+        GtkListItem *list_item = g_object_get_data(G_OBJECT(widget), GDATA_KEY_LIST_ITEM);
+        TrgTreeViewCell *cell
+            = list_item ? g_object_get_data(G_OBJECT(list_item), GDATA_KEY_CELL) : NULL;
+        return cell && cell->desc == desc && cell->item == item ? widget : NULL;
+    }
+
+    for (child = gtk_widget_get_first_child(widget); child && !found;
+         child = gtk_widget_get_next_sibling(child))
+        found = trg_tree_view_find_edit_cell(child, item, desc);
+
+    return found;
+}
+
+/* Starts editing the cell of item in the editable column desc, now if it's
+ * shown, or once it's shown. */
 void trg_tree_view_start_editing(TrgTreeView *tv, gpointer item, trg_column_description *desc)
 {
-    g_object_set_data(G_OBJECT(item), GDATA_KEY_START_EDIT, desc);
-    trg_tree_view_scroll_to(tv, trg_tree_view_find_position(tv, item));
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+    GtkWidget *label = trg_tree_view_find_edit_cell(priv->column_view, item, desc);
+
+    if (label) {
+        trg_tree_view_queue_start_editing(label);
+    } else {
+        g_object_set_data(G_OBJECT(item), GDATA_KEY_START_EDIT, desc);
+        trg_tree_view_scroll_to(tv, trg_tree_view_find_position(tv, item));
+    }
+}
+
+static void trg_tree_view_stop_editing_in(GtkWidget *widget)
+{
+    GtkWidget *child;
+
+    if (GTK_IS_EDITABLE_LABEL(widget)) {
+        if (gtk_editable_label_get_editing(GTK_EDITABLE_LABEL(widget)))
+            gtk_editable_label_stop_editing(GTK_EDITABLE_LABEL(widget), TRUE);
+        return;
+    }
+
+    for (child = gtk_widget_get_first_child(widget); child;
+         child = gtk_widget_get_next_sibling(child))
+        trg_tree_view_stop_editing_in(child);
+}
+
+/* Finishes the editing of any cell, keeping its text. A cell being edited
+ * only does that itself a moment after it loses the focus. */
+void trg_tree_view_stop_editing(TrgTreeView *tv)
+{
+    TrgTreeViewPrivate *priv = trg_tree_view_get_instance_private(tv);
+
+    trg_tree_view_stop_editing_in(priv->column_view);
 }
 
 /***

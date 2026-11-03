@@ -22,144 +22,153 @@
 #include <glib/gi18n.h>
 #include <gtk/gtk.h>
 
+#include "trg-item.h"
 #include "trg-persistent-tree-view.h"
 #include "trg-preferences-dialog.h"
 #include "trg-prefs.h"
+#include "trg-tree-view.h"
 #include "util.h"
 
-/* A config TreeView which can save/restore simple data into the TrgConf backend.
- * It's not actually a GtkTreeView, it's a GtkBox which contains the buttons
- * to add/remove entries as well as the TreeView.
+/* A config list which can save/restore simple data into the TrgConf backend.
+ * It's a GtkBox which contains a TrgTreeView of editable text columns and the
+ * buttons to add/delete/move entries.
  */
+
+static const TrgItemColumn persistent_item_columns[TRG_PERSISTENT_TREE_VIEW_MAX_COLUMNS] = {
+    { "column-0", G_TYPE_STRING },
+    { "column-1", G_TYPE_STRING },
+};
+
+#define TRG_TYPE_PERSISTENT_ITEM trg_persistent_item_get_type()
+TRG_DEFINE_ITEM_TYPE(TrgPersistentItem, trg_persistent_item, TRG, PERSISTENT_ITEM,
+                     persistent_item_columns)
+
+struct _trg_persistent_tree_view_column {
+    gchar *key;
+    gint index;
+    trg_column_description *desc;
+};
 
 struct _TrgPersistentTreeView {
     GtkBox parent;
 
-    TrgPrefs *prefs;
-    gchar *key;
     GSList *columns;
-    GtkTreeView *tv;
-    JsonArray *ja;
+    TrgTreeView *tv;
+    GListStore *store;
     GtkWidget *delButton;
     GtkWidget *upButton;
     GtkWidget *downButton;
     trg_pref_widget_desc *wd;
-    GtkTreeModel *model;
     trg_persistent_tree_view_column *addSelect;
-    gint conf_flags;
 };
 
 G_DEFINE_TYPE(TrgPersistentTreeView, trg_persistent_tree_view, GTK_TYPE_BOX)
 
-enum {
-    PROP_0,
-    PROP_PREFS,
-    PROP_KEY,
-    PROP_MODEL,
-    PROP_CONF_FLAGS
-};
-
-static void selection_changed(TrgPersistentTreeView *ptv, GtkTreeSelection *selection)
+/* The position of the only selected entry in the store, or
+ * GTK_INVALID_LIST_POSITION */
+static guint trg_persistent_tree_view_selected_position(TrgPersistentTreeView *ptv)
 {
-    GtkTreeIter iter;
-    GtkTreeModel *model;
+    guint position;
 
-    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
-        GtkTreePath *path = gtk_tree_model_get_path(model, &iter);
-        gtk_widget_set_sensitive(ptv->upButton, gtk_tree_path_prev(path));
-        gtk_widget_set_sensitive(ptv->downButton, gtk_tree_model_iter_next(model, &iter));
-        gtk_tree_path_free(path);
-        gtk_widget_set_sensitive(ptv->delButton, TRUE);
-    } else {
-        gtk_widget_set_sensitive(ptv->delButton, FALSE);
-        gtk_widget_set_sensitive(ptv->upButton, FALSE);
-        gtk_widget_set_sensitive(ptv->downButton, FALSE);
-    }
+    if (trg_tree_view_count_selected(ptv->tv) == 1
+        && g_list_store_find(ptv->store, trg_tree_view_get_first_selected(ptv->tv), &position))
+        return position;
+
+    return GTK_INVALID_LIST_POSITION;
 }
 
-static void selection_changed_cb(GtkTreeSelection *selection, gpointer data)
+static void trg_persistent_tree_view_update_buttons(TrgPersistentTreeView *ptv)
 {
-    selection_changed(TRG_PERSISTENT_TREE_VIEW(data), selection);
+    guint position = trg_persistent_tree_view_selected_position(ptv);
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(ptv->store));
+
+    gtk_widget_set_sensitive(ptv->delButton, trg_tree_view_count_selected(ptv->tv) > 0);
+    gtk_widget_set_sensitive(ptv->upButton, position != GTK_INVALID_LIST_POSITION && position > 0);
+    gtk_widget_set_sensitive(ptv->downButton,
+                             position != GTK_INVALID_LIST_POSITION && position + 1 < n);
 }
 
-static void trg_persistent_tree_view_edit(GtkCellRendererText *renderer, gchar *path,
-                                          gchar *new_text, gpointer user_data)
+static void trg_persistent_tree_view_selection_changed(GtkSelectionModel *selection, guint position,
+                                                       guint n_items, gpointer data)
 {
-    trg_persistent_tree_view_column *cd = (trg_persistent_tree_view_column *)user_data;
-    TrgPersistentTreeView *ptv = TRG_PERSISTENT_TREE_VIEW(cd->tv);
-    GtkTreeModel *model = gtk_tree_view_get_model(ptv->tv);
-    GtkTreeIter iter;
+    trg_persistent_tree_view_update_buttons(TRG_PERSISTENT_TREE_VIEW(data));
+}
 
-    gtk_tree_model_get_iter_from_string(model, &iter, path);
-    gtk_list_store_set(GTK_LIST_STORE(model), &iter, cd->index, new_text, -1);
+static void trg_persistent_tree_view_items_changed(GListModel *model, guint position, guint removed,
+                                                   guint added, gpointer data)
+{
+    trg_persistent_tree_view_update_buttons(TRG_PERSISTENT_TREE_VIEW(data));
+}
+
+static void trg_persistent_tree_view_edit(TrgTreeView *tv, gpointer item, gboolean done,
+                                          const gchar *new_text, gpointer data)
+{
+    trg_persistent_tree_view_column *cd = data;
+
+    if (done && new_text)
+        trg_item_set(item, cd->index, new_text, -1);
 }
 
 static void trg_persistent_tree_view_refresh(TrgPrefs *prefs, void *wdp)
 {
     trg_pref_widget_desc *wd = (trg_pref_widget_desc *)wdp;
     TrgPersistentTreeView *ptv = TRG_PERSISTENT_TREE_VIEW(wd->widget);
-    GtkListStore *model = GTK_LIST_STORE(gtk_tree_view_get_model(ptv->tv));
-    GtkTreeIter iter;
-    JsonArray *ja;
+    JsonArray *ja = trg_prefs_get_array(prefs, wd->key, wd->flags);
+    GPtrArray *items = g_ptr_array_new_with_free_func(g_object_unref);
     GList *ja_list, *li;
     GSList *sli;
 
-    ja = trg_prefs_get_array(prefs, wd->key, wd->flags);
-
-    gtk_list_store_clear(model);
-
-    if (!ja)
-        return;
-
-    ja_list = json_array_get_elements(ja);
+    ja_list = ja ? json_array_get_elements(ja) : NULL;
 
     for (li = ja_list; li; li = g_list_next(li)) {
-        JsonNode *ja_node = (JsonNode *)li->data;
-        JsonObject *jobj = json_node_get_object(ja_node);
-        gtk_list_store_append(model, &iter);
+        JsonObject *jobj = json_node_get_object((JsonNode *)li->data);
+        TrgItem *item = g_object_new(TRG_TYPE_PERSISTENT_ITEM, NULL);
+
         for (sli = ptv->columns; sli; sli = g_slist_next(sli)) {
-            trg_persistent_tree_view_column *cd = (trg_persistent_tree_view_column *)sli->data;
-            gtk_list_store_set(model, &iter, cd->index,
-                               json_object_get_string_member(jobj, cd->key), -1);
+            trg_persistent_tree_view_column *cd = sli->data;
+            trg_item_set(item, cd->index, json_object_get_string_member(jobj, cd->key), -1);
         }
+
+        g_ptr_array_add(items, item);
     }
 
     g_list_free(ja_list);
-}
 
-static gboolean trg_persistent_tree_view_save_foreachfunc(GtkTreeModel *model, GtkTreePath *path,
-                                                          GtkTreeIter *iter, gpointer data)
-{
-    TrgPersistentTreeView *self = TRG_PERSISTENT_TREE_VIEW(data);
-    JsonObject *new = json_object_new();
-    gchar *value;
-    GSList *li;
-
-    for (li = self->columns; li; li = g_slist_next(li)) {
-        trg_persistent_tree_view_column *cd = (trg_persistent_tree_view_column *)li->data;
-        gtk_tree_model_get(model, iter, cd->index, &value, -1);
-        json_object_set_string_member(new, cd->key, value);
-        g_free(value);
-    }
-
-    json_array_add_object_element(self->ja, new);
-
-    return FALSE;
+    g_list_store_splice(ptv->store, 0, g_list_model_get_n_items(G_LIST_MODEL(ptv->store)),
+                        items->pdata, items->len);
+    g_ptr_array_unref(items);
 }
 
 static void trg_persistent_tree_view_save(TrgPrefs *prefs, void *wdp)
 {
     trg_pref_widget_desc *wd = (trg_pref_widget_desc *)wdp;
     TrgPersistentTreeView *ptv = TRG_PERSISTENT_TREE_VIEW(wd->widget);
-    GtkTreeModel *model = gtk_tree_view_get_model(ptv->tv);
+    GListModel *model = G_LIST_MODEL(ptv->store);
+    JsonNode *node;
+    JsonArray *ja;
+    guint i, n;
 
-    JsonNode *node
-        = trg_prefs_get_value(prefs, wd->key, JSON_NODE_ARRAY, wd->flags | TRG_PREFS_REPLACENODE);
+    /* keep an entry that is still being edited, like when OK is clicked */
+    trg_tree_view_stop_editing(ptv->tv);
 
-    ptv->ja = json_array_new();
+    node = trg_prefs_get_value(prefs, wd->key, JSON_NODE_ARRAY, wd->flags | TRG_PREFS_REPLACENODE);
+    ja = json_array_new();
+    n = g_list_model_get_n_items(model);
 
-    gtk_tree_model_foreach(model, trg_persistent_tree_view_save_foreachfunc, wd->widget);
-    json_node_take_array(node, ptv->ja);
+    for (i = 0; i < n; i++) {
+        g_autoptr(TrgItem) item = g_list_model_get_item(model, i);
+        JsonObject *new = json_object_new();
+        GSList *li;
+
+        for (li = ptv->columns; li; li = g_slist_next(li)) {
+            trg_persistent_tree_view_column *cd = li->data;
+            json_object_set_string_member(new, cd->key, trg_item_get_string(item, cd->index));
+        }
+
+        json_array_add_object_element(ja, new);
+    }
+
+    json_node_take_array(node, ja);
 
     trg_prefs_changed_emit_signal(prefs, wd->key);
 }
@@ -168,150 +177,111 @@ trg_persistent_tree_view_column *trg_persistent_tree_view_add_column(TrgPersiste
                                                                      gint index, const gchar *key,
                                                                      const gchar *label)
 {
-    trg_persistent_tree_view_column *cd = g_new0(trg_persistent_tree_view_column, 1);
-    GtkCellRenderer *renderer;
+    trg_persistent_tree_view_column *cd;
 
+    g_return_val_if_fail(index >= 0 && index < TRG_PERSISTENT_TREE_VIEW_MAX_COLUMNS, NULL);
+
+    cd = g_new0(trg_persistent_tree_view_column, 1);
     cd->key = g_strdup(key);
-    cd->label = g_strdup(label);
     cd->index = index;
-    cd->tv = ptv;
-
-    renderer = gtk_cell_renderer_text_new();
-    g_object_set(G_OBJECT(renderer), "editable", TRUE, NULL);
-    g_signal_connect(renderer, "edited", G_CALLBACK(trg_persistent_tree_view_edit), cd);
-    cd->column
-        = gtk_tree_view_column_new_with_attributes(cd->label, renderer, "text", cd->index, NULL);
-    gtk_tree_view_column_set_resizable(cd->column, TRUE);
-    gtk_tree_view_append_column(GTK_TREE_VIEW(ptv->tv), cd->column);
+    cd->desc = trg_tree_view_reg_column(ptv->tv, TRG_COLTYPE_TEXT, index, label, key,
+                                        TRG_COLUMN_UNREMOVABLE | TRG_COLUMN_EDITABLE);
+    cd->desc->edit = trg_persistent_tree_view_edit;
+    cd->desc->func_data = cd;
 
     ptv->columns = g_slist_append(ptv->columns, cd);
+
+    trg_tree_view_remove_all_columns(ptv->tv);
+    trg_tree_view_setup_columns(ptv->tv);
 
     return cd;
 }
 
-static GtkTreeView *trg_persistent_tree_view_tree_view_new(TrgPersistentTreeView *ptv,
-                                                           GtkTreeModel *model)
+static void trg_persistent_tree_view_edit_item(TrgPersistentTreeView *ptv, TrgItem *item)
 {
-    GtkTreeView *tv = GTK_TREE_VIEW(gtk_tree_view_new_with_model(model));
-    GtkTreeSelection *selection;
+    trg_persistent_tree_view_column *cd
+        = ptv->addSelect ? ptv->addSelect : (ptv->columns ? ptv->columns->data : NULL);
 
-    g_object_unref(G_OBJECT(model));
+    trg_tree_view_select_item(ptv->tv, item);
 
-    gtk_tree_view_set_rubber_banding(tv, TRUE);
-
-    selection = gtk_tree_view_get_selection(GTK_TREE_VIEW(tv));
-
-    g_signal_connect(G_OBJECT(selection), "changed", G_CALLBACK(selection_changed_cb), ptv);
-
-    return tv;
+    if (cd)
+        trg_tree_view_start_editing(ptv->tv, item, cd->desc);
 }
 
 static void trg_persistent_tree_view_add_cb(GtkWidget *w, gpointer data)
 {
     TrgPersistentTreeView *ptv = TRG_PERSISTENT_TREE_VIEW(data);
-    GtkTreeModel *model = gtk_tree_view_get_model(ptv->tv);
-    GtkTreeIter iter;
-    GtkTreePath *path;
+    TrgItem *item = g_object_new(TRG_TYPE_PERSISTENT_ITEM, NULL);
 
-    gtk_list_store_append(GTK_LIST_STORE(model), &iter);
-    path = gtk_tree_model_get_path(model, &iter);
+    g_list_store_append(ptv->store, item);
+    trg_persistent_tree_view_edit_item(ptv, item);
+    g_object_unref(item);
+}
 
-    if (ptv->addSelect)
-        gtk_tree_view_set_cursor(ptv->tv, path, ptv->addSelect->column, TRUE);
+/* Enter or a double click on a row edits it */
+static void trg_persistent_tree_view_row_activated(TrgTreeView *tv, guint position, gpointer data)
+{
+    g_autoptr(GObject) row
+        = g_list_model_get_item(G_LIST_MODEL(trg_tree_view_get_selection(tv)), position);
 
-    gtk_tree_path_free(path);
+    if (row)
+        trg_persistent_tree_view_edit_item(TRG_PERSISTENT_TREE_VIEW(data),
+                                           trg_tree_view_row_item(row));
+}
+
+static void trg_persistent_tree_view_move(TrgPersistentTreeView *ptv, gint offset)
+{
+    guint position = trg_persistent_tree_view_selected_position(ptv);
+    guint n = g_list_model_get_n_items(G_LIST_MODEL(ptv->store));
+    TrgItem *item;
+
+    if (position == GTK_INVALID_LIST_POSITION || (offset < 0 && position == 0)
+        || (offset > 0 && position + 1 >= n))
+        return;
+
+    item = g_list_model_get_item(G_LIST_MODEL(ptv->store), position);
+    g_list_store_remove(ptv->store, position);
+    g_list_store_insert(ptv->store, position + offset, item);
+    trg_tree_view_select_item(ptv->tv, item);
+    g_object_unref(item);
 }
 
 static void trg_persistent_tree_view_up_cb(GtkWidget *w, gpointer data)
 {
-    TrgPersistentTreeView *self = TRG_PERSISTENT_TREE_VIEW(data);
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(self->tv);
-    GtkTreeModel *model;
-    GtkTreeIter iter, prevIter;
-    GtkTreePath *path;
-
-    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
-        path = gtk_tree_model_get_path(model, &iter);
-        if (gtk_tree_path_prev(path) && gtk_tree_model_get_iter(model, &prevIter, path)) {
-            gtk_list_store_move_before(GTK_LIST_STORE(model), &iter, &prevIter);
-            selection_changed(TRG_PERSISTENT_TREE_VIEW(data), selection);
-        }
-        gtk_tree_path_free(path);
-    }
+    trg_persistent_tree_view_move(TRG_PERSISTENT_TREE_VIEW(data), -1);
 }
 
 static void trg_persistent_tree_view_down_cb(GtkWidget *w, gpointer data)
 {
-    TrgPersistentTreeView *self = TRG_PERSISTENT_TREE_VIEW(data);
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(self->tv);
-    GtkTreeModel *model;
-    GtkTreeIter iter, nextIter;
-
-    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
-        nextIter = iter;
-        if (gtk_tree_model_iter_next(model, &nextIter)) {
-            gtk_list_store_move_after(GTK_LIST_STORE(model), &iter, &nextIter);
-            selection_changed(TRG_PERSISTENT_TREE_VIEW(data), selection);
-        }
-    }
+    trg_persistent_tree_view_move(TRG_PERSISTENT_TREE_VIEW(data), 1);
 }
 
 static void trg_persistent_tree_view_del_cb(GtkWidget *w, gpointer data)
 {
     TrgPersistentTreeView *self = TRG_PERSISTENT_TREE_VIEW(data);
-    GtkTreeSelection *selection = gtk_tree_view_get_selection(self->tv);
-    GtkTreeModel *model;
-    GtkTreeIter iter;
+    GList *items = trg_tree_view_get_selected_items(self->tv), *li;
+    guint position;
 
-    if (gtk_tree_selection_get_selected(selection, &model, &iter))
-        gtk_list_store_remove(GTK_LIST_STORE(model), &iter);
-}
+    for (li = items; li; li = g_list_next(li))
+        if (g_list_store_find(self->store, li->data, &position))
+            g_list_store_remove(self->store, position);
 
-static void trg_persistent_tree_view_get_property(GObject *object, guint property_id, GValue *value,
-                                                  GParamSpec *pspec)
-{
-    switch (property_id) {
-    default:
-        G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
-        break;
-    }
-}
-
-static void trg_persistent_tree_view_set_property(GObject *object, guint property_id,
-                                                  const GValue *value, GParamSpec *pspec)
-{
-    TrgPersistentTreeView *self = TRG_PERSISTENT_TREE_VIEW(object);
-    switch (property_id) {
-    case PROP_PREFS:
-        self->prefs = g_value_get_object(value);
-        break;
-    case PROP_KEY:
-        self->key = g_strdup(g_value_get_pointer(value));
-        break;
-    case PROP_MODEL:
-        self->model = g_value_get_object(value);
-        break;
-    case PROP_CONF_FLAGS:
-        self->conf_flags = g_value_get_int(value);
-        break;
-    default:
-        G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
-        break;
-    }
+    g_list_free(items);
 }
 
 static void trg_persistent_tree_view_finalize(GObject *object)
 {
     TrgPersistentTreeView *self = TRG_PERSISTENT_TREE_VIEW(object);
     GSList *li;
+
     for (li = self->columns; li; li = g_slist_next(li)) {
-        trg_persistent_tree_view_column *cd = (trg_persistent_tree_view_column *)li->data;
+        trg_persistent_tree_view_column *cd = li->data;
         g_free(cd->key);
-        g_free(cd->label);
         g_free(cd);
     }
     g_slist_free(self->columns);
-    g_free(self->key);
+    g_clear_object(&self->store);
+
     G_OBJECT_CLASS(trg_persistent_tree_view_parent_class)->finalize(object);
 }
 
@@ -326,109 +296,77 @@ void trg_persistent_tree_view_set_add_select(TrgPersistentTreeView *ptv,
     ptv->addSelect = cd;
 }
 
-static GObject *trg_persistent_tree_view_constructor(GType type, guint n_construct_properties,
-                                                     GObjectConstructParam *construct_params)
+static GtkWidget *trg_persistent_tree_view_button_new(TrgPersistentTreeView *ptv, GtkWidget *box,
+                                                      const gchar *label, GCallback callback,
+                                                      gboolean sensitive)
 {
-    GObject *object;
-    GtkWidget *hbox, *w;
+    GtkWidget *w = gtk_button_new_with_label(label);
 
-    object = G_OBJECT_CLASS(trg_persistent_tree_view_parent_class)
-                 ->constructor(type, n_construct_properties, construct_params);
-    TrgPersistentTreeView *ptv = TRG_PERSISTENT_TREE_VIEW(object);
-
-    hbox = trg_hbox_new(FALSE, 0);
-
-    w = gtk_button_new_with_label(_("Add"));
-    g_signal_connect(w, "clicked", G_CALLBACK(trg_persistent_tree_view_add_cb), object);
+    gtk_widget_set_sensitive(w, sensitive);
+    g_signal_connect(w, "clicked", callback, ptv);
     gtk_widget_set_margin_start(w, 4);
     gtk_widget_set_margin_end(w, 4);
-    gtk_box_append(GTK_BOX(hbox), w);
+    gtk_box_append(GTK_BOX(box), w);
 
-    w = ptv->delButton = gtk_button_new_with_label(_("Delete"));
-    gtk_widget_set_sensitive(w, FALSE);
-    g_signal_connect(w, "clicked", G_CALLBACK(trg_persistent_tree_view_del_cb), object);
-    gtk_widget_set_margin_start(w, 4);
-    gtk_widget_set_margin_end(w, 4);
-    gtk_box_append(GTK_BOX(hbox), w);
-
-    w = ptv->upButton = gtk_button_new_with_label(_("Up"));
-    gtk_widget_set_sensitive(w, FALSE);
-    g_signal_connect(w, "clicked", G_CALLBACK(trg_persistent_tree_view_up_cb), object);
-    gtk_widget_set_margin_start(w, 4);
-    gtk_widget_set_margin_end(w, 4);
-    gtk_box_append(GTK_BOX(hbox), w);
-
-    w = ptv->downButton = gtk_button_new_with_label(_("Down"));
-    gtk_widget_set_sensitive(w, FALSE);
-    g_signal_connect(w, "clicked", G_CALLBACK(trg_persistent_tree_view_down_cb), object);
-    gtk_widget_set_margin_start(w, 4);
-    gtk_widget_set_margin_end(w, 4);
-    gtk_box_append(GTK_BOX(hbox), w);
-
-    ptv->tv = trg_persistent_tree_view_tree_view_new(TRG_PERSISTENT_TREE_VIEW(object), ptv->model);
-    w = my_scrolledwin_new(GTK_WIDGET(ptv->tv));
-    gtk_widget_set_vexpand(w, TRUE);
-    gtk_widget_set_margin_top(w, 4);
-    gtk_widget_set_margin_bottom(w, 4);
-    gtk_box_append(GTK_BOX(object), w);
-    gtk_widget_set_margin_top(hbox, 4);
-    gtk_widget_set_margin_bottom(hbox, 4);
-    gtk_box_append(GTK_BOX(object), hbox);
-
-    ptv->wd = trg_pref_widget_desc_new(GTK_WIDGET(ptv->tv), ptv->key, ptv->conf_flags);
-    ptv->wd->widget = GTK_WIDGET(object);
-    ptv->wd->saveFunc = &trg_persistent_tree_view_save;
-    ptv->wd->refreshFunc = &trg_persistent_tree_view_refresh;
-
-    return object;
+    return w;
 }
 
 static void trg_persistent_tree_view_class_init(TrgPersistentTreeViewClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
-    object_class->get_property = trg_persistent_tree_view_get_property;
-    object_class->set_property = trg_persistent_tree_view_set_property;
     object_class->finalize = trg_persistent_tree_view_finalize;
-    object_class->constructor = trg_persistent_tree_view_constructor;
-
-    g_object_class_install_property(
-        object_class, PROP_KEY,
-        g_param_spec_pointer("conf-key", "Conf Key", "Conf Key",
-                             G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_NAME
-                                 | G_PARAM_STATIC_NICK | G_PARAM_STATIC_BLURB));
-
-    g_object_class_install_property(
-        object_class, PROP_PREFS,
-        g_param_spec_object("prefs", "Prefs", "Prefs", TRG_TYPE_PREFS,
-                            G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_NAME
-                                | G_PARAM_STATIC_NICK | G_PARAM_STATIC_BLURB));
-
-    g_object_class_install_property(object_class, PROP_CONF_FLAGS,
-                                    g_param_spec_int("conf-flags", "Conf Flags", "Conf Flags",
-                                                     INT_MIN, INT_MAX, TRG_PREFS_PROFILE,
-                                                     G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY
-                                                         | G_PARAM_STATIC_NAME | G_PARAM_STATIC_NICK
-                                                         | G_PARAM_STATIC_BLURB));
-
-    g_object_class_install_property(
-        object_class, PROP_MODEL,
-        g_param_spec_object("persistent-model", "Persistent Model", "Persistent Model",
-                            GTK_TYPE_LIST_STORE,
-                            G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_NAME
-                                | G_PARAM_STATIC_NICK | G_PARAM_STATIC_BLURB));
 }
 
-static void trg_persistent_tree_view_init(TrgPersistentTreeView *self)
+static void trg_persistent_tree_view_init(TrgPersistentTreeView *ptv)
 {
+    GtkWidget *hbox;
+
+    gtk_orientable_set_orientation(GTK_ORIENTABLE(ptv), GTK_ORIENTATION_VERTICAL);
+
+    ptv->store = g_list_store_new(TRG_TYPE_PERSISTENT_ITEM);
+
+    /* no prefs: nothing about the view itself is persisted */
+    ptv->tv = TRG_TREE_VIEW(trg_tree_view_new());
+    /* tree views start insensitive until connected, this one doesn't wait */
+    gtk_widget_set_sensitive(GTK_WIDGET(ptv->tv), TRUE);
+    trg_tree_view_set_sortable(ptv->tv, FALSE);
+    trg_tree_view_set_column_menus(ptv->tv, FALSE);
+    trg_tree_view_set_model(ptv->tv, G_LIST_MODEL(ptv->store));
+    g_signal_connect(trg_tree_view_get_selection(ptv->tv), "selection-changed",
+                     G_CALLBACK(trg_persistent_tree_view_selection_changed), ptv);
+    /* removing selected entries doesn't change the selection */
+    g_signal_connect_after(trg_tree_view_get_selection(ptv->tv), "items-changed",
+                           G_CALLBACK(trg_persistent_tree_view_items_changed), ptv);
+    g_signal_connect(ptv->tv, "row-activated", G_CALLBACK(trg_persistent_tree_view_row_activated),
+                     ptv);
+
+    gtk_widget_set_vexpand(GTK_WIDGET(ptv->tv), TRUE);
+    gtk_widget_set_margin_top(GTK_WIDGET(ptv->tv), 4);
+    gtk_widget_set_margin_bottom(GTK_WIDGET(ptv->tv), 4);
+    gtk_box_append(GTK_BOX(ptv), GTK_WIDGET(ptv->tv));
+
+    hbox = trg_hbox_new(FALSE, 0);
+    trg_persistent_tree_view_button_new(ptv, hbox, _("Add"),
+                                        G_CALLBACK(trg_persistent_tree_view_add_cb), TRUE);
+    ptv->delButton = trg_persistent_tree_view_button_new(
+        ptv, hbox, _("Delete"), G_CALLBACK(trg_persistent_tree_view_del_cb), FALSE);
+    ptv->upButton = trg_persistent_tree_view_button_new(
+        ptv, hbox, _("Up"), G_CALLBACK(trg_persistent_tree_view_up_cb), FALSE);
+    ptv->downButton = trg_persistent_tree_view_button_new(
+        ptv, hbox, _("Down"), G_CALLBACK(trg_persistent_tree_view_down_cb), FALSE);
+    gtk_widget_set_margin_top(hbox, 4);
+    gtk_widget_set_margin_bottom(hbox, 4);
+    gtk_box_append(GTK_BOX(ptv), hbox);
 }
 
-TrgPersistentTreeView *trg_persistent_tree_view_new(TrgPrefs *prefs, GtkListStore *model,
-                                                    const gchar *key, gint conf_flags)
+TrgPersistentTreeView *trg_persistent_tree_view_new(const gchar *key, gint conf_flags)
 {
-    GObject *obj = g_object_new(TRG_TYPE_PERSISTENT_TREE_VIEW, "prefs", prefs, "conf-key", key,
-                                "persistent-model", model, "conf-flags", conf_flags, "orientation",
-                                GTK_ORIENTATION_VERTICAL, NULL);
+    TrgPersistentTreeView *ptv = g_object_new(TRG_TYPE_PERSISTENT_TREE_VIEW, NULL);
 
-    return TRG_PERSISTENT_TREE_VIEW(obj);
+    ptv->wd = trg_pref_widget_desc_new(GTK_WIDGET(ptv), (gchar *)key, conf_flags);
+    ptv->wd->saveFunc = &trg_persistent_tree_view_save;
+    ptv->wd->refreshFunc = &trg_persistent_tree_view_refresh;
+
+    return ptv;
 }

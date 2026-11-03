@@ -23,26 +23,26 @@
 
 #include "trg-preferences-dialog.h"
 
+/* An editable list of string records (JSON objects with a string member per
+ * column) stored as a JSON array in TrgPrefs, with buttons to add, delete and
+ * move entries. The list is saved and refreshed through its widget desc. */
 #define TRG_TYPE_PERSISTENT_TREE_VIEW trg_persistent_tree_view_get_type()
 G_DECLARE_FINAL_TYPE(TrgPersistentTreeView, trg_persistent_tree_view, TRG, PERSISTENT_TREE_VIEW,
                      GtkBox)
 
-typedef struct {
-    GtkTreeViewColumn *column;
-    gchar *key;
-    gchar *label;
-    TrgPersistentTreeView *tv;
-    gint index;
-} trg_persistent_tree_view_column;
+#define TRG_PERSISTENT_TREE_VIEW_MAX_COLUMNS 2
 
-TrgPersistentTreeView *trg_persistent_tree_view_new(TrgPrefs *prefs, GtkListStore *model,
-                                                    const gchar *key, gint conf_flags);
+typedef struct _trg_persistent_tree_view_column trg_persistent_tree_view_column;
+
+TrgPersistentTreeView *trg_persistent_tree_view_new(const gchar *key, gint conf_flags);
 
 trg_pref_widget_desc *trg_persistent_tree_view_get_widget_desc(TrgPersistentTreeView *ptv);
 
+/* The column that is edited when an entry is added */
 void trg_persistent_tree_view_set_add_select(TrgPersistentTreeView *ptv,
                                              trg_persistent_tree_view_column *cd);
 
+/* index < TRG_PERSISTENT_TREE_VIEW_MAX_COLUMNS, key is the JSON member */
 trg_persistent_tree_view_column *trg_persistent_tree_view_add_column(TrgPersistentTreeView *ptv,
                                                                      gint index, const gchar *key,
                                                                      const gchar *label);

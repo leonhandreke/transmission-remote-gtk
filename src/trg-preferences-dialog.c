@@ -527,7 +527,6 @@ static GtkWidget *trg_prefs_dirsPage(TrgPreferencesDialog *dlg)
 {
     GtkWidget *t;
     TrgPersistentTreeView *ptv;
-    GtkListStore *model;
     trg_pref_widget_desc *wd;
     guint row = 0;
 
@@ -535,10 +534,7 @@ static GtkWidget *trg_prefs_dirsPage(TrgPreferencesDialog *dlg)
 
     hig_workarea_add_section_title(t, &row, _("Remote Download Directories"));
 
-    model = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
-
-    ptv = trg_persistent_tree_view_new(dlg->prefs, model, TRG_PREFS_KEY_DESTINATIONS,
-                                       TRG_PREFS_CONNECTION);
+    ptv = trg_persistent_tree_view_new(TRG_PREFS_KEY_DESTINATIONS, TRG_PREFS_CONNECTION);
     trg_persistent_tree_view_set_add_select(
         ptv, trg_persistent_tree_view_add_column(ptv, 0, TRG_PREFS_SUBKEY_LABEL, _("Label")));
     trg_persistent_tree_view_add_column(ptv, 1, TRG_PREFS_KEY_DESTINATIONS_SUBKEY_DIR,
@@ -623,7 +619,6 @@ static GtkWidget *trg_prefs_serverPage(TrgPreferencesDialog *dlg)
     GtkWidget *w, *t, *frame, *frameHbox, *profileLabel;
     GtkWidget *profileButtonsHbox;
     GtkWidget *scrolled_window;
-    GtkListStore *model;
     TrgPersistentTreeView *ptv;
     trg_pref_widget_desc *wd;
     guint row = 0;
@@ -699,9 +694,7 @@ static GtkWidget *trg_prefs_serverPage(TrgPreferencesDialog *dlg)
 
     hig_workarea_add_section_title(t, &row, _("Headers"));
 
-    model = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
-    ptv = trg_persistent_tree_view_new(dlg->prefs, model, TRG_PREFS_KEY_CUSTOM_HEADERS,
-                                       TRG_PREFS_PROFILE);
+    ptv = trg_persistent_tree_view_new(TRG_PREFS_KEY_CUSTOM_HEADERS, TRG_PREFS_PROFILE);
     trg_persistent_tree_view_set_add_select(
         ptv,
         trg_persistent_tree_view_add_column(ptv, 0, TRG_PREFS_KEY_CUSTOM_HEADER_NAME, _("Name")));

@@ -102,6 +102,7 @@ void trg_tree_view_restore_sort(TrgTreeView *tv);
 gboolean trg_tree_view_is_column_showing(TrgTreeView *tv, gint index);
 void trg_tree_view_set_column_editable(trg_column_description *desc, gboolean editable);
 void trg_tree_view_start_editing(TrgTreeView *tv, gpointer item, trg_column_description *desc);
+void trg_tree_view_stop_editing(TrgTreeView *tv);
 
 /* The model is a GListModel of TrgItems, or a GtkTreeListModel of them. */
 void trg_tree_view_set_model(TrgTreeView *tv, GListModel *model);
