@@ -20,6 +20,7 @@
 #include "config.h"
 
 #include <gtk/gtk.h>
+#include <string.h>
 
 #include "hig.h"
 #include "trg-dialog.h"
@@ -39,7 +40,13 @@ typedef struct {
     gboolean destroyed;
 } TrgDialogPrivate;
 
-G_DEFINE_TYPE_WITH_PRIVATE(TrgDialog, trg_dialog, GTK_TYPE_WINDOW)
+static void trg_dialog_buildable_init(GtkBuildableIface *iface);
+
+G_DEFINE_TYPE_WITH_CODE(TrgDialog, trg_dialog, GTK_TYPE_WINDOW,
+                        G_ADD_PRIVATE(TrgDialog)
+                            G_IMPLEMENT_INTERFACE(GTK_TYPE_BUILDABLE, trg_dialog_buildable_init))
+
+static GtkBuildableIface *parent_buildable_iface;
 
 GtkWidget *trg_dialog_get_content_area(TrgDialog *dialog)
 {
@@ -59,17 +66,91 @@ static void trg_dialog_button_clicked(GtkButton *button, TrgDialog *dialog)
                         GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), RESPONSE_ID_KEY)));
 }
 
-GtkWidget *trg_dialog_add_button(TrgDialog *dialog, const gchar *label, gint response_id)
+static void trg_dialog_append_action(TrgDialog *dialog, GtkWidget *widget)
 {
     TrgDialogPrivate *priv = trg_dialog_get_instance_private(dialog);
+
+    gtk_box_append(GTK_BOX(priv->action_area), widget);
+    gtk_widget_set_visible(priv->action_area, TRUE);
+}
+
+GtkWidget *trg_dialog_add_button(TrgDialog *dialog, const gchar *label, gint response_id)
+{
     GtkWidget *button = gtk_button_new_with_mnemonic(label);
 
     g_object_set_data(G_OBJECT(button), RESPONSE_ID_KEY, GINT_TO_POINTER(response_id));
     g_signal_connect(button, "clicked", G_CALLBACK(trg_dialog_button_clicked), dialog);
-    gtk_box_append(GTK_BOX(priv->action_area), button);
-    gtk_widget_set_visible(priv->action_area, TRUE);
+    trg_dialog_append_action(dialog, button);
 
     return button;
+}
+
+/* A response id from its GtkResponseType nick, like "accept" */
+static gint trg_dialog_response_from_nick(const gchar *nick)
+{
+    GEnumClass *enum_class = g_type_class_ref(GTK_TYPE_RESPONSE_TYPE);
+    GEnumValue *value = g_enum_get_value_by_nick(enum_class, nick);
+    gint response_id = value ? value->value : GTK_RESPONSE_NONE;
+
+    if (!value)
+        g_warning("Unknown dialog response \"%s\"", nick);
+
+    g_type_class_unref(enum_class);
+
+    return response_id;
+}
+
+/* The responses of the buttons of a template: "dialog.accept" responds with
+ * GTK_RESPONSE_ACCEPT, and so on. They're separate actions, so a response can
+ * be disabled (and its button made insensitive) with
+ * gtk_widget_action_set_enabled(). */
+static const gchar *response_actions[]
+    = { "accept", "cancel", "ok", "close", "apply", "yes", "no" };
+
+static gint trg_dialog_response_from_action(const gchar *action_name)
+{
+    if (!action_name || !g_str_has_prefix(action_name, "dialog."))
+        return GTK_RESPONSE_NONE;
+
+    return trg_dialog_response_from_nick(action_name + strlen("dialog."));
+}
+
+static void trg_dialog_response_action(GtkWidget *widget, const gchar *action_name,
+                                       GVariant *parameter)
+{
+    trg_dialog_response(TRG_DIALOG(widget), trg_dialog_response_from_action(action_name));
+}
+
+/* In a template, children go into the content area, and children of type
+ * "action" ([action] in Blueprint) into the row of buttons. Buttons there
+ * respond through the dialog.* actions, which is also how
+ * trg_dialog_get_widget_for_response() finds them. */
+static void trg_dialog_buildable_add_child(GtkBuildable *buildable, GtkBuilder *builder,
+                                           GObject *child, const gchar *type)
+{
+    TrgDialog *dialog = TRG_DIALOG(buildable);
+    TrgDialogPrivate *priv = trg_dialog_get_instance_private(dialog);
+
+    if (g_strcmp0(type, "action") == 0) {
+        if (GTK_IS_ACTIONABLE(child)) {
+            const gchar *name = gtk_actionable_get_action_name(GTK_ACTIONABLE(child));
+            gint response_id = trg_dialog_response_from_action(name);
+
+            if (response_id != GTK_RESPONSE_NONE)
+                g_object_set_data(child, RESPONSE_ID_KEY, GINT_TO_POINTER(response_id));
+        }
+        trg_dialog_append_action(dialog, GTK_WIDGET(child));
+    } else if (!type && GTK_IS_WIDGET(child) && priv->content_area) {
+        gtk_box_append(GTK_BOX(priv->content_area), GTK_WIDGET(child));
+    } else {
+        parent_buildable_iface->add_child(buildable, builder, child, type);
+    }
+}
+
+static void trg_dialog_buildable_init(GtkBuildableIface *iface)
+{
+    parent_buildable_iface = g_type_interface_peek_parent(iface);
+    iface->add_child = trg_dialog_buildable_add_child;
 }
 
 GtkWidget *trg_dialog_get_widget_for_response(TrgDialog *dialog, gint response_id)
@@ -129,11 +210,16 @@ static void trg_dialog_class_init(TrgDialogClass *klass)
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
     GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
     GtkWindowClass *window_class = GTK_WINDOW_CLASS(klass);
+    guint i;
 
     object_class->dispose = trg_dialog_dispose;
     window_class->close_request = trg_dialog_close_request;
 
     gtk_widget_class_add_binding_action(widget_class, GDK_KEY_Escape, 0, "window.close", NULL);
+    for (i = 0; i < G_N_ELEMENTS(response_actions); i++) {
+        g_autofree gchar *name = g_strconcat("dialog.", response_actions[i], NULL);
+        gtk_widget_class_install_action(widget_class, name, NULL, trg_dialog_response_action);
+    }
 
     signals[SIGNAL_RESPONSE] = g_signal_new("response", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
                                             0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_INT);
@@ -146,6 +232,10 @@ static void trg_dialog_init(TrgDialog *self)
 
     priv->content_area = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_set_vexpand(priv->content_area, TRUE);
+    gtk_widget_set_margin_start(priv->content_area, GUI_PAD);
+    gtk_widget_set_margin_end(priv->content_area, GUI_PAD);
+    gtk_widget_set_margin_top(priv->content_area, GUI_PAD);
+    gtk_widget_set_margin_bottom(priv->content_area, GUI_PAD);
     gtk_box_append(GTK_BOX(box), priv->content_area);
 
     priv->action_area = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, GUI_PAD);

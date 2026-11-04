@@ -1,0 +1,69 @@
+using Gtk 4.0;
+
+template $TrgTorrentAddUrlDialog: $TrgDialog {
+  title: _("Add torrent from URL");
+  destroy-with-parent: true;
+  default-widget: add_button;
+
+  Grid {
+    row-spacing: 6;
+    column-spacing: 12;
+    margin-start: 6;
+    margin-end: 6;
+    margin-top: 6;
+    margin-bottom: 6;
+    vexpand: true;
+
+    Label {
+      label: _("URL:");
+      xalign: 0;
+      margin-start: 18;
+      mnemonic-widget: url_entry;
+
+      layout {
+        column: 0;
+        row: 0;
+      }
+    }
+
+    Entry url_entry {
+      hexpand: true;
+      activates-default: true;
+      changed => $url_entry_changed();
+
+      layout {
+        column: 1;
+        row: 0;
+      }
+    }
+
+    CheckButton start_check {
+      label: _("Start Paused");
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 1;
+        column-span: 2;
+      }
+    }
+  }
+
+  [action]
+  Button {
+    label: _("_Close");
+    use-underline: true;
+    action-name: "dialog.cancel";
+  }
+
+  [action]
+  Button add_button {
+    label: _("_Add");
+    use-underline: true;
+    action-name: "dialog.accept";
+
+    styles [
+      "suggested-action",
+    ]
+  }
+}

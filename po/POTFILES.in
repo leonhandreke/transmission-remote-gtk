@@ -33,6 +33,7 @@ src/trg-status-bar.c
 src/trg-toolbar.blp
 src/trg-toolbar.c
 src/trg-torrent-add-dialog.c
+src/trg-torrent-add-url-dialog.blp
 src/trg-torrent-add-url-dialog.c
 src/trg-torrent-graph.c
 src/trg-torrent-model.c
