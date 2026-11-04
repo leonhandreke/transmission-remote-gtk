@@ -7,5 +7,6 @@
     <file preprocess="xml-stripblanks">trg-torrent-move-dialog.ui</file>
     <file preprocess="xml-stripblanks">trg-file-rename-dialog.ui</file>
     <file preprocess="xml-stripblanks">trg-general-panel.ui</file>
+    <file preprocess="xml-stripblanks">trg-stats-dialog.ui</file>
   </gresource>
 </gresources>

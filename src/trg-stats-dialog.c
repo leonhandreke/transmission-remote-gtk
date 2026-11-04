@@ -24,7 +24,6 @@
 #include <json-glib/json-glib.h>
 #include <libsoup/soup.h>
 
-#include "hig.h"
 #include "json.h"
 #include "requests.h"
 #include "trg-client.h"
@@ -63,6 +62,7 @@ struct _TrgStatsDialog {
     guint generation;
     guint in_flight_ticks; /* 0: no request pending */
     gboolean error_shown;
+    GtkWidget *grid;
     GtkWidget *session_labels[STAT_COUNT];
     GtkWidget *cumulat_labels[STAT_COUNT];
 };
@@ -105,6 +105,8 @@ static void trg_stats_dialog_dispose(GObject *object)
     g_clear_handle_id(&self->update_stats_timer_tag, g_source_remove);
     if (instance == self)
         instance = NULL;
+
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_STATS_DIALOG);
 
     G_OBJECT_CLASS(trg_stats_dialog_parent_class)->dispose(object);
 }
@@ -248,7 +250,7 @@ static gboolean trg_update_stats_timerfunc(gpointer data)
     TrgStatsDialog *dlg = TRG_STATS_DIALOG(data);
     gboolean connected = trg_client_is_connected(dlg->client);
 
-    gtk_widget_set_sensitive(trg_dialog_get_content_area(TRG_DIALOG(dlg)), connected);
+    gtk_widget_set_sensitive(dlg->grid, connected);
 
     if (!connected)
         dlg->in_flight_ticks = 0;
@@ -260,114 +262,58 @@ static gboolean trg_update_stats_timerfunc(gpointer data)
     return G_SOURCE_CONTINUE;
 }
 
-static GtkWidget *trg_stats_label_new(const gchar *text, const gchar *css_class)
+static void trg_stats_dialog_constructed(GObject *obj)
 {
-    GtkWidget *label = gtk_label_new(text);
-
-    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
-    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand(label, TRUE);
-    if (css_class)
-        gtk_widget_add_css_class(label, css_class);
-
-    return label;
-}
-
-static void trg_stats_add_statistic(TrgStatsDialog *dlg, GtkGrid *grid, TrgStat stat,
-                                    const gchar *name, GtkWidget *session_header,
-                                    GtkWidget *cumulat_header)
-{
-    GtkWidget *name_label = trg_stats_label_new(name, "dim-label");
-    GtkWidget *session = dlg->session_labels[stat] = trg_stats_label_new(NULL, NULL);
-    gint row = stat + 1;
-
-    gtk_grid_attach(grid, name_label, 0, row, 1, 1);
-
-    /* The version has no cumulative value, it may use both columns. */
-    if (stat == STAT_VERSION) {
-        gtk_grid_attach(grid, session, 1, row, 2, 1);
-        gtk_accessible_update_relation(GTK_ACCESSIBLE(session), GTK_ACCESSIBLE_RELATION_LABELLED_BY,
-                                       name_label, NULL, -1);
-    } else {
-        GtkWidget *cumulat = dlg->cumulat_labels[stat] = trg_stats_label_new(NULL, NULL);
-
-        gtk_grid_attach(grid, session, 1, row, 1, 1);
-        gtk_grid_attach(grid, cumulat, 2, row, 1, 1);
-        gtk_accessible_update_relation(GTK_ACCESSIBLE(session), GTK_ACCESSIBLE_RELATION_LABELLED_BY,
-                                       name_label, session_header, NULL, -1);
-        gtk_accessible_update_relation(GTK_ACCESSIBLE(cumulat), GTK_ACCESSIBLE_RELATION_LABELLED_BY,
-                                       name_label, cumulat_header, NULL, -1);
-    }
-}
-
-static GObject *trg_stats_dialog_constructor(GType type, guint n_construct_properties,
-                                             GObjectConstructParam *construct_params)
-{
-    GObject *obj = G_OBJECT_CLASS(trg_stats_dialog_parent_class)
-                       ->constructor(type, n_construct_properties, construct_params);
     TrgStatsDialog *dlg = TRG_STATS_DIALOG(obj);
-    GtkWidget *grid, *session_header, *cumulat_header;
 
-    gtk_window_set_title(GTK_WINDOW(obj), _("Statistics"));
+    G_OBJECT_CLASS(trg_stats_dialog_parent_class)->constructed(obj);
+
     gtk_window_set_transient_for(GTK_WINDOW(obj), GTK_WINDOW(dlg->parent_win));
-    gtk_window_set_destroy_with_parent(GTK_WINDOW(obj), TRUE);
-    trg_dialog_add_button(TRG_DIALOG(obj), _("_Close"), GTK_RESPONSE_CLOSE);
-
-    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(obj)), GUI_PAD);
-
-    trg_dialog_set_default_response(TRG_DIALOG(obj), GTK_RESPONSE_CLOSE);
 
     g_signal_connect(G_OBJECT(obj), "response", G_CALLBACK(trg_stats_response_cb), NULL);
-
-    /* A fixed table of values: a grid of labels, three equal columns
-     * (the old tree view had three 200 pixel columns). */
-    grid = gtk_grid_new();
-    gtk_grid_set_column_homogeneous(GTK_GRID(grid), TRUE);
-    gtk_grid_set_column_spacing(GTK_GRID(grid), GUI_PAD_BIG);
-    gtk_grid_set_row_spacing(GTK_GRID(grid), GUI_PAD);
-    gtk_widget_set_size_request(grid, 3 * 200, -1);
-    trg_widget_set_margins(grid, GUI_PAD);
-    gtk_widget_set_vexpand(grid, TRUE);
-
-    gtk_grid_attach(GTK_GRID(grid), trg_stats_label_new(_("Statistic"), "heading"), 0, 0, 1, 1);
-    session_header = trg_stats_label_new(_("Session"), "heading");
-    gtk_grid_attach(GTK_GRID(grid), session_header, 1, 0, 1, 1);
-    cumulat_header = trg_stats_label_new(_("Cumulative"), "heading");
-    gtk_grid_attach(GTK_GRID(grid), cumulat_header, 2, 0, 1, 1);
-
-    trg_stats_add_statistic(dlg, GTK_GRID(grid), STAT_VERSION, _("Version"), session_header,
-                            cumulat_header);
-    trg_stats_add_statistic(dlg, GTK_GRID(grid), STAT_DOWN, _("Download Total"), session_header,
-                            cumulat_header);
-    trg_stats_add_statistic(dlg, GTK_GRID(grid), STAT_UP, _("Upload Total"), session_header,
-                            cumulat_header);
-    trg_stats_add_statistic(dlg, GTK_GRID(grid), STAT_RATIO, _("Ratio"), session_header,
-                            cumulat_header);
-    trg_stats_add_statistic(dlg, GTK_GRID(grid), STAT_FILES_ADDED, _("Files Added"), session_header,
-                            cumulat_header);
-    trg_stats_add_statistic(dlg, GTK_GRID(grid), STAT_SESSION_COUNT, _("Session Count"),
-                            session_header, cumulat_header);
-    trg_stats_add_statistic(dlg, GTK_GRID(grid), STAT_ACTIVE, _("Time Active"), session_header,
-                            cumulat_header);
-
-    gtk_box_append(GTK_BOX(trg_dialog_get_content_area(TRG_DIALOG(obj))), grid);
 
     dlg->generation = ++instance_generation;
     trg_stats_dialog_request(dlg);
     dlg->update_stats_timer_tag
         = g_timeout_add_seconds(STATS_UPDATE_INTERVAL, trg_update_stats_timerfunc, dlg);
+}
 
-    return obj;
+/* Binds the labels of a statistic to its place in session_labels and
+ * cumulat_labels */
+static void trg_stats_dialog_bind_labels(GtkWidgetClass *widget_class, TrgStat stat,
+                                         const gchar *session, const gchar *cumulat)
+{
+    gtk_widget_class_bind_template_child_full(widget_class, session, FALSE,
+                                              G_STRUCT_OFFSET(TrgStatsDialog, session_labels)
+                                                  + stat * sizeof(GtkWidget *));
+    if (cumulat)
+        gtk_widget_class_bind_template_child_full(widget_class, cumulat, FALSE,
+                                                  G_STRUCT_OFFSET(TrgStatsDialog, cumulat_labels)
+                                                      + stat * sizeof(GtkWidget *));
 }
 
 static void trg_stats_dialog_class_init(TrgStatsDialogClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 
     object_class->get_property = trg_stats_dialog_get_property;
     object_class->set_property = trg_stats_dialog_set_property;
-    object_class->constructor = trg_stats_dialog_constructor;
+    object_class->constructed = trg_stats_dialog_constructed;
     object_class->dispose = trg_stats_dialog_dispose;
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-stats-dialog.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgStatsDialog, grid);
+    trg_stats_dialog_bind_labels(widget_class, STAT_VERSION, "version_session", NULL);
+    trg_stats_dialog_bind_labels(widget_class, STAT_DOWN, "down_session", "down_cumulat");
+    trg_stats_dialog_bind_labels(widget_class, STAT_UP, "up_session", "up_cumulat");
+    trg_stats_dialog_bind_labels(widget_class, STAT_RATIO, "ratio_session", "ratio_cumulat");
+    trg_stats_dialog_bind_labels(widget_class, STAT_FILES_ADDED, "files_added_session",
+                                 "files_added_cumulat");
+    trg_stats_dialog_bind_labels(widget_class, STAT_SESSION_COUNT, "session_count_session",
+                                 "session_count_cumulat");
+    trg_stats_dialog_bind_labels(widget_class, STAT_ACTIVE, "active_session", "active_cumulat");
 
     g_object_class_install_property(
         object_class, PROP_PARENT,
@@ -384,6 +330,7 @@ static void trg_stats_dialog_class_init(TrgStatsDialogClass *klass)
 
 static void trg_stats_dialog_init(TrgStatsDialog *self)
 {
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 TrgStatsDialog *trg_stats_dialog_get_instance(TrgMainWindow *parent, TrgClient *client)

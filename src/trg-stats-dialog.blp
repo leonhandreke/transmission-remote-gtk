@@ -1,0 +1,423 @@
+using Gtk 4.0;
+
+template $TrgStatsDialog: $TrgDialog {
+  title: _("Statistics");
+  destroy-with-parent: true;
+  default-widget: close_button;
+  // A fixed table of values: a grid of labels, three equal columns (the old
+  // tree view had three 200 pixel columns).
+  Grid grid {
+    column-homogeneous: true;
+    column-spacing: 12;
+    row-spacing: 6;
+    width-request: 600;
+    margin-start: 6;
+    margin-end: 6;
+    margin-top: 6;
+    margin-bottom: 6;
+    vexpand: true;
+
+    Label {
+      label: _("Statistic");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "heading",
+      ]
+
+      layout {
+        column: 0;
+        row: 0;
+      }
+    }
+
+    Label session_header {
+      label: _("Session");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "heading",
+      ]
+
+      layout {
+        column: 1;
+        row: 0;
+      }
+    }
+
+    Label cumulat_header {
+      label: _("Cumulative");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "heading",
+      ]
+
+      layout {
+        column: 2;
+        row: 0;
+      }
+    }
+
+    Label version_name {
+      label: _("Version");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "dim-label",
+      ]
+
+      layout {
+        column: 0;
+        row: 1;
+      }
+    }
+
+    Label version_session {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: version_name;
+      }
+
+      layout {
+        column: 1;
+        row: 1;
+        column-span: 2;
+      }
+    }
+
+    Label down_name {
+      label: _("Download Total");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "dim-label",
+      ]
+
+      layout {
+        column: 0;
+        row: 2;
+      }
+    }
+
+    Label down_session {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          down_name,
+          session_header,
+        ];
+      }
+
+      layout {
+        column: 1;
+        row: 2;
+      }
+    }
+
+    Label down_cumulat {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          down_name,
+          cumulat_header,
+        ];
+      }
+
+      layout {
+        column: 2;
+        row: 2;
+      }
+    }
+
+    Label up_name {
+      label: _("Upload Total");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "dim-label",
+      ]
+
+      layout {
+        column: 0;
+        row: 3;
+      }
+    }
+
+    Label up_session {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          up_name,
+          session_header,
+        ];
+      }
+
+      layout {
+        column: 1;
+        row: 3;
+      }
+    }
+
+    Label up_cumulat {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          up_name,
+          cumulat_header,
+        ];
+      }
+
+      layout {
+        column: 2;
+        row: 3;
+      }
+    }
+
+    Label ratio_name {
+      label: _("Ratio");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "dim-label",
+      ]
+
+      layout {
+        column: 0;
+        row: 4;
+      }
+    }
+
+    Label ratio_session {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          ratio_name,
+          session_header,
+        ];
+      }
+
+      layout {
+        column: 1;
+        row: 4;
+      }
+    }
+
+    Label ratio_cumulat {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          ratio_name,
+          cumulat_header,
+        ];
+      }
+
+      layout {
+        column: 2;
+        row: 4;
+      }
+    }
+
+    Label files_added_name {
+      label: _("Files Added");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "dim-label",
+      ]
+
+      layout {
+        column: 0;
+        row: 5;
+      }
+    }
+
+    Label files_added_session {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          files_added_name,
+          session_header,
+        ];
+      }
+
+      layout {
+        column: 1;
+        row: 5;
+      }
+    }
+
+    Label files_added_cumulat {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          files_added_name,
+          cumulat_header,
+        ];
+      }
+
+      layout {
+        column: 2;
+        row: 5;
+      }
+    }
+
+    Label session_count_name {
+      label: _("Session Count");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "dim-label",
+      ]
+
+      layout {
+        column: 0;
+        row: 6;
+      }
+    }
+
+    Label session_count_session {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          session_count_name,
+          session_header,
+        ];
+      }
+
+      layout {
+        column: 1;
+        row: 6;
+      }
+    }
+
+    Label session_count_cumulat {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          session_count_name,
+          cumulat_header,
+        ];
+      }
+
+      layout {
+        column: 2;
+        row: 6;
+      }
+    }
+
+    Label active_name {
+      label: _("Time Active");
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      styles [
+        "dim-label",
+      ]
+
+      layout {
+        column: 0;
+        row: 7;
+      }
+    }
+
+    Label active_session {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          active_name,
+          session_header,
+        ];
+      }
+
+      layout {
+        column: 1;
+        row: 7;
+      }
+    }
+
+    Label active_cumulat {
+      xalign: 0;
+      ellipsize: end;
+      hexpand: true;
+
+      accessibility {
+        labelled-by: [
+          active_name,
+          cumulat_header,
+        ];
+      }
+
+      layout {
+        column: 2;
+        row: 7;
+      }
+    }
+  }
+
+  [action]
+  Button close_button {
+    label: _("_Close");
+    use-underline: true;
+    action-name: "dialog.close";
+
+    styles [
+      "suggested-action",
+    ]
+  }
+}
