@@ -20,6 +20,7 @@ src/trg-general-panel.c
 src/trg-gtk-app.c
 src/trg-json-widgets.c
 src/trg-main-window.c
+src/trg-menu-bar.blp
 src/trg-menu-bar.c
 src/trg-model.c
 src/trg-peers-model.c

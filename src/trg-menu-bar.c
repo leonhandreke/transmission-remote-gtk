@@ -53,6 +53,7 @@ struct _TrgMenuBar {
 
     GMenu *menu;
     GMenu *queue_section;
+    GMenuModel *queue_items;
     gboolean queues_shown;
     TrgPrefs *prefs;
     TrgMainWindow *main_window;
@@ -83,13 +84,16 @@ static void trg_menu_bar_set_enabled(TrgMenuBar *mb, const gchar **names, guint 
     }
 }
 
-static void trg_menu_bar_queue_section_fill(GMenu *section)
+/* Appends (copies of) the items of a menu from the GtkBuilder file */
+static void trg_menu_append_items(GMenu *menu, GMenuModel *items)
 {
-    g_menu_append(section, _("Start Now"), "win.start-now");
-    g_menu_append(section, _("Move Up Queue"), "win.up-queue");
-    g_menu_append(section, _("Move Down Queue"), "win.down-queue");
-    g_menu_append(section, _("Bottom Of Queue"), "win.bottom-queue");
-    g_menu_append(section, _("Top Of Queue"), "win.top-queue");
+    gint i;
+
+    for (i = 0; i < g_menu_model_get_n_items(items); i++) {
+        GMenuItem *item = g_menu_item_new_from_model(items, i);
+        g_menu_append_item(menu, item);
+        g_object_unref(item);
+    }
 }
 
 void trg_menu_bar_set_supports_queues(TrgMenuBar *mb, gboolean supportsQueues)
@@ -100,7 +104,7 @@ void trg_menu_bar_set_supports_queues(TrgMenuBar *mb, gboolean supportsQueues)
         return;
 
     if (supportsQueues)
-        trg_menu_bar_queue_section_fill(mb->queue_section);
+        trg_menu_append_items(mb->queue_section, mb->queue_items);
     else
         g_menu_remove_all(mb->queue_section);
 
@@ -140,18 +144,57 @@ static void trg_menu_bar_get_property(GObject *object, guint property_id, GValue
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
 }
 
-static GMenuItem *trg_menu_bar_item_new(const gchar *label, const gchar *action)
+/* "win.style" has the nick of the style as its state, so it can be the
+ * target of the items in the GtkBuilder file */
+static const gchar *style_nicks[] = {
+    [TRG_STYLE_TR] = "transmission",
+    [TRG_STYLE_CLASSIC] = "classic",
+    [TRG_STYLE_TR_COMPACT] = "transmission-compact",
+};
+
+static GVariant *trg_menu_bar_style_state(TrgPrefs *p)
 {
-    return g_menu_item_new(label, action);
+    gint64 style = trg_prefs_get_int(p, TRG_PREFS_KEY_STYLE, TRG_PREFS_GLOBAL);
+
+    if (style < 0 || style >= (gint64)G_N_ELEMENTS(style_nicks))
+        style = TRG_STYLE_TR;
+
+    return g_variant_new_string(style_nicks[style]);
 }
 
-static void view_menu_radio_item_change_state(GSimpleAction *action, GVariant *value, gpointer data)
+static void style_change_state(GSimpleAction *action, GVariant *value, gpointer data)
 {
-    TrgPrefs *p = TRG_PREFS(data);
-    const gchar *key = (gchar *)g_object_get_data(G_OBJECT(action), G_DATAKEY_CONF_KEY);
+    const gchar *nick = g_variant_get_string(value, NULL);
+    guint i;
 
-    g_simple_action_set_state(action, value);
-    trg_prefs_set_int(p, key, g_variant_get_int32(value), TRG_PREFS_GLOBAL);
+    for (i = 0; i < G_N_ELEMENTS(style_nicks); i++) {
+        if (g_strcmp0(nick, style_nicks[i]) == 0) {
+            g_simple_action_set_state(action, value);
+            trg_prefs_set_int(TRG_PREFS(data), TRG_PREFS_KEY_STYLE, i, TRG_PREFS_GLOBAL);
+            break;
+        }
+    }
+}
+
+static void style_update(TrgPrefs *p, const gchar *updatedKey, gpointer data)
+{
+    GSimpleAction *action = G_SIMPLE_ACTION(data);
+    g_autoptr(GVariant) state = g_action_get_state(G_ACTION(action));
+    g_autoptr(GVariant) value = g_variant_ref_sink(trg_menu_bar_style_state(p));
+
+    if (g_strcmp0(updatedKey, TRG_PREFS_KEY_STYLE) == 0 && !g_variant_equal(state, value))
+        g_simple_action_set_state(action, value);
+}
+
+static void trg_menu_bar_style_action_new(TrgMenuBar *mb)
+{
+    GSimpleAction *action = g_simple_action_new_stateful("style", G_VARIANT_TYPE_STRING,
+                                                         trg_menu_bar_style_state(mb->prefs));
+
+    g_signal_connect(action, "change-state", G_CALLBACK(style_change_state), mb->prefs);
+    g_signal_connect_object(mb->prefs, "pref-changed", G_CALLBACK(style_update), action, 0);
+    g_action_map_add_action(G_ACTION_MAP(mb->main_window), G_ACTION(action));
+    g_object_unref(action);
 }
 
 static void view_menu_item_change_state(GSimpleAction *action, GVariant *value, gpointer data)
@@ -189,27 +232,10 @@ static void trg_menu_bar_view_item_update(TrgPrefs *p, const gchar *updatedKey, 
         g_simple_action_set_state(action, g_variant_new_boolean(value));
 }
 
-static void trg_menu_bar_view_radio_item_update(TrgPrefs *p, const gchar *updatedKey, gpointer data)
-{
-    GSimpleAction *action = G_SIMPLE_ACTION(data);
-    const gchar *key = (gchar *)g_object_get_data(G_OBJECT(action), G_DATAKEY_CONF_KEY);
-    g_autoptr(GVariant) state = g_action_get_state(G_ACTION(action));
-    gint value;
-
-    if (g_strcmp0(updatedKey, key))
-        return;
-
-    value = trg_prefs_get_int(p, key, TRG_PREFS_GLOBAL);
-    if (value != g_variant_get_int32(state))
-        g_simple_action_set_state(action, g_variant_new_int32(value));
-}
-
 static GSimpleAction *trg_menu_bar_view_action_new(TrgMenuBar *mb, const gchar *name,
                                                    GVariant *state, const gchar *key)
 {
-    GSimpleAction *action = g_simple_action_new_stateful(
-        name, g_variant_is_of_type(state, G_VARIANT_TYPE_BOOLEAN) ? NULL : G_VARIANT_TYPE_INT32,
-        state);
+    GSimpleAction *action = g_simple_action_new_stateful(name, NULL, state);
 
     g_object_set_data_full(G_OBJECT(action), G_DATAKEY_CONF_KEY, g_strdup(key), g_free);
     g_action_map_add_action(G_ACTION_MAP(mb->main_window), G_ACTION(action));
@@ -218,38 +244,12 @@ static GSimpleAction *trg_menu_bar_view_action_new(TrgMenuBar *mb, const gchar *
     return action;
 }
 
-static void trg_menu_bar_view_radio_item_new(TrgMenuBar *mb, GMenu *menu, const gchar *key,
-                                             gint index, const gchar *label)
-{
-    GSimpleAction *action
-        = G_SIMPLE_ACTION(g_action_map_lookup_action(G_ACTION_MAP(mb->main_window), key));
-    GMenuItem *item;
-    gchar *name;
-
-    if (!action) {
-        action = trg_menu_bar_view_action_new(
-            mb, key, g_variant_new_int32(trg_prefs_get_int(mb->prefs, key, TRG_PREFS_GLOBAL)), key);
-        g_signal_connect(action, "change-state", G_CALLBACK(view_menu_radio_item_change_state),
-                         mb->prefs);
-        g_signal_connect_object(mb->prefs, "pref-changed",
-                                G_CALLBACK(trg_menu_bar_view_radio_item_update), action, 0);
-    }
-
-    name = g_strconcat("win.", key, NULL);
-    item = trg_menu_bar_item_new(label, NULL);
-    g_menu_item_set_action_and_target(item, name, "i", index);
-    g_menu_append_item(menu, item);
-    g_object_unref(item);
-    g_free(name);
-}
-
-static void trg_menu_bar_view_item_new(TrgMenuBar *mb, GMenu *menu, const gchar *name,
-                                       const gchar *key, const gchar *label,
+/* A boolean preference, as stateful "win.<name>" action */
+static void trg_menu_bar_view_item_new(TrgMenuBar *mb, const gchar *name, const gchar *key,
                                        const gchar *dependency)
 {
     GSimpleAction *action = trg_menu_bar_view_action_new(
         mb, name, g_variant_new_boolean(trg_prefs_get_bool(mb->prefs, key, TRG_PREFS_GLOBAL)), key);
-    gchar *detailed = g_strconcat("win.", name, NULL);
 
     if (dependency) {
         GAction *dep = g_action_map_lookup_action(G_ACTION_MAP(mb->main_window), dependency);
@@ -260,59 +260,31 @@ static void trg_menu_bar_view_item_new(TrgMenuBar *mb, GMenu *menu, const gchar 
     g_signal_connect(action, "change-state", G_CALLBACK(view_menu_item_change_state), mb->prefs);
     g_signal_connect_object(mb->prefs, "pref-changed", G_CALLBACK(trg_menu_bar_view_item_update),
                             action, 0);
-
-    g_menu_append(menu, label, detailed);
-    g_free(detailed);
 }
 
-static GMenu *trg_menu_bar_view_menu_new(TrgMenuBar *mb)
+static void trg_menu_bar_view_menu_fill(TrgMenuBar *mb, GMenu *viewSection)
 {
-    GMenu *viewMenu = g_menu_new();
     GMenu *sortMenu;
     GAction *viewStates;
 
-    trg_menu_bar_view_radio_item_new(mb, viewMenu, TRG_PREFS_KEY_STYLE, TRG_STYLE_TR,
-                                     _("Transmission Style"));
-    trg_menu_bar_view_radio_item_new(mb, viewMenu, TRG_PREFS_KEY_STYLE, TRG_STYLE_TR_COMPACT,
-                                     _("Transmission Compact Style"));
-    trg_menu_bar_view_radio_item_new(mb, viewMenu, TRG_PREFS_KEY_STYLE, TRG_STYLE_CLASSIC,
-                                     _("Classic Style"));
+    trg_menu_bar_style_action_new(mb);
 
     sortMenu = trg_tree_view_sort_menu(TRG_TREE_VIEW(mb->torrent_tree_view),
                                        G_ACTION_MAP(mb->main_window));
-    g_menu_append_submenu(viewMenu, _("Sort"), G_MENU_MODEL(sortMenu));
+    g_menu_insert_submenu(viewSection, 0, _("Sort"), G_MENU_MODEL(sortMenu));
     g_object_unref(sortMenu);
 
-    trg_menu_bar_view_item_new(mb, viewMenu, "view-states", TRG_PREFS_KEY_SHOW_STATE_SELECTOR,
-                               _("State selector"), NULL);
-    trg_menu_bar_view_item_new(mb, viewMenu, "filter-dirs", TRG_PREFS_KEY_FILTER_DIRS,
-                               _("Directory filters"), "view-states");
-    trg_menu_bar_view_item_new(mb, viewMenu, "filter-trackers", TRG_PREFS_KEY_FILTER_TRACKERS,
-                               _("Tracker filters"), "view-states");
-    trg_menu_bar_view_item_new(mb, viewMenu, "directories-first", TRG_PREFS_KEY_DIRECTORIES_FIRST,
-                               _("Directories first"), "view-states");
+    trg_menu_bar_view_item_new(mb, "view-states", TRG_PREFS_KEY_SHOW_STATE_SELECTOR, NULL);
+    trg_menu_bar_view_item_new(mb, "filter-dirs", TRG_PREFS_KEY_FILTER_DIRS, "view-states");
+    trg_menu_bar_view_item_new(mb, "filter-trackers", TRG_PREFS_KEY_FILTER_TRACKERS, "view-states");
+    trg_menu_bar_view_item_new(mb, "directories-first", TRG_PREFS_KEY_DIRECTORIES_FIRST,
+                               "view-states");
 
     viewStates = g_action_map_lookup_action(G_ACTION_MAP(mb->main_window), "view-states");
     g_signal_connect_object(viewStates, "notify::state",
                             G_CALLBACK(view_menu_bar_toggled_dependency_cb), mb, 0);
 
-    trg_menu_bar_view_item_new(mb, viewMenu, "view-notebook", TRG_PREFS_KEY_SHOW_NOTEBOOK,
-                               _("Torrent Details"), NULL);
-
-    g_menu_append(viewMenu, _("_Statistics"), "win.view-stats");
-
-    return viewMenu;
-}
-
-static GMenu *trg_menu_bar_options_menu_new(TrgMenuBar *mb)
-{
-    GMenu *optsMenu = g_menu_new();
-
-    if (!trg_is_macos())
-        g_menu_append(optsMenu, _("_Local Preferences"), "win.local-prefs");
-    g_menu_append(optsMenu, _("_Remote Preferences"), "win.remote-prefs");
-
-    return optsMenu;
+    trg_menu_bar_view_item_new(mb, "view-notebook", TRG_PREFS_KEY_SHOW_NOTEBOOK, NULL);
 }
 
 static void trg_menu_bar_file_connect_menu_fill(GMenu *menu, TrgPrefs *p)
@@ -334,7 +306,7 @@ static void trg_menu_bar_file_connect_menu_fill(GMenu *menu, TrgPrefs *p)
 
         /* The connect action's state is the current profile, so the items
          * display as radio items like they did in GTK 3. */
-        item = trg_menu_bar_item_new(name_value, NULL);
+        item = g_menu_item_new(name_value, NULL);
         g_menu_item_set_action_and_target(item, "win.connect", "i", i);
         g_menu_append_item(menu, item);
         g_object_unref(item);
@@ -392,99 +364,13 @@ static void menu_bar_refresh_menu(TrgPrefs *p, gpointer data)
                                   g_variant_new_int32(trg_menu_bar_current_profile_index(p)));
 }
 
-static GMenu *trg_menu_bar_file_file_menu_new(TrgMenuBar *mb)
-{
-    GMenu *fileMenu = g_menu_new();
-    GMenu *connectMenu = trg_menu_bar_file_connect_menu_new(mb->main_window, mb->prefs);
-
-    g_menu_append_submenu(fileMenu, _("Connect"), G_MENU_MODEL(connectMenu));
-    g_object_unref(connectMenu);
-
-    g_menu_append(fileMenu, _("_Disconnect"), "win.disconnect");
-    g_menu_append(fileMenu, _("_Add"), "win.add");
-    g_menu_append(fileMenu, _("Add from _URL"), "win.add-url");
-    /* macOS has Quit in the application menu */
-    if (trg_is_macos())
-        g_menu_append(fileMenu, _("Close Window"), "app.close-window");
-    else
-        g_menu_append(fileMenu, _("_Quit"), "app.quit");
-
-    return fileMenu;
-}
-
-static GMenu *trg_menu_bar_torrent_menu_new(TrgMenuBar *mb)
-{
-    GMenu *torrentMenu = g_menu_new();
-    GMenu *section = g_menu_new();
-
-    g_menu_append(section, _("Properties"), "win.properties");
-    g_menu_append(section, _("_Copy Magnet Link"), "win.copy-magnet");
-    g_menu_append(section, _("_Resume"), "win.resume");
-    g_menu_append(section, _("_Pause"), "win.pause");
-    g_menu_append(section, _("_Verify"), "win.verify");
-    g_menu_append(section, _("Re-_announce"), "win.reannounce");
-    g_menu_append(section, _("_Move"), "win.move");
-    g_menu_append(section, _("Remove"), "win.remove");
-    g_menu_append(section, _("Remove and delete data"), "win.delete");
-    g_menu_append_section(torrentMenu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    mb->queue_section = g_menu_new();
-    trg_menu_bar_queue_section_fill(mb->queue_section);
-    mb->queues_shown = TRUE;
-    g_menu_append_section(torrentMenu, NULL, G_MENU_MODEL(mb->queue_section));
-
-    section = g_menu_new();
-    g_menu_append(section, _("_Resume All"), "win.resume-all");
-    g_menu_append(section, _("_Pause All"), "win.pause-all");
-    g_menu_append_section(torrentMenu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    return torrentMenu;
-}
-
-static GMenu *trg_menu_bar_help_menu_new(TrgMenuBar *menuBar)
-{
-    GMenu *helpMenu = g_menu_new();
-
-    g_menu_append(helpMenu, _("_About"), "win.about");
-
-    return helpMenu;
-}
-
-/* macOS: this replaces GTK's default Edit menu, which is what makes the
- * standard editing shortcuts work in native dialogs (file choosers) too. */
-static GMenu *trg_menu_bar_edit_menu_new(void)
-{
-    GMenu *editMenu = g_menu_new();
-    GMenu *section = g_menu_new();
-
-    g_menu_append(section, _("Undo"), "text.undo");
-    g_menu_append(section, _("Redo"), "text.redo");
-    g_menu_append_section(editMenu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    section = g_menu_new();
-    g_menu_append(section, _("Cut"), "clipboard.cut");
-    g_menu_append(section, _("Copy"), "clipboard.copy");
-    g_menu_append(section, _("Paste"), "clipboard.paste");
-    g_menu_append(section, _("Select All"), "selection.select-all");
-    g_menu_append_section(editMenu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    return editMenu;
-}
-
-static void trg_menu_bar_append_submenu(GMenu *menu, const gchar *label, GMenu *submenu)
-{
-    g_menu_append_submenu(menu, label, G_MENU_MODEL(submenu));
-    g_object_unref(submenu);
-}
-
 static void trg_menu_bar_constructed(GObject *object)
 {
     TrgMenuBar *mb = TRG_MENU_BAR(object);
+    gboolean macos = trg_is_macos();
     GSimpleAction *connect;
+    GtkBuilder *builder;
+    GMenu *connectMenu, *fileMenu;
 
     G_OBJECT_CLASS(trg_menu_bar_parent_class)->constructed(object);
 
@@ -495,29 +381,43 @@ static void trg_menu_bar_constructed(GObject *object)
         g_simple_action_set_state(
             connect, g_variant_new_int32(trg_menu_bar_current_profile_index(mb->prefs)));
 
-    mb->menu = g_menu_new();
-    trg_menu_bar_append_submenu(mb->menu, _("_File"), trg_menu_bar_file_file_menu_new(mb));
-    if (trg_is_macos())
-        trg_menu_bar_append_submenu(mb->menu, _("_Edit"), trg_menu_bar_edit_menu_new());
-    trg_menu_bar_append_submenu(mb->menu, _("_Torrent"), trg_menu_bar_torrent_menu_new(mb));
-    trg_menu_bar_append_submenu(mb->menu, _("_Options"), trg_menu_bar_options_menu_new(mb));
-    trg_menu_bar_append_submenu(mb->menu, _("_View"), trg_menu_bar_view_menu_new(mb));
+    builder = gtk_builder_new_from_resource("/io/github/TransmissionRemoteGtk/ui/trg-menu-bar.ui");
+    mb->menu = g_object_ref(G_MENU(gtk_builder_get_object(builder, "main_menu")));
 
-    if (trg_is_macos()) {
-        /* macOS adds the window list and tiling items to the Window menu */
-        GMenu *windowMenu = g_menu_new();
-        GMenuItem *item = g_menu_item_new_submenu(_("_Window"), G_MENU_MODEL(windowMenu));
+    /* The connect submenu of the File menu */
+    connectMenu = G_MENU(gtk_builder_get_object(builder, "connect_menu"));
+    trg_menu_bar_file_connect_menu_fill(connectMenu, mb->prefs);
+    g_signal_connect_object(mb->prefs, "pref-profile-changed",
+                            G_CALLBACK(trg_menu_bar_file_connect_menu_refresh), connectMenu, 0);
 
-        g_menu_append(windowMenu, _("Minimize"), "app.minimize");
-        g_menu_append(windowMenu, _("Zoom"), "app.zoom");
+    /* Quit, or on macOS (where it's in the application menu) Close Window */
+    fileMenu = G_MENU(gtk_builder_get_object(builder, "file_menu"));
+    g_menu_remove(fileMenu, g_menu_model_get_n_items(G_MENU_MODEL(fileMenu)) - (macos ? 2 : 1));
 
-        g_menu_item_set_attribute(item, "gtk-macos-special", "s", "window-submenu");
-        g_menu_append_item(mb->menu, item);
-        g_object_unref(item);
-        g_object_unref(windowMenu);
+    mb->queue_section = g_object_ref(G_MENU(gtk_builder_get_object(builder, "queue_section")));
+    mb->queue_items = g_object_ref(G_MENU_MODEL(gtk_builder_get_object(builder, "queue_items")));
+    trg_menu_append_items(mb->queue_section, mb->queue_items);
+    mb->queues_shown = TRUE;
+
+    /* macOS has Preferences in the application menu */
+    if (macos)
+        g_menu_remove(G_MENU(gtk_builder_get_object(builder, "options_menu")), 0);
+
+    trg_menu_bar_view_menu_fill(mb, G_MENU(gtk_builder_get_object(builder, "view_section")));
+
+    if (macos) {
+        GMenuItem *edit = g_menu_item_new_from_model(
+            G_MENU_MODEL(gtk_builder_get_object(builder, "macos_edit_menu")), 0);
+        g_menu_insert_item(mb->menu, 1, edit);
+        g_object_unref(edit);
+
+        trg_menu_append_items(mb->menu,
+                              G_MENU_MODEL(gtk_builder_get_object(builder, "macos_window_menu")));
     } else {
-        trg_menu_bar_append_submenu(mb->menu, _("_Help"), trg_menu_bar_help_menu_new(mb));
+        trg_menu_append_items(mb->menu, G_MENU_MODEL(gtk_builder_get_object(builder, "help_menu")));
     }
+
+    g_object_unref(builder);
 
     trg_menu_bar_connected_change(mb, FALSE);
     trg_menu_bar_torrent_actions_sensitive(mb, FALSE);
@@ -531,6 +431,7 @@ static void trg_menu_bar_dispose(GObject *object)
     TrgMenuBar *mb = TRG_MENU_BAR(object);
 
     g_clear_object(&mb->queue_section);
+    g_clear_object(&mb->queue_items);
     g_clear_object(&mb->menu);
 
     G_OBJECT_CLASS(trg_menu_bar_parent_class)->dispose(object);

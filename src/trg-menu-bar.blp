@@ -1,0 +1,277 @@
+using Gtk 4.0;
+// The main menu. Parts of it depend on the platform, the server and the
+// preferences, so TrgMenuBar fills in the profiles, the sort menu and the
+// queue items, and adds the menus below that are specific to a platform.
+menu main_menu {
+  submenu file_menu {
+    label: _("_File");
+
+    submenu connect_menu {
+      label: _("Connect");
+    }
+
+    item {
+      label: _("_Disconnect");
+      action: "win.disconnect";
+    }
+
+    item {
+      label: _("_Add");
+      action: "win.add";
+    }
+
+    item {
+      label: _("Add from _URL");
+      action: "win.add-url";
+    }
+
+    // Only one of these two stays, macOS has Quit in the application menu.
+    item {
+      label: _("_Quit");
+      action: "app.quit";
+    }
+
+    item {
+      label: _("Close Window");
+      action: "app.close-window";
+    }
+  }
+
+  submenu {
+    label: _("_Torrent");
+
+    section {
+      item {
+        label: _("Properties");
+        action: "win.properties";
+      }
+
+      item {
+        label: _("_Copy Magnet Link");
+        action: "win.copy-magnet";
+      }
+
+      item {
+        label: _("_Resume");
+        action: "win.resume";
+      }
+
+      item {
+        label: _("_Pause");
+        action: "win.pause";
+      }
+
+      item {
+        label: _("_Verify");
+        action: "win.verify";
+      }
+
+      item {
+        label: _("Re-_announce");
+        action: "win.reannounce";
+      }
+
+      item {
+        label: _("_Move");
+        action: "win.move";
+      }
+
+      item {
+        label: _("Remove");
+        action: "win.remove";
+      }
+
+      item {
+        label: _("Remove and delete data");
+        action: "win.delete";
+      }
+    }
+
+    // The items of queue_items, while the server supports queues
+    section queue_section {}
+
+    section {
+      item {
+        label: _("_Resume All");
+        action: "win.resume-all";
+      }
+
+      item {
+        label: _("_Pause All");
+        action: "win.pause-all";
+      }
+    }
+  }
+
+  submenu options_menu {
+    label: _("_Options");
+    // Not on macOS, where it's Preferences in the application menu
+    item {
+      label: _("_Local Preferences");
+      action: "win.local-prefs";
+    }
+
+    item {
+      label: _("_Remote Preferences");
+      action: "win.remote-prefs";
+    }
+  }
+
+  submenu {
+    label: _("_View");
+
+    section {
+      item {
+        label: _("Transmission Style");
+        action: "win.style";
+        target: "transmission";
+      }
+
+      item {
+        label: _("Transmission Compact Style");
+        action: "win.style";
+        target: "transmission-compact";
+      }
+
+      item {
+        label: _("Classic Style");
+        action: "win.style";
+        target: "classic";
+      }
+    }
+
+    // The Sort menu of the torrent list goes first
+    section view_section {
+      item {
+        label: _("State selector");
+        action: "win.view-states";
+      }
+
+      item {
+        label: _("Directory filters");
+        action: "win.filter-dirs";
+      }
+
+      item {
+        label: _("Tracker filters");
+        action: "win.filter-trackers";
+      }
+
+      item {
+        label: _("Directories first");
+        action: "win.directories-first";
+      }
+
+      item {
+        label: _("Torrent Details");
+        action: "win.view-notebook";
+      }
+    }
+
+    section {
+      item {
+        label: _("_Statistics");
+        action: "win.view-stats";
+      }
+    }
+  }
+}
+
+menu queue_items {
+  item {
+    label: _("Start Now");
+    action: "win.start-now";
+  }
+
+  item {
+    label: _("Move Up Queue");
+    action: "win.up-queue";
+  }
+
+  item {
+    label: _("Move Down Queue");
+    action: "win.down-queue";
+  }
+
+  item {
+    label: _("Bottom Of Queue");
+    action: "win.bottom-queue";
+  }
+
+  item {
+    label: _("Top Of Queue");
+    action: "win.top-queue";
+  }
+}
+
+// Not on macOS, which has About in the application menu
+menu help_menu {
+  submenu {
+    label: _("_Help");
+
+    item {
+      label: _("_About");
+      action: "win.about";
+    }
+  }
+}
+
+// macOS: this replaces GTK's default Edit menu, which is what makes the
+// standard editing shortcuts work in native dialogs (file choosers) too.
+menu macos_edit_menu {
+  submenu {
+    label: _("_Edit");
+
+    section {
+      item {
+        label: _("Undo");
+        action: "text.undo";
+      }
+
+      item {
+        label: _("Redo");
+        action: "text.redo";
+      }
+    }
+
+    section {
+      item {
+        label: _("Cut");
+        action: "clipboard.cut";
+      }
+
+      item {
+        label: _("Copy");
+        action: "clipboard.copy";
+      }
+
+      item {
+        label: _("Paste");
+        action: "clipboard.paste";
+      }
+
+      item {
+        label: _("Select All");
+        action: "selection.select-all";
+      }
+    }
+  }
+}
+
+// macOS adds the window list and tiling items to the Window menu
+menu macos_window_menu {
+  submenu {
+    label: _("_Window");
+    gtk-macos-special: "window-submenu";
+
+    item {
+      label: _("Minimize");
+      action: "app.minimize";
+    }
+
+    item {
+      label: _("Zoom");
+      action: "app.zoom";
+    }
+  }
+}
