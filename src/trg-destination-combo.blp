@@ -1,0 +1,16 @@
+using Gtk 4.0;
+
+template $TrgDestinationCombo: Box {
+  styles [
+    "linked",
+  ]
+
+  Entry entry {
+    activates-default: true;
+    hexpand: true;
+    changed => $trg_destination_combo_entry_changed_cb();
+  }
+
+  // Its menu (the directories) is made once the client is known
+  MenuButton button {}
+}

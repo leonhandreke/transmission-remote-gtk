@@ -16,5 +16,6 @@
     <file preprocess="xml-stripblanks">trg-main-window.ui</file>
     <file preprocess="xml-stripblanks">trg-files-tree-view.ui</file>
     <file preprocess="xml-stripblanks">trg-trackers-tree-view.ui</file>
+    <file preprocess="xml-stripblanks">trg-destination-combo.ui</file>
   </gresource>
 </gresources>

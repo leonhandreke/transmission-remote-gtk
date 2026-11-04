@@ -53,6 +53,7 @@ src_files = files(
 blueprint_compiler = find_program('blueprint-compiler', version: '>= 0.16')
 
 blueprint_files = files(
+  'trg-destination-combo.blp',
   'trg-file-rename-dialog.blp',
   'trg-files-tree-view.blp',
   'trg-general-panel.blp',

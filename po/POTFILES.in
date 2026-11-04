@@ -11,6 +11,7 @@ src/torrent.c
 src/torrent-row.c
 src/trg-about-window.c
 src/trg-client.c
+src/trg-destination-combo.blp
 src/trg-destination-combo.c
 src/trg-file-parser.c
 src/trg-files-model.c

@@ -273,13 +273,8 @@ static void trg_destination_combo_constructed(GObject *object)
     g_object_unref(actions);
 
     menu = trg_destination_combo_menu_new(self);
-    self->button = gtk_menu_button_new();
     gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(self->button), menu);
     g_object_unref(menu);
-    gtk_box_append(GTK_BOX(self), self->button);
-
-    g_signal_connect(self->entry, "changed", G_CALLBACK(trg_destination_combo_entry_changed_cb),
-                     self);
 
     /* Restore any previous selection, or the default dir (the first item) */
     if (self->last_selection)
@@ -297,10 +292,19 @@ static void trg_destination_combo_constructed(GObject *object)
     g_free(lastDestination);
 }
 
+static void trg_destination_combo_dispose(GObject *object)
+{
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_DESTINATION_COMBO);
+
+    G_OBJECT_CLASS(trg_destination_combo_parent_class)->dispose(object);
+}
+
 static void trg_destination_combo_class_init(TrgDestinationComboClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 
+    object_class->dispose = trg_destination_combo_dispose;
     object_class->get_property = trg_destination_combo_get_property;
     object_class->set_property = trg_destination_combo_set_property;
     object_class->finalize = trg_destination_combo_finalize;
@@ -318,18 +322,19 @@ static void trg_destination_combo_class_init(TrgDestinationComboClass *klass)
 
     signals[SIGNAL_CHANGED] = g_signal_new("changed", G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST,
                                            0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-destination-combo.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgDestinationCombo, entry);
+    gtk_widget_class_bind_template_child(widget_class, TrgDestinationCombo, button);
+    gtk_widget_class_bind_template_callback(widget_class, trg_destination_combo_entry_changed_cb);
 }
 
 static void trg_destination_combo_init(TrgDestinationCombo *self)
 {
     self->store = g_list_store_new(TRG_TYPE_DESTINATION_ITEM);
 
-    gtk_widget_add_css_class(GTK_WIDGET(self), "linked");
-
-    self->entry = gtk_entry_new();
-    gtk_entry_set_activates_default(GTK_ENTRY(self->entry), TRUE);
-    gtk_widget_set_hexpand(self->entry, TRUE);
-    gtk_box_append(GTK_BOX(self), self->entry);
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 GtkWidget *trg_destination_combo_new(TrgClient *client, const gchar *lastSelectionKey)
