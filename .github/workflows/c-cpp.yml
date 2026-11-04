@@ -5,30 +5,42 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: install deps
         run: |
           sudo apt-get update
-          sudo apt-get upgrade
-          sudo apt-get install meson gcc \
-                               libgtk-4-dev \
-                               libjson-glib-dev \
-                               libsoup-3.0-dev \
-                               gettext \
-                               \
-                               libappstream-dev \
-                               appstream
+          sudo apt-get install -y meson gcc \
+                                  libgtk-4-dev \
+                                  libjson-glib-dev \
+                                  libsoup-3.0-dev \
+                                  gettext \
+                                  \
+                                  libappstream-dev \
+                                  appstream \
+                                  \
+                                  python3-gi
       - name: meson configure
         run: meson setup build
       - name: build
         run: meson compile -C build
       - name: dist
         run: meson dist -C build
+      - name: translation template
+        # Fails if po/POTFILES.in lists files that don't exist
+        run: meson compile -C build transmission-remote-gtk-pot
 
   build-macos:
     runs-on: macos-latest
@@ -36,7 +48,7 @@ jobs:
       # icu4c is keg only
       PKG_CONFIG_PATH: /opt/homebrew/opt/icu4c/lib/pkgconfig
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: install deps
         run: |
           brew install meson \
@@ -44,7 +56,7 @@ jobs:
                        gtk4 \
                        json-glib \
                        libsoup \
-                       gettext\
+                       gettext \
                        librsvg \
                        adwaita-icon-theme \
                        glib-networking \
@@ -59,10 +71,11 @@ jobs:
         run: meson dist -C build
       - name: application bundle
         run: meson compile -C build macos-dmg
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-dmg
           path: build/macos-dist/*.dmg
+          if-no-files-found: error
 
   build-windows:
     runs-on: windows-latest
@@ -71,28 +84,26 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: msys2/setup-msys2@v2
-      - name: install deps
-        run: |
-          mingw="mingw-w64-x86_64"
-          pacman -S --noconfirm \
-                    git \
-                    ${mingw}-gcc \
-                    ${mingw}-meson \
-                    ${mingw}-ninja \
-                    ${mingw}-pkg-config \
-                    ${mingw}-blueprint-compiler \
-                    \
-                    ${mingw}-gtk4 \
-                    ${mingw}-libsoup3 \
-                    ${mingw}-glib2 \
-                    ${mingw}-gettext \
-                    ${mingw}-json-glib \
-                    \
-                    ${mingw}-appstream \
-                    ${mingw}-desktop-file-utils
+        with:
+          msystem: MINGW64
+          # setup-msys2 caches the downloaded packages between runs
+          install: git
+          pacboy: >-
+            gcc:p
+            meson:p
+            ninja:p
+            pkg-config:p
+            blueprint-compiler:p
+            gtk4:p
+            libsoup3:p
+            glib2:p
+            gettext:p
+            json-glib:p
+            appstream:p
+            desktop-file-utils:p
       - name: setup git eol
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: configure
         run: meson setup build
       - name: build
