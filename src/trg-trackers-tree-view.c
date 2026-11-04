@@ -200,18 +200,23 @@ static void view_popup_menu(GtkWidget *treeview, gdouble x, gdouble y, gboolean 
         { "add", add_tracker_action_cb, NULL, NULL, NULL, { 0 } },
     };
     GSimpleActionGroup *actions = g_simple_action_group_new();
+    GtkBuilder *builder = gtk_builder_new_from_resource(
+        "/io/github/TransmissionRemoteGtk/ui/trg-trackers-tree-view.ui");
     GMenu *menu = g_menu_new();
 
     g_action_map_add_action_entries(G_ACTION_MAP(actions), entries, G_N_ELEMENTS(entries),
                                     treeview);
 
     if (with_delete)
-        g_menu_append(menu, _("Delete"), "trackers.delete");
-    g_menu_append(menu, _("Add"), "trackers.add");
+        g_menu_append_section(menu, NULL,
+                              G_MENU_MODEL(gtk_builder_get_object(builder, "delete_menu")));
+    g_menu_append_section(menu, NULL,
+                          G_MENU_MODEL(gtk_builder_get_object(builder, "trackers_menu")));
 
     trg_popover_menu_popup(treeview, G_MENU_MODEL(menu), x, y, "trackers", G_ACTION_GROUP(actions));
 
     g_object_unref(menu);
+    g_object_unref(builder);
     g_object_unref(actions);
 }
 

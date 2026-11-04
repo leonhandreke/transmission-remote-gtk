@@ -54,6 +54,7 @@ blueprint_compiler = find_program('blueprint-compiler', version: '>= 0.16')
 
 blueprint_files = files(
   'trg-file-rename-dialog.blp',
+  'trg-files-tree-view.blp',
   'trg-general-panel.blp',
   'trg-main-window.blp',
   'trg-menu-bar.blp',
@@ -66,6 +67,7 @@ blueprint_files = files(
   'trg-torrent-add-url-dialog.blp',
   'trg-torrent-move-dialog.blp',
   'trg-torrent-props-dialog.blp',
+  'trg-trackers-tree-view.blp',
 )
 
 blueprints = custom_target(

@@ -118,8 +118,6 @@ static void trg_main_window_get_property(GObject *object, guint property_id, GVa
 static void trg_main_window_set_property(GObject *object, guint property_id, const GValue *value,
                                          GParamSpec *pspec);
 static TrgMenuBar *trg_main_window_menu_bar_new(TrgMainWindow *win);
-static GMenuItem *trg_imagemenuitem_new(const gchar *text, const char *action,
-                                        const char *icon_name);
 static void set_limit_cb(GSimpleAction *action, GVariant *value, gpointer data);
 static GMenuItem *limit_menu_new(TrgMainWindow *win, GActionMap *actions, const gchar *name,
                                  gchar *title, gchar *enabledKey, gchar *speedKey, JsonArray *ids);
@@ -137,6 +135,7 @@ struct _TrgMainWindow {
 
     TrgStatusBar *statusBar;
     GtkWidget *menu_bar, *toolbar_box;
+    GMenuModel *torrent_actions_menu, *torrent_queue_menu;
     TrgStateSelector *stateSelector;
     TrgGeneralPanel *genDetails;
     GtkWidget *notebook;
@@ -1308,30 +1307,6 @@ static void clear_filter_entry_cb(GtkEntry *entry, GtkEntryIconPosition icon_pos
     gtk_editable_set_text(GTK_EDITABLE(entry), "");
 }
 
-static GMenuItem *trg_imagemenuitem_new(const gchar *text, const char *action,
-                                        const char *icon_name)
-{
-    GMenuItem *item = g_menu_item_new(text, action);
-    GIcon *icon = g_themed_icon_new(icon_name);
-
-    g_menu_item_set_icon(item, icon);
-    g_object_unref(icon);
-
-    return item;
-}
-
-static void trg_menu_append_image_item(GMenu *menu, const gchar *text, const char *action,
-                                       const char *icon_name)
-{
-    GMenuItem *item = trg_imagemenuitem_new(text, action, icon_name);
-
-    g_menu_append_item(menu, item);
-    g_object_unref(item);
-}
-
-/* The speed limit and priority items of the context menu are radio items of
- * stateful actions in a per-menu action group ("torrent."). The keys and
- * torrent ids are attached to the action. */
 static void set_limit_cb(GSimpleAction *action, GVariant *value, gpointer data)
 {
     TrgMainWindow *win = TRG_MAIN_WINDOW(data);
@@ -1548,30 +1523,9 @@ static void trg_torrent_tv_view_menu(GtkWidget *treeview, gdouble x, gdouble y, 
 
     ids = build_json_id_array(TRG_TORRENT_TREE_VIEW(treeview));
 
-    section = g_menu_new();
-    trg_menu_append_image_item(section, _("Properties"), "win.properties", "document-properties");
-    trg_menu_append_image_item(section, _("Copy Magnet Link"), "win.copy-magnet", "edit-copy");
-    trg_menu_append_image_item(section, _("Resume"), "win.resume", "media-playback-start");
-    trg_menu_append_image_item(section, _("Pause"), "win.pause", "media-playback-pause");
-    trg_menu_append_image_item(section, _("Verify"), "win.verify", "view-refresh");
-    trg_menu_append_image_item(section, _("Re-announce"), "win.reannounce", "network-server");
-    trg_menu_append_image_item(section, _("Move"), "win.move", "drive-harddisk");
-    trg_menu_append_image_item(section, _("Remove"), "win.remove", "list-remove");
-    trg_menu_append_image_item(section, _("Remove and delete data"), "win.delete", "edit-delete");
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    if (win->queuesEnabled) {
-        section = g_menu_new();
-        trg_menu_append_image_item(section, _("Start Now"), "win.start-now",
-                                   "media-playback-start");
-        trg_menu_append_image_item(section, _("Move Up Queue"), "win.up-queue", "go-up");
-        trg_menu_append_image_item(section, _("Move Down Queue"), "win.down-queue", "go-down");
-        trg_menu_append_image_item(section, _("Bottom Of Queue"), "win.bottom-queue", "go-bottom");
-        trg_menu_append_image_item(section, _("Top Of Queue"), "win.top-queue", "go-top");
-        g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-        g_object_unref(section);
-    }
+    g_menu_append_section(menu, NULL, win->torrent_actions_menu);
+    if (win->queuesEnabled)
+        g_menu_append_section(menu, NULL, win->torrent_queue_menu);
 
     section = g_menu_new();
     item = limit_menu_new(win, G_ACTION_MAP(actions), "down-limit", _("Down Limit"),
@@ -1838,6 +1792,8 @@ static void trg_main_window_class_init(TrgMainWindowClass *klass)
     gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, hpaned);
     gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, vpaned);
     gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, notebook);
+    gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, torrent_actions_menu);
+    gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, torrent_queue_menu);
     gtk_widget_class_bind_template_child_full(widget_class, "filter_entry", FALSE,
                                               G_STRUCT_OFFSET(TrgMainWindow, filterEntry));
     gtk_widget_class_bind_template_child_full(widget_class, "gen_details", FALSE,

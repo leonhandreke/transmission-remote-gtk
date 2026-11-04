@@ -63,3 +63,94 @@ template $TrgMainWindow: ApplicationWindow {
     }
   }
 }
+
+// The context menu of the torrent list is made of these, and the speed limit
+// and priority menus of the torrents.
+menu torrent_actions_menu {
+  item {
+    label: _("Properties");
+    action: "win.properties";
+    icon: "document-properties";
+  }
+
+  item {
+    label: _("Copy Magnet Link");
+    action: "win.copy-magnet";
+    icon: "edit-copy";
+  }
+
+  item {
+    label: _("Resume");
+    action: "win.resume";
+    icon: "media-playback-start";
+  }
+
+  item {
+    label: _("Pause");
+    action: "win.pause";
+    icon: "media-playback-pause";
+  }
+
+  item {
+    label: _("Verify");
+    action: "win.verify";
+    icon: "view-refresh";
+  }
+
+  item {
+    label: _("Re-announce");
+    action: "win.reannounce";
+    icon: "network-server";
+  }
+
+  item {
+    label: _("Move");
+    action: "win.move";
+    icon: "drive-harddisk";
+  }
+
+  item {
+    label: _("Remove");
+    action: "win.remove";
+    icon: "list-remove";
+  }
+
+  item {
+    label: _("Remove and delete data");
+    action: "win.delete";
+    icon: "edit-delete";
+  }
+}
+
+// While the server has queues
+menu torrent_queue_menu {
+  item {
+    label: _("Start Now");
+    action: "win.start-now";
+    icon: "media-playback-start";
+  }
+
+  item {
+    label: _("Move Up Queue");
+    action: "win.up-queue";
+    icon: "go-up";
+  }
+
+  item {
+    label: _("Move Down Queue");
+    action: "win.down-queue";
+    icon: "go-down";
+  }
+
+  item {
+    label: _("Bottom Of Queue");
+    action: "win.bottom-queue";
+    icon: "go-bottom";
+  }
+
+  item {
+    label: _("Top Of Queue");
+    action: "win.top-queue";
+    icon: "go-top";
+  }
+}

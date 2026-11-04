@@ -1,0 +1,52 @@
+using Gtk 4.0;
+// The context menu of the files, after rename_menu for the files of a torrent
+// on the server
+menu files_menu {
+  section {
+    item {
+      label: _("High Priority");
+      action: "files.priority-high";
+    }
+
+    item {
+      label: _("Normal Priority");
+      action: "files.priority-normal";
+    }
+
+    item {
+      label: _("Low Priority");
+      action: "files.priority-low";
+    }
+  }
+
+  section {
+    item {
+      label: _("Download");
+      action: "files.wanted";
+    }
+
+    item {
+      label: _("Skip");
+      action: "files.unwanted";
+    }
+  }
+
+  section {
+    item {
+      label: _("Expand All");
+      action: "files.expand-all";
+    }
+
+    item {
+      label: _("Collapse All");
+      action: "files.collapse-all";
+    }
+  }
+}
+
+menu rename_menu {
+  item {
+    label: _("Rename...");
+    action: "files.rename";
+  }
+}

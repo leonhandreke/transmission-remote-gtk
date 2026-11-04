@@ -223,8 +223,9 @@ static void view_popup_menu(TrgFilesTreeView *self, gdouble x, gdouble y)
         = { "priority-high", "priority-normal", "priority-low", "wanted", "unwanted" };
     guint n_selected = trg_tree_view_count_selected(TRG_TREE_VIEW(self));
     GSimpleActionGroup *actions = g_simple_action_group_new();
+    GtkBuilder *builder = gtk_builder_new_from_resource(
+        "/io/github/TransmissionRemoteGtk/ui/trg-files-tree-view.ui");
     GMenu *menu = g_menu_new();
-    GMenu *section;
     guint i;
 
     g_action_map_add_action_entries(G_ACTION_MAP(actions), entries, G_N_ELEMENTS(entries), self);
@@ -234,40 +235,23 @@ static void view_popup_menu(TrgFilesTreeView *self, gdouble x, gdouble y)
                                         G_ACTION_MAP(actions), selection_actions[i])),
                                     n_selected > 0);
 
+    /* Files of a torrent on the server can be renamed */
     if (self->client) {
-        section = g_menu_new();
         /* Rename on multiple files currently not supported */
         g_simple_action_set_enabled(
             G_SIMPLE_ACTION(g_action_map_lookup_action(G_ACTION_MAP(actions), "rename")),
             n_selected == 1);
-        g_menu_append(section, _("Rename..."), "files.rename");
-        g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-        g_object_unref(section);
+        g_menu_append_section(menu, NULL,
+                              G_MENU_MODEL(gtk_builder_get_object(builder, "rename_menu")));
     }
 
-    section = g_menu_new();
-    g_menu_append(section, _("High Priority"), "files.priority-high");
-    g_menu_append(section, _("Normal Priority"), "files.priority-normal");
-    g_menu_append(section, _("Low Priority"), "files.priority-low");
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    section = g_menu_new();
-    g_menu_append(section, _("Download"), "files.wanted");
-    g_menu_append(section, _("Skip"), "files.unwanted");
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
-
-    section = g_menu_new();
-    g_menu_append(section, _("Expand All"), "files.expand-all");
-    g_menu_append(section, _("Collapse All"), "files.collapse-all");
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
-    g_object_unref(section);
+    g_menu_append_section(menu, NULL, G_MENU_MODEL(gtk_builder_get_object(builder, "files_menu")));
 
     trg_popover_menu_popup(GTK_WIDGET(self), G_MENU_MODEL(menu), x, y, "files",
                            G_ACTION_GROUP(actions));
 
     g_object_unref(menu);
+    g_object_unref(builder);
     g_object_unref(actions);
 }
 

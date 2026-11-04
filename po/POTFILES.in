@@ -14,6 +14,7 @@ src/trg-client.c
 src/trg-destination-combo.c
 src/trg-file-parser.c
 src/trg-files-model.c
+src/trg-files-tree-view.blp
 src/trg-files-tree-view.c
 src/trg-general-panel.blp
 src/trg-general-panel.c
@@ -50,6 +51,7 @@ src/trg-torrent-props-dialog.blp
 src/trg-torrent-props-dialog.c
 src/trg-torrent-tree-view.c
 src/trg-trackers-model.c
+src/trg-trackers-tree-view.blp
 src/trg-trackers-tree-view.c
 src/trg-tree-view.c
 src/util.c

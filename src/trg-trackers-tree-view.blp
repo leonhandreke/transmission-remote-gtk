@@ -1,0 +1,15 @@
+using Gtk 4.0;
+// The context menu of the trackers, after delete_menu on a tracker
+menu trackers_menu {
+  item {
+    label: _("Add");
+    action: "trackers.add";
+  }
+}
+
+menu delete_menu {
+  item {
+    label: _("Delete");
+    action: "trackers.delete";
+  }
+}
