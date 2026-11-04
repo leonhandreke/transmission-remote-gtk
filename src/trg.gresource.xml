@@ -9,5 +9,6 @@
     <file preprocess="xml-stripblanks">trg-general-panel.ui</file>
     <file preprocess="xml-stripblanks">trg-stats-dialog.ui</file>
     <file preprocess="xml-stripblanks">trg-menu-bar.ui</file>
+    <file preprocess="xml-stripblanks">trg-preferences-dialog.ui</file>
   </gresource>
 </gresources>

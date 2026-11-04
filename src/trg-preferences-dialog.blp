@@ -1,0 +1,829 @@
+using Gtk 4.0;
+using Gio 2.0;
+
+template $TrgPreferencesDialog: $TrgDialog {
+  title: _("Local Preferences");
+  destroy-with-parent: true;
+  default-widget: ok_button;
+
+  Notebook notebook {
+    vexpand: true;
+    margin-start: 6;
+    margin-end: 6;
+    margin-top: 6;
+    margin-bottom: 6;
+
+    ScrolledWindow {
+      hscrollbar-policy: never;
+
+      Frame {
+        margin-start: 5;
+        margin-end: 5;
+        margin-top: 5;
+        margin-bottom: 5;
+
+        label-widget: Box {
+          spacing: 2;
+
+          Label {
+            label: _("Profile: ");
+            margin-start: 2;
+            margin-end: 2;
+          }
+
+          DropDown profile_combo {
+            margin-start: 4;
+            margin-end: 4;
+            notify::selected => $profile_changed_cb();
+
+            model: Gio.ListStore profile_store {
+              item-type: typeof<$TrgProfileItem>;
+            };
+
+            // Bound to the name, so the label follows the name entry
+            factory: BuilderListItemFactory {
+              template ListItem {
+                child: Label {
+                  xalign: 0;
+                  label: bind template.item as <$TrgProfileItem>.name;
+                };
+              }
+            };
+          }
+        };
+
+        Grid {
+          row-spacing: 6;
+          column-spacing: 12;
+          margin-start: 12;
+          margin-end: 12;
+          margin-top: 12;
+          margin-bottom: 12;
+
+          Label {
+            label: _("Name:");
+            xalign: 0;
+            mnemonic-widget: profile_name_entry;
+            use-underline: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 0;
+            }
+          }
+
+          Entry profile_name_entry {
+            changed => $name_changed_cb();
+            hexpand: true;
+
+            layout {
+              column: 1;
+              row: 0;
+            }
+          }
+
+          Box {
+            spacing: 8;
+
+            Button {
+              label: _("New");
+              clicked => $add_profile_cb();
+            }
+
+            Button profile_del_button {
+              label: _("Delete");
+              sensitive: false;
+              clicked => $del_profile_cb();
+            }
+
+            hexpand: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 1;
+              column-span: 2;
+            }
+          }
+
+          Label {
+            label: _("Connection");
+            xalign: 0;
+            hexpand: true;
+
+            styles [
+              "heading",
+            ]
+
+            layout {
+              column: 0;
+              row: 2;
+              column-span: 2;
+            }
+          }
+
+          Label {
+            label: _("Host:");
+            xalign: 0;
+            mnemonic-widget: hostname_entry;
+            use-underline: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 3;
+            }
+          }
+
+          Entry hostname_entry {
+            hexpand: true;
+
+            layout {
+              column: 1;
+              row: 3;
+            }
+          }
+
+          Label {
+            label: _("Port:");
+            xalign: 0;
+            mnemonic-widget: port_spin;
+            use-underline: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 4;
+            }
+          }
+
+          SpinButton port_spin {
+            digits: 0;
+
+            adjustment: Adjustment {
+              lower: 1;
+              upper: 65535;
+              step-increment: 1;
+              page-increment: 10;
+            };
+
+            hexpand: true;
+
+            layout {
+              column: 1;
+              row: 4;
+            }
+          }
+
+          Label {
+            label: _("RPC URL Path:");
+            xalign: 0;
+            mnemonic-widget: rpc_url_path_entry;
+            use-underline: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 5;
+            }
+          }
+
+          Entry rpc_url_path_entry {
+            hexpand: true;
+
+            layout {
+              column: 1;
+              row: 5;
+            }
+          }
+
+          Label {
+            label: _("Username:");
+            xalign: 0;
+            mnemonic-widget: username_entry;
+            use-underline: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 6;
+            }
+          }
+
+          Entry username_entry {
+            hexpand: true;
+
+            layout {
+              column: 1;
+              row: 6;
+            }
+          }
+
+          Label {
+            label: _("Password:");
+            xalign: 0;
+            mnemonic-widget: password_entry;
+            use-underline: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 7;
+            }
+          }
+
+          PasswordEntry password_entry {
+            show-peek-icon: true;
+            hexpand: true;
+
+            layout {
+              column: 1;
+              row: 7;
+            }
+          }
+
+          CheckButton auto_connect_check {
+            label: _("Automatically connect");
+            use-underline: true;
+            hexpand: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 8;
+              column-span: 2;
+            }
+          }
+
+          CheckButton ssl_check {
+            label: _("SSL");
+            use-underline: true;
+            hexpand: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 9;
+              column-span: 2;
+            }
+          }
+
+          CheckButton ssl_validate_check {
+            label: _("Validate SSL Certificate");
+            use-underline: true;
+            sensitive: bind ssl_check.active;
+            hexpand: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 10;
+              column-span: 2;
+            }
+          }
+
+          Label {
+            label: _("Timeout:");
+            xalign: 0;
+            mnemonic-widget: timeout_spin;
+            use-underline: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 11;
+            }
+          }
+
+          SpinButton timeout_spin {
+            digits: 0;
+
+            adjustment: Adjustment {
+              lower: 1;
+              upper: 3600;
+              step-increment: 1;
+              page-increment: 10;
+            };
+
+            hexpand: true;
+
+            layout {
+              column: 1;
+              row: 11;
+            }
+          }
+
+          Label {
+            label: _("Retries:");
+            xalign: 0;
+            mnemonic-widget: retries_spin;
+            use-underline: true;
+            margin-start: 18;
+
+            layout {
+              column: 0;
+              row: 12;
+            }
+          }
+
+          SpinButton retries_spin {
+            digits: 0;
+
+            adjustment: Adjustment {
+              lower: 0;
+              upper: 3600;
+              step-increment: 1;
+              page-increment: 10;
+            };
+
+            hexpand: true;
+
+            layout {
+              column: 1;
+              row: 12;
+            }
+          }
+
+          Label {
+            label: _("Headers");
+            xalign: 0;
+            hexpand: true;
+
+            styles [
+              "heading",
+            ]
+
+            layout {
+              column: 0;
+              row: 13;
+              column-span: 2;
+            }
+          }
+
+          Box headers_box {
+            orientation: vertical;
+            hexpand: true;
+            margin-start: 18;
+            vexpand: true;
+
+            layout {
+              column: 0;
+              row: 14;
+              column-span: 2;
+            }
+          }
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("Connection");
+    }
+
+    Grid {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("Updates");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      CheckButton update_active_only_check {
+        label: _("Update active torrents only");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 1;
+          column-span: 2;
+        }
+      }
+
+      CheckButton full_update_check {
+        label: _("Full update every (?) updates");
+        use-underline: true;
+        sensitive: bind update_active_only_check.active;
+        notify::sensitive => $full_update_dependency_cb();
+        notify::active => $full_update_dependency_cb();
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 2;
+        }
+      }
+
+      SpinButton full_update_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 2;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 2;
+        }
+      }
+
+      Label {
+        label: _("Update interval:");
+        xalign: 0;
+        mnemonic-widget: update_interval_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 3;
+        }
+      }
+
+      SpinButton update_interval_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 1;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 3;
+        }
+      }
+
+      Label {
+        label: _("Session update interval:");
+        xalign: 0;
+        mnemonic-widget: session_update_interval_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+        }
+      }
+
+      SpinButton session_update_interval_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 1;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 4;
+        }
+      }
+
+      Label {
+        label: _("Torrents");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 5;
+          column-span: 2;
+        }
+      }
+
+      CheckButton start_paused_check {
+        label: _("Start paused");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 6;
+          column-span: 2;
+        }
+      }
+
+      CheckButton add_options_dialog_check {
+        label: _("Options dialog on add");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 7;
+          column-span: 2;
+        }
+      }
+
+      CheckButton delete_local_torrent_check {
+        label: _("Delete local .torrent file after adding");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 8;
+          column-span: 2;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("General");
+    }
+
+    Grid {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("View");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      CheckButton show_state_selector_check {
+        label: _("State selector");
+        use-underline: true;
+        toggled => $view_states_toggled_cb();
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 1;
+          column-span: 2;
+        }
+      }
+
+      CheckButton filter_dirs_check {
+        label: _("Directory filters");
+        use-underline: true;
+        sensitive: bind show_state_selector_check.active;
+        toggled => $filter_dirs_toggled_cb();
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 2;
+          column-span: 2;
+        }
+      }
+
+      CheckButton filter_trackers_check {
+        label: _("Tracker filters");
+        use-underline: true;
+        sensitive: bind show_state_selector_check.active;
+        toggled => $filter_trackers_toggled_cb();
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 3;
+          column-span: 2;
+        }
+      }
+
+      CheckButton directories_first_check {
+        label: _("Directories first");
+        use-underline: true;
+        sensitive: bind show_state_selector_check.active;
+        toggled => $directories_first_toggled_cb();
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+          column-span: 2;
+        }
+      }
+
+      CheckButton show_notebook_check {
+        label: _("Torrent Details");
+        use-underline: true;
+        toggled => $notebook_toggled_cb();
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 5;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("System Tray");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 6;
+          column-span: 2;
+        }
+      }
+
+      CheckButton system_tray_check {
+        label: _("Show in system tray");
+        use-underline: true;
+        sensitive: false;
+        tooltip-text: _("System tray not supported.");
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 7;
+          column-span: 2;
+        }
+      }
+
+      CheckButton minimize_to_tray_check {
+        label: _("Minimize to tray");
+        use-underline: true;
+        sensitive: false;
+        tooltip-text: _("System tray not supported.");
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 8;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Notifications");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 9;
+          column-span: 2;
+        }
+      }
+
+      CheckButton add_notify_check {
+        label: _("Torrent added notifications");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 10;
+          column-span: 2;
+        }
+      }
+
+      CheckButton complete_notify_check {
+        label: _("Torrent complete notifications");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 11;
+          column-span: 2;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("View");
+    }
+
+    Grid {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("Remote Download Directories");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      Box destinations_box {
+        orientation: vertical;
+        hexpand: true;
+        margin-start: 18;
+        vexpand: true;
+
+        layout {
+          column: 0;
+          row: 1;
+          column-span: 2;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("Directories");
+    }
+  }
+
+  [action]
+  Button {
+    label: _("_Close");
+    use-underline: true;
+    action-name: "dialog.close";
+  }
+
+  [action]
+  Button ok_button {
+    label: _("_OK");
+    use-underline: true;
+    action-name: "dialog.ok";
+
+    styles [
+      "suggested-action",
+    ]
+  }
+}
