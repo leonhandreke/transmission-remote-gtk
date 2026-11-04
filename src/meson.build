@@ -1,6 +1,5 @@
 src_files = files(
   'bencode.c',
-  'hig.c',
   'icons.c',
   'json.c',
   'main.c',

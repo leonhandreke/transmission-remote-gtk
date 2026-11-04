@@ -1,7 +1,6 @@
 data/io.github.TransmissionRemoteGtk.desktop.in
 data/io.github.TransmissionRemoteGtk.appdata.xml.in
 src/bencode.c
-src/hig.c
 src/json.c
 src/main.c
 src/remote-exec.c

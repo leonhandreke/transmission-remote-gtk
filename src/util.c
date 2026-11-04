@@ -265,20 +265,6 @@ void add_file_id_to_array(JsonObject *args, const gchar *key, gint index)
 
 /* A drop down of the given (NULL terminated) labels, the selected position is
  * the index of the label. */
-GtkWidget *gtr_drop_down_new(const char *text_1, ...)
-{
-    GtkStringList *strings = gtk_string_list_new(NULL);
-    const char *text;
-    va_list vl;
-
-    va_start(vl, text_1);
-    for (text = text_1; text; text = va_arg(vl, const char *))
-        gtk_string_list_append(strings, text);
-    va_end(vl);
-
-    return gtk_drop_down_new(G_LIST_MODEL(strings), NULL);
-}
-
 GtkWidget *my_scrolledwin_new(GtkWidget *child)
 {
     GtkWidget *scrolled_win = gtk_scrolled_window_new();
@@ -672,26 +658,10 @@ char *tr_strlsize(char *buf, guint64 bytes, size_t buflen)
 }
 
 /* Replacement for GtkContainer:border-width */
-void trg_widget_set_margins(GtkWidget *w, gint margin)
-{
-    gtk_widget_set_margin_start(w, margin);
-    gtk_widget_set_margin_end(w, margin);
-    gtk_widget_set_margin_top(w, margin);
-    gtk_widget_set_margin_bottom(w, margin);
-}
-
 GtkWidget *trg_hbox_new(gboolean homogeneous, gint spacing)
 {
     GtkWidget *box;
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, spacing);
-    gtk_box_set_homogeneous(GTK_BOX(box), homogeneous);
-    return box;
-}
-
-GtkWidget *trg_vbox_new(gboolean homogeneous, gint spacing)
-{
-    GtkWidget *box;
-    box = gtk_box_new(GTK_ORIENTATION_VERTICAL, spacing);
     gtk_box_set_homogeneous(GTK_BOX(box), homogeneous);
     return box;
 }

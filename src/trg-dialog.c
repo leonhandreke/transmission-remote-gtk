@@ -25,8 +25,6 @@
 #include "hig.h"
 #include "trg-dialog.h"
 
-#define RESPONSE_ID_KEY "trg-dialog-response-id"
-
 enum {
     SIGNAL_RESPONSE,
     SIGNAL_COUNT
@@ -48,22 +46,9 @@ G_DEFINE_TYPE_WITH_CODE(TrgDialog, trg_dialog, GTK_TYPE_WINDOW,
 
 static GtkBuildableIface *parent_buildable_iface;
 
-GtkWidget *trg_dialog_get_content_area(TrgDialog *dialog)
-{
-    TrgDialogPrivate *priv = trg_dialog_get_instance_private(dialog);
-
-    return priv->content_area;
-}
-
 void trg_dialog_response(TrgDialog *dialog, gint response_id)
 {
     g_signal_emit(dialog, signals[SIGNAL_RESPONSE], 0, response_id);
-}
-
-static void trg_dialog_button_clicked(GtkButton *button, TrgDialog *dialog)
-{
-    trg_dialog_response(dialog,
-                        GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), RESPONSE_ID_KEY)));
 }
 
 static void trg_dialog_append_action(TrgDialog *dialog, GtkWidget *widget)
@@ -72,17 +57,6 @@ static void trg_dialog_append_action(TrgDialog *dialog, GtkWidget *widget)
 
     gtk_box_append(GTK_BOX(priv->action_area), widget);
     gtk_widget_set_visible(priv->action_area, TRUE);
-}
-
-GtkWidget *trg_dialog_add_button(TrgDialog *dialog, const gchar *label, gint response_id)
-{
-    GtkWidget *button = gtk_button_new_with_mnemonic(label);
-
-    g_object_set_data(G_OBJECT(button), RESPONSE_ID_KEY, GINT_TO_POINTER(response_id));
-    g_signal_connect(button, "clicked", G_CALLBACK(trg_dialog_button_clicked), dialog);
-    trg_dialog_append_action(dialog, button);
-
-    return button;
 }
 
 /* A response id from its GtkResponseType nick, like "accept" */
@@ -122,9 +96,8 @@ static void trg_dialog_response_action(GtkWidget *widget, const gchar *action_na
 }
 
 /* In a template, children go into the content area, and children of type
- * "action" ([action] in Blueprint) into the row of buttons. Buttons there
- * respond through the dialog.* actions, which is also how
- * trg_dialog_get_widget_for_response() finds them. */
+ * "action" ([action] in Blueprint) into the row of buttons, which respond
+ * through the dialog.* actions. */
 static void trg_dialog_buildable_add_child(GtkBuildable *buildable, GtkBuilder *builder,
                                            GObject *child, const gchar *type)
 {
@@ -132,13 +105,6 @@ static void trg_dialog_buildable_add_child(GtkBuildable *buildable, GtkBuilder *
     TrgDialogPrivate *priv = trg_dialog_get_instance_private(dialog);
 
     if (g_strcmp0(type, "action") == 0) {
-        if (GTK_IS_ACTIONABLE(child)) {
-            const gchar *name = gtk_actionable_get_action_name(GTK_ACTIONABLE(child));
-            gint response_id = trg_dialog_response_from_action(name);
-
-            if (response_id != GTK_RESPONSE_NONE)
-                g_object_set_data(child, RESPONSE_ID_KEY, GINT_TO_POINTER(response_id));
-        }
         trg_dialog_append_action(dialog, GTK_WIDGET(child));
     } else if (!type && GTK_IS_WIDGET(child) && priv->content_area) {
         gtk_box_append(GTK_BOX(priv->content_area), GTK_WIDGET(child));
@@ -151,30 +117,6 @@ static void trg_dialog_buildable_init(GtkBuildableIface *iface)
 {
     parent_buildable_iface = g_type_interface_peek_parent(iface);
     iface->add_child = trg_dialog_buildable_add_child;
-}
-
-GtkWidget *trg_dialog_get_widget_for_response(TrgDialog *dialog, gint response_id)
-{
-    TrgDialogPrivate *priv = trg_dialog_get_instance_private(dialog);
-    GtkWidget *child;
-
-    for (child = gtk_widget_get_first_child(priv->action_area); child;
-         child = gtk_widget_get_next_sibling(child)) {
-        if (GPOINTER_TO_INT(g_object_get_data(G_OBJECT(child), RESPONSE_ID_KEY)) == response_id)
-            return child;
-    }
-
-    return NULL;
-}
-
-void trg_dialog_set_default_response(TrgDialog *dialog, gint response_id)
-{
-    GtkWidget *button = trg_dialog_get_widget_for_response(dialog, response_id);
-
-    if (button) {
-        gtk_widget_add_css_class(button, "suggested-action");
-        gtk_window_set_default_widget(GTK_WINDOW(dialog), button);
-    }
 }
 
 /* Closing the window is a GTK_RESPONSE_DELETE_EVENT response, like GtkDialog.

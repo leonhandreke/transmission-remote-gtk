@@ -25,7 +25,11 @@ G_BEGIN_DECLS
 /* A modal-capable window with a content area and a row of buttons, which
  * replaces the deprecated GtkDialog. Like GtkDialog, it emits "response" with
  * the id of the button that was clicked, or GTK_RESPONSE_DELETE_EVENT when it
- * is closed (with the window's close button or Escape). */
+ * is closed (with the window's close button or Escape).
+ *
+ * Subclasses are templates: their children go into the content area, and
+ * [action] children into the row of buttons. A button responds through an
+ * action named after the response, like dialog.accept or dialog.close. */
 #define TRG_TYPE_DIALOG trg_dialog_get_type()
 G_DECLARE_DERIVABLE_TYPE(TrgDialog, trg_dialog, TRG, DIALOG, GtkWindow)
 
@@ -33,10 +37,6 @@ struct _TrgDialogClass {
     GtkWindowClass parent_class;
 };
 
-GtkWidget *trg_dialog_get_content_area(TrgDialog *dialog);
-GtkWidget *trg_dialog_add_button(TrgDialog *dialog, const gchar *label, gint response_id);
-void trg_dialog_set_default_response(TrgDialog *dialog, gint response_id);
-GtkWidget *trg_dialog_get_widget_for_response(TrgDialog *dialog, gint response_id);
 void trg_dialog_response(TrgDialog *dialog, gint response_id);
 
 G_END_DECLS

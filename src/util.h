@@ -89,11 +89,8 @@ void trg_popover_menu_popup(GtkWidget *parent, GMenuModel *model, gdouble x, gdo
                             const gchar *prefix, GActionGroup *actions);
 gboolean is_url(const gchar *string);
 gboolean is_magnet(const gchar *string);
-GtkWidget *gtr_drop_down_new(const char *text_1, ...) G_GNUC_NULL_TERMINATED;
 
-GtkWidget *trg_vbox_new(gboolean homogeneous, gint spacing);
 GtkWidget *trg_hbox_new(gboolean homogeneous, gint spacing);
-void trg_widget_set_margins(GtkWidget *w, gint margin);
 
 #ifdef G_OS_WIN32
 gchar *trg_win32_support_path(gchar *file);
