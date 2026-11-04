@@ -18,13 +18,21 @@ jobs:
   formatting-check:
     name: Formatting Check
     runs-on: ubuntu-latest
+    env:
+      # Pinned so that the result doesn't change with the runner image.
+      # Use the same version locally: pip install clang-format==<version>
+      CLANG_FORMAT_VERSION: 20.1.8
     steps:
       - uses: actions/checkout@v7
-      - name: Run clang-format style check for C/C++/Protobuf programs.
-        uses: jidicula/clang-format-action@v4.6.2
-        with:
-          check-path: 'src'
-          clang-format-version: '14'
+      - name: Install clang-format
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "clang-format==$CLANG_FORMAT_VERSION"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: Run clang-format style check
+        run: |
+          clang-format --version
+          clang-format --dry-run --Werror src/*.c src/*.h
 
   blueprint-formatting-check:
     name: Blueprint Formatting Check
