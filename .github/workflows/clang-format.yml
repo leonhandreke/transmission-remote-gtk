@@ -16,3 +16,13 @@ jobs:
       with:
         check-path: 'src'
         clang-format-version: '14'
+
+  blueprint-formatting-check:
+    name: Blueprint Formatting Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Get blueprint-compiler
+      run: git clone --depth 1 --branch v0.22.2 https://gitlab.gnome.org/GNOME/blueprint-compiler.git "$RUNNER_TEMP/blueprint-compiler"
+    - name: Run blueprint-compiler format check
+      run: python3 "$RUNNER_TEMP/blueprint-compiler/blueprint-compiler.py" format src/*.blp

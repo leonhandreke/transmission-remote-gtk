@@ -33,6 +33,9 @@ transmission-remote-gtk uses meson for its build system. A relatively new
 version of meson is required.
 
  - meson >= 0.59.0
+ - blueprint-compiler >= 0.16 (the user interface is written in
+   [Blueprint](https://gnome.pages.gitlab.gnome.org/blueprint-compiler/); if
+   it's missing or too old, meson fetches it with git)
  - appstream (optional, appdata validation using `appstreamcli validate`)
  - desktop-file-utils (optional, desktop file validation)
  - rst2man (optional, manpage generation)
@@ -40,7 +43,7 @@ version of meson is required.
 An example of getting the build dependencies for an Ubuntu/Debian system:
 
 ```
-# apt install gcc meson appstream python-docutils
+# apt install gcc meson blueprint-compiler appstream python-docutils
 ```
 
 **NOTE:** Ubuntu and other stable or LTS distros may have outdated versions of
@@ -71,7 +74,7 @@ $ meson compile -C "$builddir"
 On macOS, install the dependencies with [Homebrew](https://brew.sh):
 
 ```
-$ brew install meson gtk4 json-glib libsoup gettext librsvg adwaita-icon-theme glib-networking
+$ brew install meson blueprint-compiler gtk4 json-glib libsoup gettext librsvg adwaita-icon-theme glib-networking
 ```
 
 Building also creates an application bundle, `"$builddir/Transmission Remote GTK.app"`,
