@@ -19,50 +19,23 @@
 
 #include "config.h"
 
-#include <glib/gi18n.h>
 #include <gtk/gtk.h>
 
 #include "trg-about-window.h"
 
 GtkWidget *trg_about_window_new(GtkWindow *parent)
 {
-    GtkWidget *dialog;
-    const gchar *trgAuthors[] = { "Alan Fitton <alan@eth0.org.uk>", NULL };
+    GtkBuilder *builder
+        = gtk_builder_new_from_resource("/io/github/TransmissionRemoteGtk/ui/trg-about-window.ui");
+    GtkWidget *dialog = GTK_WIDGET(gtk_builder_get_object(builder, "about_dialog"));
 
-    dialog = gtk_about_dialog_new();
+    /* Toplevel windows stay around until they're destroyed */
+    g_object_unref(builder);
+
     gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
-    gtk_window_set_destroy_with_parent(GTK_WINDOW(dialog), TRUE);
-
     gtk_about_dialog_set_logo_icon_name(GTK_ABOUT_DIALOG(dialog), PACKAGE_NAME);
-
-    gtk_about_dialog_set_license_type(GTK_ABOUT_DIALOG(dialog), GTK_LICENSE_GPL_2_0);
-
     gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(dialog), PACKAGE_NAME);
     gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(dialog), PACKAGE_VERSION);
-    gtk_about_dialog_set_copyright(GTK_ABOUT_DIALOG(dialog), "(C) 2011-2013 Alan Fitton");
-    gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(dialog),
-                                  _("A remote client to transmission-daemon."));
-
-    gtk_about_dialog_set_website(
-        GTK_ABOUT_DIALOG(dialog),
-        "https://github.com/transmission-remote-gtk/transmission-remote-gtk");
-    gtk_about_dialog_set_website_label(
-        GTK_ABOUT_DIALOG(dialog),
-        "https://github.com/transmission-remote-gtk/transmission-remote-gtk");
-
-    gtk_about_dialog_set_authors(GTK_ABOUT_DIALOG(dialog), trgAuthors);
-    /*gtk_about_dialog_set_documenters(GTK_ABOUT_DIALOG(dialog), documenters); */
-    gtk_about_dialog_set_translator_credits(GTK_ABOUT_DIALOG(dialog),
-                                            "translations kindly contributed by\n\n"
-                                            "* Pierre Rudloff (French)\n"
-                                            "* Julian Held (German)\n"
-                                            "* Algimantas Margevičius (Lithuanian)\n"
-                                            "* Youn sok Choi (Korean)\n"
-                                            "* Piotr (Polish)\n"
-                                            "* Y3AVD (Russian)\n"
-                                            "* aspidzent (Spanish)\n"
-                                            "* Åke Svensson (Swedish)\n"
-                                            "* ROR191 (Ukranian)\n");
 
     return dialog;
 }

@@ -9,6 +9,7 @@ src/requests.c
 src/session-get.c
 src/torrent.c
 src/torrent-row.c
+src/trg-about-window.blp
 src/trg-about-window.c
 src/trg-client.c
 src/trg-destination-combo.blp
