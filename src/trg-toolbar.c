@@ -42,12 +42,10 @@ struct _TrgToolbar {
 
     TrgPrefs *prefs;
     TrgMainWindow *main_window;
+    GtkWidget *connect_menu_button;
 };
 
 G_DEFINE_TYPE(TrgToolbar, trg_toolbar, GTK_TYPE_BOX)
-
-/* GTK_ICON_SIZE_LARGE_TOOLBAR in GTK 3 */
-#define TOOLBAR_ICON_PIXEL_SIZE 24
 
 static void trg_toolbar_set_property(GObject *object, guint prop_id, const GValue *value,
                                      GParamSpec *pspec G_GNUC_UNUSED)
@@ -63,96 +61,37 @@ static void trg_toolbar_set_property(GObject *object, guint prop_id, const GValu
     }
 }
 
-static GtkWidget *trg_toolbar_image_new(const gchar *icon)
-{
-    GtkWidget *img = gtk_image_new_from_icon_name(icon);
-    gtk_image_set_pixel_size(GTK_IMAGE(img), TOOLBAR_ICON_PIXEL_SIZE);
-    return img;
-}
-
-static GtkWidget *trg_toolbar_item_new(TrgToolbar *toolbar, gchar *text, const gchar *action,
-                                       gchar *icon)
-{
-    GtkWidget *w = gtk_button_new();
-
-    /* GTK_TOOLBAR_BOTH_HORIZ only showed labels for "important" items, so
-     * these are icon only, with the label as tooltip. */
-    gtk_button_set_child(GTK_BUTTON(w), trg_toolbar_image_new(icon));
-    gtk_button_set_has_frame(GTK_BUTTON(w), FALSE);
-    gtk_widget_set_tooltip_text(w, text);
-    gtk_accessible_update_property(GTK_ACCESSIBLE(w), GTK_ACCESSIBLE_PROPERTY_LABEL, text, -1);
-    gtk_actionable_set_action_name(GTK_ACTIONABLE(w), action);
-    gtk_box_append(GTK_BOX(toolbar), w);
-    return w;
-}
-
-static void trg_toolbar_separator_new(TrgToolbar *toolbar)
-{
-    GtkWidget *separator = gtk_separator_new(GTK_ORIENTATION_VERTICAL);
-    gtk_widget_set_margin_start(separator, 4);
-    gtk_widget_set_margin_end(separator, 4);
-    gtk_box_append(GTK_BOX(toolbar), separator);
-}
-
 static void trg_toolbar_constructed(GObject *obj)
 {
     TrgToolbar *self = TRG_TOOLBAR(obj);
-    GtkWidget *connect, *connectBox, *connectMenuButton;
     GMenu *menu;
 
     G_OBJECT_CLASS(trg_toolbar_parent_class)->constructed(obj);
 
-    gtk_widget_add_css_class(GTK_WIDGET(obj), "toolbar");
-
-    /* GtkMenuToolButton: a button connecting to the current profile, with a
-     * drop down of all the profiles next to it. */
-    connectBox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class(connectBox, "linked");
-
-    connect = gtk_button_new();
-    {
-        GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-        gtk_box_append(GTK_BOX(box), trg_toolbar_image_new("trg-gtk-connect"));
-        gtk_box_append(GTK_BOX(box), gtk_label_new(_("Connect")));
-        gtk_button_set_child(GTK_BUTTON(connect), box);
-    }
-    gtk_button_set_has_frame(GTK_BUTTON(connect), FALSE);
-    gtk_widget_set_tooltip_text(connect, _("Connect"));
-    gtk_actionable_set_action_target(GTK_ACTIONABLE(connect), "i", -1);
-    gtk_actionable_set_action_name(GTK_ACTIONABLE(connect), "win.connect");
-    gtk_box_append(GTK_BOX(connectBox), connect);
-
-    connectMenuButton = gtk_menu_button_new();
-    gtk_menu_button_set_has_frame(GTK_MENU_BUTTON(connectMenuButton), FALSE);
     menu = trg_menu_bar_file_connect_menu_new(self->main_window, self->prefs);
-    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(connectMenuButton), G_MENU_MODEL(menu));
+    gtk_menu_button_set_menu_model(GTK_MENU_BUTTON(self->connect_menu_button), G_MENU_MODEL(menu));
     g_object_unref(menu);
-    gtk_box_append(GTK_BOX(connectBox), connectMenuButton);
+}
 
-    gtk_box_append(GTK_BOX(obj), connectBox);
+static void trg_toolbar_dispose(GObject *object)
+{
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_TOOLBAR);
 
-    trg_toolbar_item_new(self, _("Disconnect"), "win.disconnect", "trg-gtk-disconnect");
-    trg_toolbar_item_new(self, _("Add"), "win.add", "list-add");
-
-    trg_toolbar_separator_new(self);
-
-    trg_toolbar_item_new(self, _("Resume"), "win.resume", "media-playback-start");
-    trg_toolbar_item_new(self, _("Pause"), "win.pause", "media-playback-pause");
-    trg_toolbar_item_new(self, _("Properties"), "win.properties", "document-properties");
-    trg_toolbar_item_new(self, _("Remove"), "win.remove", "list-remove");
-    trg_toolbar_item_new(self, _("Remove and delete data"), "win.delete", "edit-delete");
-
-    trg_toolbar_separator_new(self);
-
-    trg_toolbar_item_new(self, _("Local Preferences"), "win.local-prefs", "preferences-system");
-    trg_toolbar_item_new(self, _("Remote Preferences"), "win.remote-prefs", "network-workgroup");
+    G_OBJECT_CLASS(trg_toolbar_parent_class)->dispose(object);
 }
 
 static void trg_toolbar_class_init(TrgToolbarClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+
     object_class->set_property = trg_toolbar_set_property;
     object_class->constructed = trg_toolbar_constructed;
+    object_class->dispose = trg_toolbar_dispose;
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-toolbar.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgToolbar, connect_menu_button);
 
     g_object_class_install_property(
         object_class, PROP_PREFS,
@@ -169,10 +108,10 @@ static void trg_toolbar_class_init(TrgToolbarClass *klass)
 
 static void trg_toolbar_init(TrgToolbar *self)
 {
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 TrgToolbar *trg_toolbar_new(TrgMainWindow *win, TrgPrefs *prefs)
 {
-    return g_object_new(TRG_TYPE_TOOLBAR, "prefs", prefs, "mainwindow", win, "orientation",
-                        GTK_ORIENTATION_HORIZONTAL, NULL);
+    return g_object_new(TRG_TYPE_TOOLBAR, "prefs", prefs, "mainwindow", win, NULL);
 }

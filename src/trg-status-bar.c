@@ -57,7 +57,6 @@ struct _TrgStatusBar {
 
 G_DEFINE_TYPE(TrgStatusBar, trg_status_bar, GTK_TYPE_BOX)
 
-
 void trg_status_bar_clear_indicators(TrgStatusBar *sb)
 {
     gtk_label_set_text(GTK_LABEL(sb->free_lbl), "");

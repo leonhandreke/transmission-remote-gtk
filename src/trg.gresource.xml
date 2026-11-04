@@ -2,5 +2,6 @@
 <gresources>
   <gresource prefix="/io/github/TransmissionRemoteGtk/ui">
     <file preprocess="xml-stripblanks">trg-status-bar.ui</file>
+    <file preprocess="xml-stripblanks">trg-toolbar.ui</file>
   </gresource>
 </gresources>

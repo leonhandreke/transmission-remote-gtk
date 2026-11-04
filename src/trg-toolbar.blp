@@ -1,0 +1,190 @@
+using Gtk 4.0;
+
+template $TrgToolbar: Box {
+  orientation: horizontal;
+  // The items are icon only, with the label as tooltip, like
+  // GTK_TOOLBAR_BOTH_HORIZ showed them in GTK 3. 24px is
+  // GTK_ICON_SIZE_LARGE_TOOLBAR.
+  styles [
+    "toolbar",
+  ]
+
+  // GtkMenuToolButton: a button connecting to the current profile, with a
+  // drop down of all the profiles next to it.
+  Box {
+    styles [
+      "linked",
+    ]
+
+    Button {
+      has-frame: false;
+      tooltip-text: _("Connect");
+      action-name: "win.connect";
+      action-target: "-1";
+
+      Box {
+        spacing: 6;
+
+        Image {
+          icon-name: "trg-gtk-connect";
+          pixel-size: 24;
+        }
+
+        Label {
+          label: _("Connect");
+        }
+      }
+    }
+
+    MenuButton connect_menu_button {
+      has-frame: false;
+    }
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Disconnect");
+    action-name: "win.disconnect";
+
+    accessibility {
+      label: _("Disconnect");
+    }
+
+    Image {
+      icon-name: "trg-gtk-disconnect";
+      pixel-size: 24;
+    }
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Add");
+    action-name: "win.add";
+
+    accessibility {
+      label: _("Add");
+    }
+
+    Image {
+      icon-name: "list-add";
+      pixel-size: 24;
+    }
+  }
+
+  Separator {
+    orientation: vertical;
+    margin-start: 4;
+    margin-end: 4;
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Resume");
+    action-name: "win.resume";
+
+    accessibility {
+      label: _("Resume");
+    }
+
+    Image {
+      icon-name: "media-playback-start";
+      pixel-size: 24;
+    }
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Pause");
+    action-name: "win.pause";
+
+    accessibility {
+      label: _("Pause");
+    }
+
+    Image {
+      icon-name: "media-playback-pause";
+      pixel-size: 24;
+    }
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Properties");
+    action-name: "win.properties";
+
+    accessibility {
+      label: _("Properties");
+    }
+
+    Image {
+      icon-name: "document-properties";
+      pixel-size: 24;
+    }
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Remove");
+    action-name: "win.remove";
+
+    accessibility {
+      label: _("Remove");
+    }
+
+    Image {
+      icon-name: "list-remove";
+      pixel-size: 24;
+    }
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Remove and delete data");
+    action-name: "win.delete";
+
+    accessibility {
+      label: _("Remove and delete data");
+    }
+
+    Image {
+      icon-name: "edit-delete";
+      pixel-size: 24;
+    }
+  }
+
+  Separator {
+    orientation: vertical;
+    margin-start: 4;
+    margin-end: 4;
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Local Preferences");
+    action-name: "win.local-prefs";
+
+    accessibility {
+      label: _("Local Preferences");
+    }
+
+    Image {
+      icon-name: "preferences-system";
+      pixel-size: 24;
+    }
+  }
+
+  Button {
+    has-frame: false;
+    tooltip-text: _("Remote Preferences");
+    action-name: "win.remote-prefs";
+
+    accessibility {
+      label: _("Remote Preferences");
+    }
+
+    Image {
+      icon-name: "network-workgroup";
+      pixel-size: 24;
+    }
+  }
+}

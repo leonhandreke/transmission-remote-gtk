@@ -54,6 +54,7 @@ blueprint_compiler = find_program('blueprint-compiler', version: '>= 0.16')
 
 blueprint_files = files(
   'trg-status-bar.blp',
+  'trg-toolbar.blp',
 )
 
 blueprints = custom_target(
