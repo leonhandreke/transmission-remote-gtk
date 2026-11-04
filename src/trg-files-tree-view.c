@@ -226,6 +226,7 @@ static void view_popup_menu(TrgFilesTreeView *self, gdouble x, gdouble y)
     GtkBuilder *builder = gtk_builder_new_from_resource(
         "/io/github/TransmissionRemoteGtk/ui/trg-files-tree-view.ui");
     GMenu *menu = g_menu_new();
+    GMenuModel *files_menu;
     guint i;
 
     g_action_map_add_action_entries(G_ACTION_MAP(actions), entries, G_N_ELEMENTS(entries), self);
@@ -245,7 +246,13 @@ static void view_popup_menu(TrgFilesTreeView *self, gdouble x, gdouble y)
                               G_MENU_MODEL(gtk_builder_get_object(builder, "rename_menu")));
     }
 
-    g_menu_append_section(menu, NULL, G_MENU_MODEL(gtk_builder_get_object(builder, "files_menu")));
+    /* its sections, as sections of this menu */
+    files_menu = G_MENU_MODEL(gtk_builder_get_object(builder, "files_menu"));
+    for (i = 0; i < (guint)g_menu_model_get_n_items(files_menu); i++) {
+        GMenuItem *section = g_menu_item_new_from_model(files_menu, i);
+        g_menu_append_item(menu, section);
+        g_object_unref(section);
+    }
 
     trg_popover_menu_popup(GTK_WIDGET(self), G_MENU_MODEL(menu), x, y, "files",
                            G_ACTION_GROUP(actions));
