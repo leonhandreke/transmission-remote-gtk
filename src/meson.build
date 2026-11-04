@@ -63,6 +63,7 @@ blueprint_files = files(
   'trg-toolbar.blp',
   'trg-torrent-add-url-dialog.blp',
   'trg-torrent-move-dialog.blp',
+  'trg-torrent-props-dialog.blp',
 )
 
 blueprints = custom_target(

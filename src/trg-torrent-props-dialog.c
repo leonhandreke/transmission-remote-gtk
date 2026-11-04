@@ -23,7 +23,6 @@
 #include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
 
-#include "hig.h"
 #include "json.h"
 #include "protocol-constants.h"
 #include "requests.h"
@@ -64,7 +63,10 @@ struct _TrgTorrentPropsDialog {
 
     GList *widgets;
 
-    GtkWidget *bandwidthPriorityCombo, *seedRatioMode;
+    GtkWidget *notebook;
+    GtkWidget *info_page;
+    GtkWidget *bandwidth_priority_combo, *seed_ratio_mode_combo, *seed_ratio_limit_spin;
+    GtkWidget *queue_position_label, *queue_position_spin;
 
     TrgPeersTreeView *peersTv;
     TrgPeersModel *peersModel;
@@ -100,6 +102,20 @@ enum {
     PROP_PARENT_WINDOW,
     PROP_CLIENT
 };
+/* The widgets of the limits page that show a field of the torrent */
+static const struct {
+    const gchar *id;
+    const gchar *key;
+} field_widgets[] = {
+    { "honors_session_limits_check", FIELD_HONORS_SESSION_LIMITS },
+    { "download_limited_check", FIELD_DOWNLOAD_LIMITED },
+    { "download_limit_spin", FIELD_DOWNLOAD_LIMIT },
+    { "upload_limited_check", FIELD_UPLOAD_LIMITED },
+    { "upload_limit_spin", FIELD_UPLOAD_LIMIT },
+    { "seed_ratio_limit_spin", FIELD_SEED_RATIO_LIMIT },
+    { "peer_limit_spin", FIELD_PEER_LIMIT },
+};
+
 static void trg_torrent_props_dialog_set_property(GObject *object, guint prop_id,
                                                   const GValue *value,
                                                   GParamSpec *pspec G_GNUC_UNUSED)
@@ -153,11 +169,12 @@ static void trg_torrent_props_response_cb(TrgDialog *dialog, gint res_id,
         JsonNode *request = torrent_set(self->targetIds);
         JsonObject *args = node_get_arguments(request);
 
-        json_object_set_int_member(args, FIELD_SEED_RATIO_MODE,
-                                   gtk_drop_down_get_selected(GTK_DROP_DOWN(self->seedRatioMode)));
+        json_object_set_int_member(
+            args, FIELD_SEED_RATIO_MODE,
+            gtk_drop_down_get_selected(GTK_DROP_DOWN(self->seed_ratio_mode_combo)));
         json_object_set_int_member(
             args, FIELD_BANDWIDTH_PRIORITY,
-            (gint)gtk_drop_down_get_selected(GTK_DROP_DOWN(self->bandwidthPriorityCombo)) - 1);
+            (gint)gtk_drop_down_get_selected(GTK_DROP_DOWN(self->bandwidth_priority_combo)) - 1);
 
         trg_json_widgets_save(self->widgets, args);
 
@@ -168,105 +185,12 @@ static void trg_torrent_props_response_cb(TrgDialog *dialog, gint res_id,
     gtk_window_destroy(GTK_WINDOW(dialog));
 }
 
-static void seed_ratio_mode_changed_cb(GtkWidget *w, GParamSpec *pspec, gpointer data)
+/* The ratio limit is for "Stop seeding at ratio" */
+static void seed_ratio_mode_changed_cb(GtkDropDown *w, GParamSpec *pspec,
+                                       TrgTorrentPropsDialog *self)
 {
-    gtk_widget_set_sensitive(GTK_WIDGET(data), gtk_drop_down_get_selected(GTK_DROP_DOWN(w)) == 1);
-}
-
-static GtkWidget *info_page_new(TrgTorrentPropsDialog *dialog)
-{
-    guint row = 0;
-    GtkTextBuffer *b;
-    GtkWidget *l, *w, *fr, *sw;
-    GtkWidget *t = hig_workarea_create();
-
-    hig_workarea_add_section_title(t, &row, _("Activity"));
-
-    /* size */
-    l = dialog->size_lb = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("Torrent size:"), l, NULL);
-
-    /* have */
-    l = dialog->have_lb = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("Have:"), l, NULL);
-
-    /* downloaded */
-    l = dialog->dl_lb = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("Downloaded:"), l, NULL);
-
-    /* uploaded */
-    l = dialog->ul_lb = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("Uploaded:"), l, NULL);
-
-    /* state */
-    l = dialog->state_lb = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("State:"), l, NULL);
-
-    /* running for */
-    l = dialog->date_started_lb = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("Running time:"), l, NULL);
-
-    /* eta */
-    l = dialog->eta_lb = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("Remaining time:"), l, NULL);
-
-    /* last activity */
-    l = dialog->last_activity_lb = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("Last activity:"), l, NULL);
-
-    /* error */
-    l = g_object_new(GTK_TYPE_LABEL, "selectable", TRUE, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
-    hig_workarea_add_row(t, &row, _("Error:"), l, NULL);
-    dialog->error_lb = l;
-
-    hig_workarea_add_section_title(t, &row, _("Details"));
-
-    /* destination */
-    l = g_object_new(GTK_TYPE_LABEL, "selectable", TRUE, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
-    hig_workarea_add_row(t, &row, _("Location:"), l, NULL);
-    dialog->destination_lb = l;
-
-    /* hash */
-    l = g_object_new(GTK_TYPE_LABEL, "selectable", TRUE, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
-    hig_workarea_add_row(t, &row, _("Hash:"), l, NULL);
-    dialog->hash_lb = l;
-
-    /* privacy */
-    l = gtk_label_new(NULL);
-    gtk_label_set_single_line_mode(GTK_LABEL(l), TRUE);
-    hig_workarea_add_row(t, &row, _("Privacy:"), l, NULL);
-    dialog->privacy_lb = l;
-
-    /* origins */
-    l = g_object_new(GTK_TYPE_LABEL, "selectable", TRUE, "ellipsize", PANGO_ELLIPSIZE_END, NULL);
-    hig_workarea_add_row(t, &row, _("Origin:"), l, NULL);
-    dialog->origin_lb = l;
-
-    /* comment */
-    b = dialog->comment_buffer = gtk_text_buffer_new(NULL);
-    w = gtk_text_view_new_with_buffer(b);
-    gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(w), GTK_WRAP_WORD);
-    gtk_text_view_set_editable(GTK_TEXT_VIEW(w), FALSE);
-    sw = gtk_scrolled_window_new();
-    gtk_widget_set_size_request(sw, 350, 36);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(sw), GTK_POLICY_AUTOMATIC,
-                                   GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(sw), w);
-    fr = gtk_frame_new(NULL);
-    gtk_frame_set_child(GTK_FRAME(fr), sw);
-    w = hig_workarea_add_tall_row(t, &row, _("Comment:"), fr, NULL);
-    gtk_widget_set_halign(w, GTK_ALIGN_START);
-    gtk_widget_set_valign(w, GTK_ALIGN_START);
-
-    return t;
+    if (self->seed_ratio_limit_spin)
+        gtk_widget_set_sensitive(self->seed_ratio_limit_spin, gtk_drop_down_get_selected(w) == 1);
 }
 
 static void info_page_update(TrgTorrentPropsDialog *dialog, JsonObject *t, TrgTorrentItem *item)
@@ -355,60 +279,33 @@ static void info_page_update(TrgTorrentPropsDialog *dialog, JsonObject *t, TrgTo
     gtk_label_set_text(GTK_LABEL(dialog->have_lb), buf);
 }
 
-static GtkWidget *trg_props_limits_page_new(TrgTorrentPropsDialog *win, JsonObject *json)
+static void trg_props_limits_page_load(TrgTorrentPropsDialog *self, JsonObject *json)
 {
-    GtkWidget *w, *tb, *t;
-    guint row = 0;
+    guint i;
 
-    t = hig_workarea_create();
+    /* Also a field of the torrent */
+    self->seed_ratio_limit_spin = GTK_WIDGET(gtk_widget_get_template_child(
+        GTK_WIDGET(self), TRG_TYPE_TORRENT_PROPS_DIALOG, "seed_ratio_limit_spin"));
 
-    hig_workarea_add_section_title(t, &row, _("Bandwidth"));
-
-    w = trg_json_widget_check_new(&win->widgets, json, FIELD_HONORS_SESSION_LIMITS,
-                                  _("Honor global limits"), NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    w = win->bandwidthPriorityCombo = gtr_drop_down_new(_("Low"), _("Normal"), _("High"), NULL);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(w), torrent_get_bandwidth_priority(json) + 1);
-
-    hig_workarea_add_row(t, &row, _("Torrent priority:"), w, NULL);
+    for (i = 0; i < G_N_ELEMENTS(field_widgets); i++)
+        trg_json_widget_add(&self->widgets,
+                            GTK_WIDGET(gtk_widget_get_template_child(GTK_WIDGET(self),
+                                                                     TRG_TYPE_TORRENT_PROPS_DIALOG,
+                                                                     field_widgets[i].id)),
+                            json, field_widgets[i].key);
 
     if (json_object_has_member(json, FIELD_QUEUE_POSITION)) {
-        w = trg_json_widget_spin_int_new(&win->widgets, json, FIELD_QUEUE_POSITION, NULL, 0,
-                                         INT_MAX, 1);
-        hig_workarea_add_row(t, &row, _("Queue Position:"), w, w);
+        trg_json_widget_add(&self->widgets, self->queue_position_spin, json, FIELD_QUEUE_POSITION);
+    } else {
+        gtk_widget_set_visible(self->queue_position_label, FALSE);
+        gtk_widget_set_visible(self->queue_position_spin, FALSE);
     }
 
-    tb = trg_json_widget_check_new(&win->widgets, json, FIELD_DOWNLOAD_LIMITED,
-                                   _("Limit download speed (KiB/s)"), NULL);
-    w = trg_json_widget_spin_int_new(&win->widgets, json, FIELD_DOWNLOAD_LIMIT, tb, 0, INT_MAX, 1);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    tb = trg_json_widget_check_new(&win->widgets, json, FIELD_UPLOAD_LIMITED,
-                                   _("Limit upload speed (KiB/s)"), NULL);
-    w = trg_json_widget_spin_int_new(&win->widgets, json, FIELD_UPLOAD_LIMIT, tb, 0, INT_MAX, 1);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    hig_workarea_add_section_title(t, &row, _("Seeding"));
-
-    w = win->seedRatioMode = gtr_drop_down_new(_("Use global settings"), _("Stop seeding at ratio"),
-                                               _("Seed regardless of ratio"), NULL);
-    gtk_drop_down_set_selected(GTK_DROP_DOWN(w), torrent_get_seed_ratio_mode(json));
-    hig_workarea_add_row(t, &row, _("Seed ratio mode:"), w, NULL);
-
-    w = trg_json_widget_spin_double_new(&win->widgets, json, FIELD_SEED_RATIO_LIMIT, NULL, 0,
-                                        INT_MAX, 0.2);
-    seed_ratio_mode_changed_cb(win->seedRatioMode, NULL, w);
-    g_signal_connect(G_OBJECT(win->seedRatioMode), "notify::selected",
-                     G_CALLBACK(seed_ratio_mode_changed_cb), w);
-    hig_workarea_add_row(t, &row, _("Seed ratio limit:"), w, w);
-
-    hig_workarea_add_section_title(t, &row, _("Peers"));
-
-    w = trg_json_widget_spin_int_new(&win->widgets, json, FIELD_PEER_LIMIT, NULL, 0, INT_MAX, 5);
-    hig_workarea_add_row(t, &row, _("Peer limit:"), w, w);
-
-    return t;
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(self->bandwidth_priority_combo),
+                               torrent_get_bandwidth_priority(json) + 1);
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(self->seed_ratio_mode_combo),
+                               torrent_get_seed_ratio_mode(json));
+    seed_ratio_mode_changed_cb(GTK_DROP_DOWN(self->seed_ratio_mode_combo), NULL, self);
 }
 
 static void models_updated(TrgTorrentModel *model, gpointer data)
@@ -436,12 +333,8 @@ static void models_updated(TrgTorrentModel *model, gpointer data)
     dlg->lastJson = t;
 }
 
-static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_construct_properties,
-                                                     GObjectConstructParam *construct_params)
+static void trg_torrent_props_dialog_constructed(GObject *object)
 {
-    GObject *object = G_OBJECT_CLASS(trg_torrent_props_dialog_parent_class)
-                          ->constructor(type, n_construct_properties, construct_params);
-
     TrgTorrentPropsDialog *propsDialog = TRG_TORRENT_PROPS_DIALOG(object);
     GtkWindow *window = GTK_WINDOW(object);
 
@@ -455,7 +348,9 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
 
     JsonObject *json = NULL;
     TrgTorrentItem *item = NULL;
-    GtkWidget *notebook, *contentvbox;
+    GtkNotebook *notebook = GTK_NOTEBOOK(propsDialog->notebook);
+
+    G_OBJECT_CLASS(trg_torrent_props_dialog_parent_class)->constructed(object);
 
     get_torrent_data(trg_client_get_torrent_table(propsDialog->client),
                      trg_mw_get_selected_torrent_id(propsDialog->parent_win), &json, &item);
@@ -470,26 +365,14 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
     }
 
     gtk_window_set_transient_for(window, GTK_WINDOW(propsDialog->parent_win));
-    gtk_window_set_destroy_with_parent(window, TRUE);
-
-    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
-    trg_dialog_add_button(TRG_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
-
-    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
-
-    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_OK);
 
     g_signal_connect(G_OBJECT(object), "response", G_CALLBACK(trg_torrent_props_response_cb), NULL);
-
-    notebook = gtk_notebook_new();
 
     if (propsDialog->show_details) {
         gint64 serial = trg_client_get_serial(propsDialog->client);
 
         /* Information */
 
-        gtk_notebook_append_page(GTK_NOTEBOOK(notebook), info_page_new(propsDialog),
-                                 gtk_label_new(_("Information")));
         info_page_update(propsDialog, json, item);
 
         /* Files */
@@ -499,8 +382,8 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
             = trg_files_tree_view_new(propsDialog->filesModel, propsDialog->parent_win,
                                       propsDialog->client, "TrgFilesTreeView-dialog");
         trg_files_model_update(propsDialog->filesModel, serial, json, TORRENT_GET_MODE_FIRST);
-        gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->filesTv),
-                                 gtk_label_new(_("Files")));
+        gtk_notebook_insert_page(notebook, GTK_WIDGET(propsDialog->filesTv),
+                                 gtk_label_new(_("Files")), 1);
 
         /* Peers */
 
@@ -509,8 +392,8 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
             = trg_peers_tree_view_new(prefs, propsDialog->peersModel, "TrgPeersTreeView-dialog");
         trg_peers_model_update(propsDialog->peersModel, TRG_TREE_VIEW(propsDialog->peersTv), serial,
                                json, TORRENT_GET_MODE_FIRST);
-        gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->peersTv),
-                                 gtk_label_new(_("Peers")));
+        gtk_notebook_insert_page(notebook, GTK_WIDGET(propsDialog->peersTv),
+                                 gtk_label_new(_("Peers")), 2);
 
         /* Trackers */
 
@@ -520,8 +403,8 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
                                          propsDialog->parent_win, "TrgTrackersTreeView-dialog");
         trg_trackers_tree_view_new_connection(propsDialog->trackersTv, propsDialog->client);
         trg_trackers_model_update(propsDialog->trackersModel, serial, json, TORRENT_GET_MODE_FIRST);
-        gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(propsDialog->trackersTv),
-                                 gtk_label_new(_("Trackers")));
+        gtk_notebook_insert_page(notebook, GTK_WIDGET(propsDialog->trackersTv),
+                                 gtk_label_new(_("Trackers")), 3);
 
         g_object_unref(propsDialog->trackersModel);
         g_object_unref(propsDialog->filesModel);
@@ -531,16 +414,11 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
                                 object, G_CONNECT_AFTER);
 
         propsDialog->lastJson = json;
+    } else {
+        gtk_notebook_remove_page(notebook, gtk_notebook_page_num(notebook, propsDialog->info_page));
     }
 
-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), trg_props_limits_page_new(propsDialog, json),
-                             gtk_label_new(_("Limits")));
-
-    trg_widget_set_margins(notebook, GUI_PAD);
-
-    contentvbox = trg_dialog_get_content_area(TRG_DIALOG(object));
-    gtk_widget_set_vexpand(notebook, TRUE);
-    gtk_box_append(GTK_BOX(contentvbox), notebook);
+    trg_props_limits_page_load(propsDialog, json);
 
     if (propsDialog->show_details) {
         TrgPrefs *prefs = trg_client_get_prefs(propsDialog->client);
@@ -554,12 +432,12 @@ static GObject *trg_torrent_props_dialog_constructor(GType type, guint n_constru
     }
 
     gtk_window_set_default_size(window, width, height);
-
-    return object;
 }
 
 static void trg_torrent_props_dialog_dispose(GObject *object)
 {
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_TORRENT_PROPS_DIALOG);
+
     G_OBJECT_CLASS(trg_torrent_props_dialog_parent_class)->dispose(object);
 }
 
@@ -572,8 +450,10 @@ static void trg_torrent_props_dialog_finalize(GObject *object)
 static void trg_torrent_props_dialog_class_init(TrgTorrentPropsDialogClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+    guint i;
 
-    object_class->constructor = trg_torrent_props_dialog_constructor;
+    object_class->constructed = trg_torrent_props_dialog_constructed;
     object_class->set_property = trg_torrent_props_dialog_set_property;
     object_class->get_property = trg_torrent_props_dialog_get_property;
     object_class->dispose = trg_torrent_props_dialog_dispose;
@@ -604,10 +484,42 @@ static void trg_torrent_props_dialog_class_init(TrgTorrentPropsDialogClass *klas
         g_param_spec_pointer("trg-client", "TClient", "Client",
                              G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_NAME
                                  | G_PARAM_STATIC_NICK | G_PARAM_STATIC_BLURB));
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-torrent-props-dialog.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, notebook);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, info_page);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog,
+                                         bandwidth_priority_combo);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog,
+                                         seed_ratio_mode_combo);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, queue_position_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, queue_position_spin);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, size_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, have_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, dl_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, ul_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, state_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, date_started_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, eta_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, last_activity_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, error_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, destination_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, hash_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, privacy_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, origin_lb);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentPropsDialog, comment_buffer);
+
+    /* Declared, for gtk_widget_get_template_child() */
+    for (i = 0; i < G_N_ELEMENTS(field_widgets); i++)
+        gtk_widget_class_bind_template_child_full(widget_class, field_widgets[i].id, FALSE, 0);
+
+    gtk_widget_class_bind_template_callback(widget_class, seed_ratio_mode_changed_cb);
 }
 
-static void trg_torrent_props_dialog_init(TrgTorrentPropsDialog *self G_GNUC_UNUSED)
+static void trg_torrent_props_dialog_init(TrgTorrentPropsDialog *self)
 {
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 TrgTorrentPropsDialog *trg_torrent_props_dialog_new(GtkWindow *window, TrgTorrentTreeView *treeview,

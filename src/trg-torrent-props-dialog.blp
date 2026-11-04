@@ -1,0 +1,721 @@
+using Gtk 4.0;
+
+template $TrgTorrentPropsDialog: $TrgDialog {
+  destroy-with-parent: true;
+  default-widget: ok_button;
+  // With the details of a torrent, the pages of its files, peers and trackers
+  // follow the information.
+  Notebook notebook {
+    vexpand: true;
+    margin-start: 6;
+    margin-end: 6;
+    margin-top: 6;
+    margin-bottom: 6;
+
+    Grid info_page {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("Activity");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Torrent size:");
+        xalign: 0;
+        mnemonic-widget: size_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 1;
+        }
+      }
+
+      Label size_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 1;
+        }
+      }
+
+      Label {
+        label: _("Have:");
+        xalign: 0;
+        mnemonic-widget: have_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 2;
+        }
+      }
+
+      Label have_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 2;
+        }
+      }
+
+      Label {
+        label: _("Downloaded:");
+        xalign: 0;
+        mnemonic-widget: dl_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 3;
+        }
+      }
+
+      Label dl_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 3;
+        }
+      }
+
+      Label {
+        label: _("Uploaded:");
+        xalign: 0;
+        mnemonic-widget: ul_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+        }
+      }
+
+      Label ul_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 4;
+        }
+      }
+
+      Label {
+        label: _("State:");
+        xalign: 0;
+        mnemonic-widget: state_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 5;
+        }
+      }
+
+      Label state_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 5;
+        }
+      }
+
+      Label {
+        label: _("Running time:");
+        xalign: 0;
+        mnemonic-widget: date_started_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 6;
+        }
+      }
+
+      Label date_started_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 6;
+        }
+      }
+
+      Label {
+        label: _("Remaining time:");
+        xalign: 0;
+        mnemonic-widget: eta_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 7;
+        }
+      }
+
+      Label eta_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 7;
+        }
+      }
+
+      Label {
+        label: _("Last activity:");
+        xalign: 0;
+        mnemonic-widget: last_activity_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 8;
+        }
+      }
+
+      Label last_activity_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 8;
+        }
+      }
+
+      Label {
+        label: _("Error:");
+        xalign: 0;
+        mnemonic-widget: error_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 9;
+        }
+      }
+
+      Label error_lb {
+        xalign: 0;
+        selectable: true;
+        ellipsize: end;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 9;
+        }
+      }
+
+      Label {
+        label: _("Details");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 10;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Location:");
+        xalign: 0;
+        mnemonic-widget: destination_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 11;
+        }
+      }
+
+      Label destination_lb {
+        xalign: 0;
+        selectable: true;
+        ellipsize: end;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 11;
+        }
+      }
+
+      Label {
+        label: _("Hash:");
+        xalign: 0;
+        mnemonic-widget: hash_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 12;
+        }
+      }
+
+      Label hash_lb {
+        xalign: 0;
+        selectable: true;
+        ellipsize: end;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 12;
+        }
+      }
+
+      Label {
+        label: _("Privacy:");
+        xalign: 0;
+        mnemonic-widget: privacy_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 13;
+        }
+      }
+
+      Label privacy_lb {
+        xalign: 0;
+        single-line-mode: true;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 13;
+        }
+      }
+
+      Label {
+        label: _("Origin:");
+        xalign: 0;
+        mnemonic-widget: origin_lb;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 14;
+        }
+      }
+
+      Label origin_lb {
+        xalign: 0;
+        selectable: true;
+        ellipsize: end;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 14;
+        }
+      }
+
+      Label {
+        label: _("Comment:");
+        xalign: 0;
+        margin-start: 18;
+        valign: start;
+        margin-top: 3;
+
+        layout {
+          column: 0;
+          row: 15;
+        }
+      }
+
+      Frame {
+        ScrolledWindow {
+          width-request: 350;
+          height-request: 36;
+
+          TextView {
+            wrap-mode: word;
+            editable: false;
+
+            buffer: TextBuffer comment_buffer {};
+          }
+        }
+
+        hexpand: true;
+        vexpand: true;
+
+        layout {
+          column: 1;
+          row: 15;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("Information");
+    }
+
+    Grid {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("Bandwidth");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      CheckButton honors_session_limits_check {
+        label: _("Honor global limits");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 1;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Torrent priority:");
+        xalign: 0;
+        mnemonic-widget: bandwidth_priority_combo;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 2;
+        }
+      }
+
+      DropDown bandwidth_priority_combo {
+        model: StringList {
+          strings [
+            _("Low"),
+            _("Normal"),
+            _("High"),
+          ]
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 2;
+        }
+      }
+
+      Label queue_position_label {
+        label: _("Queue Position:");
+        xalign: 0;
+        mnemonic-widget: queue_position_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 3;
+        }
+      }
+
+      SpinButton queue_position_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 3;
+        }
+      }
+
+      CheckButton download_limited_check {
+        label: _("Limit download speed (KiB/s)");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+        }
+      }
+
+      SpinButton download_limit_spin {
+        digits: 0;
+        sensitive: bind download_limited_check.active;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 4;
+        }
+      }
+
+      CheckButton upload_limited_check {
+        label: _("Limit upload speed (KiB/s)");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 5;
+        }
+      }
+
+      SpinButton upload_limit_spin {
+        digits: 0;
+        sensitive: bind upload_limited_check.active;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 5;
+        }
+      }
+
+      Label {
+        label: _("Seeding");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 6;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Seed ratio mode:");
+        xalign: 0;
+        mnemonic-widget: seed_ratio_mode_combo;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 7;
+        }
+      }
+
+      DropDown seed_ratio_mode_combo {
+        notify::selected => $seed_ratio_mode_changed_cb();
+
+        model: StringList {
+          strings [
+            _("Use global settings"),
+            _("Stop seeding at ratio"),
+            _("Seed regardless of ratio"),
+          ]
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 7;
+        }
+      }
+
+      Label {
+        label: _("Seed ratio limit:");
+        xalign: 0;
+        mnemonic-widget: seed_ratio_limit_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 8;
+        }
+      }
+
+      SpinButton seed_ratio_limit_spin {
+        digits: 1;
+        sensitive: false;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 0.2;
+          page-increment: 2.0;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 8;
+        }
+      }
+
+      Label {
+        label: _("Peers");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 9;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Peer limit:");
+        xalign: 0;
+        mnemonic-widget: peer_limit_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 10;
+        }
+      }
+
+      SpinButton peer_limit_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 5;
+          page-increment: 50;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 10;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("Limits");
+    }
+  }
+
+  [action]
+  Button {
+    label: _("_Close");
+    use-underline: true;
+    action-name: "dialog.close";
+  }
+
+  [action]
+  Button ok_button {
+    label: _("_OK");
+    use-underline: true;
+    action-name: "dialog.ok";
+
+    styles [
+      "suggested-action",
+    ]
+  }
+}
