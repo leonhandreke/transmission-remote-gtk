@@ -47,11 +47,35 @@ src_files = files(
   'util.c',
 )
 
+# UI definitions, compiled from Blueprint to GtkBuilder XML. batch-compile
+# writes each foo.blp to foo.ui in the build directory, where the resources
+# below pick them up.
+blueprint_compiler = find_program('blueprint-compiler', version: '>= 0.16')
+
+blueprint_files = files(
+  'trg-status-bar.blp',
+)
+
+blueprints = custom_target(
+  'blueprints',
+  input: blueprint_files,
+  output: '.',
+  command: [blueprint_compiler, 'batch-compile', '@OUTPUT@', '@CURRENT_SOURCE_DIR@', '@INPUT@'],
+)
+
+ui_resources = gnome.compile_resources(
+  'trg-ui-resources',
+  'trg.gresource.xml',
+  source_dir: meson.current_build_dir(),
+  dependencies: blueprints,
+)
+
 # generate config file
 configure_file(output: 'config.h', configuration: conf_data)
 
 # Add gresources
 src_files += gresources
+src_files += ui_resources
 
 trg_exe = executable(
   project_name,

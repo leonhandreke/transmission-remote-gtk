@@ -1,0 +1,39 @@
+using Gtk 4.0;
+
+template $TrgStatusBar: Box {
+  orientation: horizontal;
+  margin-start: 2;
+  margin-end: 2;
+  margin-top: 2;
+  margin-bottom: 2;
+
+  Label info_lbl {
+    label: _("Disconnected");
+    ellipsize: end;
+  }
+
+  // GTK 4 boxes have no pack_end, so the free space label takes the remaining
+  // space and right-aligns, pushing the rest to the end.
+  Label free_lbl {
+    hexpand: true;
+    halign: end;
+    margin-start: 5;
+    margin-end: 5;
+  }
+
+  Label speed_lbl {
+    ellipsize: start;
+    margin-start: 5;
+    margin-end: 5;
+  }
+
+  Image turtle_image {
+    visible: false;
+    margin-start: 5;
+    margin-end: 5;
+
+    GestureClick {
+      pressed => $turtle_toggle();
+    }
+  }
+}

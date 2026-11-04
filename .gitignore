@@ -14,3 +14,6 @@ __pycache__/
 /po/*.sin
 /po/*.header
 /po/stamp-po
+
+# meson subprojects
+/subprojects/blueprint-compiler

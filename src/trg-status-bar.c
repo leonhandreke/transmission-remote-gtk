@@ -48,7 +48,7 @@ struct _TrgStatusBar {
     GtkBox parent;
 
     GtkWidget *speed_lbl;
-    GtkWidget *turtleImage;
+    GtkWidget *turtle_image;
     GtkWidget *free_lbl;
     GtkWidget *info_lbl;
     TrgClient *client;
@@ -57,9 +57,6 @@ struct _TrgStatusBar {
 
 G_DEFINE_TYPE(TrgStatusBar, trg_status_bar, GTK_TYPE_BOX)
 
-static void trg_status_bar_class_init(TrgStatusBarClass *klass)
-{
-}
 
 void trg_status_bar_clear_indicators(TrgStatusBar *sb)
 {
@@ -71,7 +68,7 @@ void trg_status_bar_reset(TrgStatusBar *sb)
 {
     trg_status_bar_clear_indicators(sb);
     gtk_label_set_text(GTK_LABEL(sb->info_lbl), _("Disconnected"));
-    gtk_widget_set_visible(sb->turtleImage, FALSE);
+    gtk_widget_set_visible(sb->turtle_image, FALSE);
 }
 
 static void turtle_toggle(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
@@ -83,50 +80,42 @@ static void turtle_toggle(GtkGestureClick *gesture, gint n_press, gdouble x, gdo
     const gchar *iconName;
     gboolean altSpeedOn;
 
-    iconName = gtk_image_get_icon_name(GTK_IMAGE(sb->turtleImage));
+    iconName = gtk_image_get_icon_name(GTK_IMAGE(sb->turtle_image));
     altSpeedOn = g_strcmp0(iconName, "alt-speed-on") == 0;
 
-    gtk_image_set_from_icon_name(GTK_IMAGE(sb->turtleImage),
+    gtk_image_set_from_icon_name(GTK_IMAGE(sb->turtle_image),
                                  altSpeedOn ? "alt-speed-off" : "alt-speed-on");
     json_object_set_boolean_member(args, SGET_ALT_SPEED_ENABLED, !altSpeedOn);
 
     dispatch_rpc_async(sb->client, req, on_session_set, sb->win);
 }
 
+static void trg_status_bar_dispose(GObject *object)
+{
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_STATUS_BAR);
+
+    G_OBJECT_CLASS(trg_status_bar_parent_class)->dispose(object);
+}
+
+static void trg_status_bar_class_init(TrgStatusBarClass *klass)
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+
+    object_class->dispose = trg_status_bar_dispose;
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-status-bar.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgStatusBar, info_lbl);
+    gtk_widget_class_bind_template_child(widget_class, TrgStatusBar, free_lbl);
+    gtk_widget_class_bind_template_child(widget_class, TrgStatusBar, speed_lbl);
+    gtk_widget_class_bind_template_child(widget_class, TrgStatusBar, turtle_image);
+    gtk_widget_class_bind_template_callback(widget_class, turtle_toggle);
+}
+
 static void trg_status_bar_init(TrgStatusBar *self)
 {
-    GtkGesture *gesture;
-
-    trg_widget_set_margins(GTK_WIDGET(self), 2);
-
-    self->info_lbl = gtk_label_new(_("Disconnected"));
-    gtk_label_set_ellipsize(GTK_LABEL(self->info_lbl), PANGO_ELLIPSIZE_END);
-    gtk_box_append(GTK_BOX(self), self->info_lbl);
-
-    /* GTK 4 boxes have no pack_end, so the free space label takes the
-     * remaining space and right-aligns, pushing the rest to the end. */
-    self->free_lbl = gtk_label_new(NULL);
-    gtk_widget_set_hexpand(self->free_lbl, TRUE);
-    gtk_widget_set_halign(self->free_lbl, GTK_ALIGN_END);
-    gtk_widget_set_margin_start(self->free_lbl, 5);
-    gtk_widget_set_margin_end(self->free_lbl, 5);
-    gtk_box_append(GTK_BOX(self), self->free_lbl);
-
-    self->speed_lbl = gtk_label_new(NULL);
-    gtk_label_set_ellipsize(GTK_LABEL(self->speed_lbl), PANGO_ELLIPSIZE_START);
-    gtk_widget_set_margin_start(self->speed_lbl, 5);
-    gtk_widget_set_margin_end(self->speed_lbl, 5);
-    gtk_box_append(GTK_BOX(self), self->speed_lbl);
-
-    /* No GtkEventBox in GTK 4, the image takes the click directly */
-    self->turtleImage = gtk_image_new();
-    gesture = gtk_gesture_click_new();
-    g_signal_connect(gesture, "pressed", G_CALLBACK(turtle_toggle), self);
-    gtk_widget_add_controller(self->turtleImage, GTK_EVENT_CONTROLLER(gesture));
-    gtk_widget_set_visible(self->turtleImage, FALSE);
-    gtk_widget_set_margin_start(self->turtleImage, 5);
-    gtk_widget_set_margin_end(self->turtleImage, 5);
-    gtk_box_append(GTK_BOX(self), self->turtleImage);
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 void trg_status_bar_push_connection_msg(TrgStatusBar *sb, const gchar *msg)
@@ -173,12 +162,12 @@ void trg_status_bar_session_update(TrgStatusBar *sb, JsonObject *session)
         gtk_label_set_text(GTK_LABEL(sb->free_lbl), "");
     }
 
-    gtk_image_set_from_icon_name(GTK_IMAGE(sb->turtleImage),
+    gtk_image_set_from_icon_name(GTK_IMAGE(sb->turtle_image),
                                  altSpeedEnabled ? "alt-speed-on" : "alt-speed-off");
-    gtk_widget_set_tooltip_text(sb->turtleImage,
+    gtk_widget_set_tooltip_text(sb->turtle_image,
                                 altSpeedEnabled ? _("Disable alternate speed limits")
                                                 : _("Enable alternate speed limits"));
-    gtk_widget_set_visible(sb->turtleImage, TRUE);
+    gtk_widget_set_visible(sb->turtle_image, TRUE);
 }
 
 void trg_status_bar_update_speed(TrgStatusBar *sb, trg_torrent_model_update_stats *stats,
@@ -243,8 +232,7 @@ const gchar *trg_status_bar_get_speed_text(TrgStatusBar *sb)
 
 TrgStatusBar *trg_status_bar_new(TrgMainWindow *win, TrgClient *client)
 {
-    TrgStatusBar *sb
-        = g_object_new(TRG_TYPE_STATUS_BAR, "orientation", GTK_ORIENTATION_HORIZONTAL, NULL);
+    TrgStatusBar *sb = g_object_new(TRG_TYPE_STATUS_BAR, NULL);
 
     sb->client = client;
     sb->win = win;

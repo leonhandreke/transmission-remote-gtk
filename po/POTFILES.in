@@ -28,6 +28,7 @@ src/trg-prefs.c
 src/trg-remote-prefs-dialog.c
 src/trg-state-selector.c
 src/trg-stats-dialog.c
+src/trg-status-bar.blp
 src/trg-status-bar.c
 src/trg-toolbar.c
 src/trg-torrent-add-dialog.c
