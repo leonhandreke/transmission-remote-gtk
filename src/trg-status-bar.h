@@ -27,7 +27,7 @@
 #define TRG_TYPE_STATUS_BAR trg_status_bar_get_type()
 G_DECLARE_FINAL_TYPE(TrgStatusBar, trg_status_bar, TRG, STATUS_BAR, GtkBox)
 
-TrgStatusBar *trg_status_bar_new(TrgMainWindow *win, TrgClient *client);
+void trg_status_bar_set_client(TrgStatusBar *sb, TrgMainWindow *win, TrgClient *client);
 void trg_status_bar_update(TrgStatusBar *sb, trg_torrent_model_update_stats *stats,
                            TrgClient *client);
 void trg_status_bar_session_update(TrgStatusBar *sb, JsonObject *session);

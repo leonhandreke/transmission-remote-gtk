@@ -94,7 +94,7 @@ static void confirm_action_dialog(TrgMainWindow *win, const gchar *action_name,
 static void view_stats_toggled_cb(GSimpleAction *action, GVariant *parameter, gpointer data);
 static void view_states_toggled_cb(GObject *action, GParamSpec *pspec, gpointer data);
 static void view_notebook_toggled_cb(GObject *action, GParamSpec *pspec, gpointer data);
-static GtkWidget *trg_main_window_notebook_new(TrgMainWindow *win);
+static void trg_main_window_notebook_fill(TrgMainWindow *win);
 static gboolean on_session_get_timer(gpointer data);
 static gboolean on_session_get(gpointer data);
 static gboolean on_torrent_get(gpointer data, int mode);
@@ -118,8 +118,6 @@ static void trg_main_window_get_property(GObject *object, guint property_id, GVa
 static void trg_main_window_set_property(GObject *object, guint property_id, const GValue *value,
                                          GParamSpec *pspec);
 static TrgMenuBar *trg_main_window_menu_bar_new(TrgMainWindow *win);
-static void clear_filter_entry_cb(GtkEntry *entry, GtkEntryIconPosition icon_pos,
-                                  gpointer user_data);
 static GMenuItem *trg_imagemenuitem_new(const gchar *text, const char *action,
                                         const char *icon_name);
 static void set_limit_cb(GSimpleAction *action, GVariant *value, gpointer data);
@@ -138,6 +136,7 @@ struct _TrgMainWindow {
     TrgMenuBar *menuBar;
 
     TrgStatusBar *statusBar;
+    GtkWidget *menu_bar, *toolbar_box;
     TrgStateSelector *stateSelector;
     TrgGeneralPanel *genDetails;
     GtkWidget *notebook;
@@ -185,10 +184,6 @@ static void reset_connect_args(TrgMainWindow *win)
         g_strfreev(win->args);
         win->args = NULL;
     }
-}
-
-static void trg_main_window_init(TrgMainWindow *self)
-{
 }
 
 gint trg_mw_get_selected_torrent_id(TrgMainWindow *win)
@@ -749,18 +744,11 @@ void trg_main_window_notebook_set_visible(TrgMainWindow *win, gboolean visible)
     trg_widget_set_visible(win->notebook, visible);
 }
 
-static GtkWidget *trg_main_window_notebook_new(TrgMainWindow *win)
+/* The pages of the notebook after the general one, which is in the template */
+static void trg_main_window_notebook_fill(TrgMainWindow *win)
 {
     TrgPrefs *prefs = trg_client_get_prefs(win->client);
-
-    GtkWidget *notebook = win->notebook = gtk_notebook_new();
-    GtkWidget *genScrolledWin = gtk_scrolled_window_new();
-
-    win->genDetails = trg_general_panel_new(win->client);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(genScrolledWin), GTK_POLICY_AUTOMATIC,
-                                   GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(genScrolledWin), GTK_WIDGET(win->genDetails));
-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook), genScrolledWin, gtk_label_new(_("General")));
+    GtkWidget *notebook = win->notebook;
 
     win->trackersModel = trg_trackers_model_new();
     win->trackersTreeView = trg_trackers_tree_view_new(win->trackersModel, win->client, win, NULL);
@@ -776,8 +764,6 @@ static GtkWidget *trg_main_window_notebook_new(TrgMainWindow *win)
     win->peersTreeView = trg_peers_tree_view_new(prefs, win->peersModel, NULL);
     gtk_notebook_append_page(GTK_NOTEBOOK(notebook), GTK_WIDGET(win->peersTreeView),
                              gtk_label_new(_("Peers")));
-
-    return notebook;
 }
 
 gboolean on_session_set(gpointer data)
@@ -1317,7 +1303,7 @@ static TrgMenuBar *trg_main_window_menu_bar_new(TrgMainWindow *win)
 }
 
 static void clear_filter_entry_cb(GtkEntry *entry, GtkEntryIconPosition icon_pos,
-                                  gpointer user_data)
+                                  TrgMainWindow *win)
 {
     gtk_editable_set_text(GTK_EDITABLE(entry), "");
 }
@@ -1699,41 +1685,22 @@ static gboolean window_key_press_handler(GtkEventControllerKey *controller, guin
     return FALSE;
 }
 
-static GObject *trg_main_window_constructor(GType type, guint n_construct_properties,
-                                            GObjectConstructParam *construct_params)
+static void trg_main_window_constructed(GObject *object)
 {
-    TrgMainWindow *self
-        = TRG_MAIN_WINDOW(G_OBJECT_CLASS(trg_main_window_parent_class)
-                              ->constructor(type, n_construct_properties, construct_params));
-    GtkWidget *w;
-    GtkWidget *outerVbox;
-    GtkWidget *toolbarHbox;
-    // GtkWidget *outerAlignment;
-    GtkEventController *keyController;
+    TrgMainWindow *self = TRG_MAIN_WINDOW(object);
     GtkDropTarget *dropTarget;
     GtkFilterListModel *filtered;
     GtkSelectionModel *selection;
     gint width, height, pos;
     TrgPrefs *prefs;
 
+    G_OBJECT_CLASS(trg_main_window_parent_class)->constructed(object);
+
     self->queuesEnabled = TRUE;
 
     prefs = trg_client_get_prefs(self->client);
 
     gtk_window_set_default_icon_name(PACKAGE_NAME);
-
-    gtk_window_set_title(GTK_WINDOW(self), _("Transmission Remote"));
-    gtk_window_set_default_size(GTK_WINDOW(self), 1000, 600);
-
-    g_signal_connect(G_OBJECT(self), "close-request", G_CALLBACK(close_request), NULL);
-    g_signal_connect(G_OBJECT(self), "destroy", G_CALLBACK(destroy_window), NULL);
-
-    /* Ctrl+K/Ctrl+F (Command-K/F on macOS), before the focus widget gets
-     * them like "key-press-event" did */
-    keyController = gtk_event_controller_key_new();
-    gtk_event_controller_set_propagation_phase(keyController, GTK_PHASE_CAPTURE);
-    g_signal_connect(keyController, "key-pressed", G_CALLBACK(window_key_press_handler), self);
-    gtk_widget_add_controller(GTK_WIDGET(self), keyController);
 
     self->torrentModel = trg_torrent_model_new();
     trg_client_set_torrent_table(self->client, get_torrent_table(self->torrentModel));
@@ -1758,62 +1725,29 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
     g_signal_connect(self->torrentTreeView, "row-activated", G_CALLBACK(torrent_tv_onRowActivated),
                      self);
 
-    outerVbox = trg_vbox_new(FALSE, 0);
-
-    gtk_window_set_child(GTK_WINDOW(self), outerVbox);
-
     /* The menu is a GMenuModel, shown here with a GtkPopoverMenuBar, or in
      * the macOS menu bar (see trg_gtk_app_startup()). */
     self->menuBar = trg_main_window_menu_bar_new(self);
-    if (!trg_is_macos())
-        gtk_box_append(GTK_BOX(outerVbox),
-                       gtk_popover_menu_bar_new_from_model(trg_menu_bar_get_model(self->menuBar)));
+    if (trg_is_macos())
+        gtk_widget_set_visible(self->menu_bar, FALSE);
+    else
+        gtk_popover_menu_bar_set_menu_model(GTK_POPOVER_MENU_BAR(self->menu_bar),
+                                            trg_menu_bar_get_model(self->menuBar));
 
-    toolbarHbox = trg_hbox_new(FALSE, 0);
     self->toolBar = trg_main_window_toolbar_new(self);
     gtk_widget_set_hexpand(GTK_WIDGET(self->toolBar), TRUE);
-    gtk_box_append(GTK_BOX(toolbarHbox), GTK_WIDGET(self->toolBar));
-
-    w = gtk_entry_new();
-    gtk_entry_set_icon_from_icon_name(GTK_ENTRY(w), GTK_ENTRY_ICON_SECONDARY, "edit-clear");
-    g_signal_connect(w, "icon-release", G_CALLBACK(clear_filter_entry_cb), NULL);
-    gtk_widget_set_valign(w, GTK_ALIGN_CENTER);
-    gtk_box_append(GTK_BOX(toolbarHbox), w);
-    g_object_set(w, "secondary-icon-sensitive", FALSE, NULL);
-    self->filterEntry = w;
-
-    g_signal_connect(G_OBJECT(self->filterEntry), "changed", G_CALLBACK(entry_filter_changed_cb),
-                     self);
-
-    gtk_box_append(GTK_BOX(outerVbox), GTK_WIDGET(toolbarHbox));
-
-    self->hpaned = gtk_paned_new(GTK_ORIENTATION_HORIZONTAL);
-    self->vpaned = gtk_paned_new(GTK_ORIENTATION_VERTICAL);
-
-    gtk_widget_set_vexpand(self->vpaned, TRUE);
-    gtk_box_append(GTK_BOX(outerVbox), self->vpaned);
-    gtk_paned_set_start_child(GTK_PANED(self->vpaned), self->hpaned);
-    gtk_paned_set_resize_start_child(GTK_PANED(self->vpaned), TRUE);
-    gtk_paned_set_shrink_start_child(GTK_PANED(self->vpaned), TRUE);
+    gtk_box_prepend(GTK_BOX(self->toolbar_box), GTK_WIDGET(self->toolBar));
 
     self->stateSelector = trg_state_selector_new(self->client, self->torrentModel);
     gtk_paned_set_start_child(GTK_PANED(self->hpaned), GTK_WIDGET(self->stateSelector));
-    gtk_paned_set_resize_start_child(GTK_PANED(self->hpaned), FALSE);
-    gtk_paned_set_shrink_start_child(GTK_PANED(self->hpaned), FALSE);
-
     gtk_paned_set_end_child(GTK_PANED(self->hpaned), GTK_WIDGET(self->torrentTreeView));
-    gtk_paned_set_resize_end_child(GTK_PANED(self->hpaned), TRUE);
-    gtk_paned_set_shrink_end_child(GTK_PANED(self->hpaned), TRUE);
 
     g_signal_connect(G_OBJECT(self->stateSelector), "torrent-state-changed",
                      G_CALLBACK(torrent_state_selection_changed), self);
     /* the restored filter */
     trg_main_window_refilter(self);
 
-    self->notebook = trg_main_window_notebook_new(self);
-    gtk_paned_set_end_child(GTK_PANED(self->vpaned), self->notebook);
-    gtk_paned_set_resize_end_child(GTK_PANED(self->vpaned), FALSE);
-    gtk_paned_set_shrink_end_child(GTK_PANED(self->vpaned), FALSE);
+    trg_main_window_notebook_fill(self);
 
     /* the lists are enabled once connected (trg_main_window_conn_changed) */
     gtk_widget_set_sensitive(GTK_WIDGET(self->torrentTreeView), FALSE);
@@ -1823,13 +1757,9 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
 
     /* There's no system tray (TRG_PREFS_KEY_SYSTEM_TRAY) in GTK 4 */
 
-    self->statusBar = trg_status_bar_new(self, self->client);
+    trg_status_bar_set_client(self->statusBar, self, self->client);
     g_signal_connect(self->client, "session-updated", G_CALLBACK(trg_client_session_updated_cb),
                      self);
-
-    gtk_widget_set_margin_top(GTK_WIDGET(self->statusBar), 2);
-    gtk_widget_set_margin_bottom(GTK_WIDGET(self->statusBar), 2);
-    gtk_box_append(GTK_BOX(outerVbox), GTK_WIDGET(self->statusBar));
 
     width = trg_prefs_get_int(prefs, TRG_PREFS_KEY_WINDOW_WIDTH, TRG_PREFS_GLOBAL);
     height = trg_prefs_get_int(prefs, TRG_PREFS_KEY_WINDOW_HEIGHT, TRG_PREFS_GLOBAL);
@@ -1858,8 +1788,20 @@ static GObject *trg_main_window_constructor(GType type, guint n_construct_proper
     dropTarget = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY | GDK_ACTION_MOVE);
     g_signal_connect(dropTarget, "drop", G_CALLBACK(on_dropped_file), self);
     gtk_widget_add_controller(GTK_WIDGET(self), GTK_EVENT_CONTROLLER(dropTarget));
+}
 
-    return G_OBJECT(self);
+static void trg_main_window_dispose(GObject *object)
+{
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_MAIN_WINDOW);
+
+    G_OBJECT_CLASS(trg_main_window_parent_class)->dispose(object);
+}
+
+static void trg_main_window_init(TrgMainWindow *self)
+{
+    g_type_ensure(TRG_TYPE_GENERAL_PANEL);
+    g_type_ensure(TRG_TYPE_STATUS_BAR);
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 static void trg_main_window_finalize(GObject *object)
@@ -1876,8 +1818,10 @@ static void trg_main_window_finalize(GObject *object)
 static void trg_main_window_class_init(TrgMainWindowClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 
-    object_class->constructor = trg_main_window_constructor;
+    object_class->constructed = trg_main_window_constructed;
+    object_class->dispose = trg_main_window_dispose;
     object_class->finalize = trg_main_window_finalize;
     object_class->get_property = trg_main_window_get_property;
     object_class->set_property = trg_main_window_set_property;
@@ -1886,6 +1830,25 @@ static void trg_main_window_class_init(TrgMainWindowClass *klass)
         object_class, PROP_CLIENT,
         g_param_spec_pointer("trg-client", "TClient", "Client",
                              G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-main-window.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, menu_bar);
+    gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, toolbar_box);
+    gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, hpaned);
+    gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, vpaned);
+    gtk_widget_class_bind_template_child(widget_class, TrgMainWindow, notebook);
+    gtk_widget_class_bind_template_child_full(widget_class, "filter_entry", FALSE,
+                                              G_STRUCT_OFFSET(TrgMainWindow, filterEntry));
+    gtk_widget_class_bind_template_child_full(widget_class, "gen_details", FALSE,
+                                              G_STRUCT_OFFSET(TrgMainWindow, genDetails));
+    gtk_widget_class_bind_template_child_full(widget_class, "status_bar", FALSE,
+                                              G_STRUCT_OFFSET(TrgMainWindow, statusBar));
+    gtk_widget_class_bind_template_callback(widget_class, close_request);
+    gtk_widget_class_bind_template_callback(widget_class, destroy_window);
+    gtk_widget_class_bind_template_callback(widget_class, window_key_press_handler);
+    gtk_widget_class_bind_template_callback(widget_class, entry_filter_changed_cb);
+    gtk_widget_class_bind_template_callback(widget_class, clear_filter_entry_cb);
 }
 
 void trg_main_window_set_start_args(TrgMainWindow *win, gchar **args)

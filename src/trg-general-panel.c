@@ -57,7 +57,6 @@ struct _TrgGeneralPanel {
     GtkLabel *gen_hash_label;
     GtkLabel *gen_error_label;
     GtkLabel *error_key_label;
-    TrgClient *tc;
 };
 
 G_DEFINE_FINAL_TYPE(TrgGeneralPanel, trg_general_panel, GTK_TYPE_GRID)
@@ -258,13 +257,4 @@ static void trg_general_panel_class_init(TrgGeneralPanelClass *klass)
 static void trg_general_panel_init(TrgGeneralPanel *self)
 {
     gtk_widget_init_template(GTK_WIDGET(self));
-}
-
-TrgGeneralPanel *trg_general_panel_new(TrgClient *tc)
-{
-    TrgGeneralPanel *obj = g_object_new(TRG_TYPE_GENERAL_PANEL, NULL);
-
-    obj->tc = tc;
-
-    return obj;
 }

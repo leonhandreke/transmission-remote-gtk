@@ -229,12 +229,9 @@ const gchar *trg_status_bar_get_speed_text(TrgStatusBar *sb)
     return gtk_label_get_text(GTK_LABEL(sb->speed_lbl));
 }
 
-TrgStatusBar *trg_status_bar_new(TrgMainWindow *win, TrgClient *client)
+/* The main window has the status bar in its template, so this is set later */
+void trg_status_bar_set_client(TrgStatusBar *sb, TrgMainWindow *win, TrgClient *client)
 {
-    TrgStatusBar *sb = g_object_new(TRG_TYPE_STATUS_BAR, NULL);
-
     sb->client = client;
     sb->win = win;
-
-    return sb;
 }

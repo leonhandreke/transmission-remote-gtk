@@ -13,5 +13,6 @@
     <file preprocess="xml-stripblanks">trg-remote-prefs-dialog.ui</file>
     <file preprocess="xml-stripblanks">trg-torrent-props-dialog.ui</file>
     <file preprocess="xml-stripblanks">trg-torrent-add-dialog.ui</file>
+    <file preprocess="xml-stripblanks">trg-main-window.ui</file>
   </gresource>
 </gresources>

@@ -1,0 +1,65 @@
+using Gtk 4.0;
+// The skeleton of the main window. Its parts that need the client or the
+// models when they're created are added by TrgMainWindow: the toolbar, the
+// state selector, the lists and the drop target.
+template $TrgMainWindow: ApplicationWindow {
+  title: _("Transmission Remote");
+  default-width: 1000;
+  default-height: 600;
+  close-request => $close_request();
+  destroy => $destroy_window();
+  // Ctrl+K/Ctrl+F (Command-K/F on macOS), before the focus widget gets them
+  EventControllerKey {
+    propagation-phase: capture;
+    key-pressed => $window_key_press_handler();
+  }
+
+  Box {
+    orientation: vertical;
+    // Not on macOS, which shows the menu in its menu bar
+    PopoverMenuBar menu_bar {}
+
+    Box toolbar_box {
+      Entry filter_entry {
+        valign: center;
+        secondary-icon-name: "edit-clear";
+        secondary-icon-sensitive: false;
+        changed => $entry_filter_changed_cb();
+        icon-release => $clear_filter_entry_cb();
+      }
+    }
+
+    Paned vpaned {
+      orientation: vertical;
+      vexpand: true;
+      resize-start-child: true;
+      shrink-start-child: true;
+      resize-end-child: false;
+      shrink-end-child: false;
+
+      start-child: Paned hpaned {
+        orientation: horizontal;
+        resize-start-child: false;
+        shrink-start-child: false;
+        resize-end-child: true;
+        shrink-end-child: true;
+      };
+
+      end-child: Notebook notebook {
+        ScrolledWindow {
+          $TrgGeneralPanel gen_details {}
+        }
+
+        [tab]
+        Label {
+          label: _("General");
+        }
+      };
+    }
+
+    $TrgStatusBar status_bar {
+      margin-top: 2;
+      margin-bottom: 2;
+    }
+  }
+}
