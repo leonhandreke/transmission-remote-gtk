@@ -54,6 +54,7 @@ blueprint_compiler = find_program('blueprint-compiler', version: '>= 0.16')
 
 blueprint_files = files(
   'trg-file-rename-dialog.blp',
+  'trg-general-panel.blp',
   'trg-status-bar.blp',
   'trg-toolbar.blp',
   'trg-torrent-add-url-dialog.blp',

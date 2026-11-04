@@ -15,6 +15,7 @@ src/trg-destination-combo.c
 src/trg-file-parser.c
 src/trg-files-model.c
 src/trg-files-tree-view.c
+src/trg-general-panel.blp
 src/trg-general-panel.c
 src/trg-gtk-app.c
 src/trg-json-widgets.c

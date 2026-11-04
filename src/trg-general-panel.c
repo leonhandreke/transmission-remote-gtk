@@ -31,13 +31,7 @@
 #include "trg-torrent-model.h"
 #include "util.h"
 
-#define TRG_GENERAL_PANEL_SPACING_X 4
-#define TRG_GENERAL_PANEL_SPACING_Y 2
-#define TRG_GENERAL_PANEL_COLUMNS   6
-
 static void gtk_label_clear(GtkLabel *l);
-static GtkLabel *gen_panel_label_get_key_label(GtkLabel *l);
-static GtkLabel *trg_general_panel_add_label(TrgGeneralPanel *gp, char *key, guint col, guint row);
 
 struct _TrgGeneralPanel {
     GtkGrid parent;
@@ -62,6 +56,7 @@ struct _TrgGeneralPanel {
     GtkLabel *gen_comment_label;
     GtkLabel *gen_hash_label;
     GtkLabel *gen_error_label;
+    GtkLabel *error_key_label;
     TrgClient *tc;
 };
 
@@ -89,21 +84,12 @@ void trg_general_panel_clear(TrgGeneralPanel *panel)
     gtk_label_clear(panel->gen_comment_label);
     gtk_label_clear(panel->gen_hash_label);
     gtk_label_clear(panel->gen_error_label);
-    gtk_label_clear(gen_panel_label_get_key_label(GTK_LABEL(panel->gen_error_label)));
+    gtk_label_clear(panel->error_key_label);
 }
 
 static void gtk_label_clear(GtkLabel *l)
 {
     gtk_label_set_text(l, "");
-}
-
-static GtkLabel *gen_panel_label_get_key_label(GtkLabel *l)
-{
-    return GTK_LABEL(g_object_get_data(G_OBJECT(l), "key-label"));
-}
-
-static void trg_general_panel_class_init(TrgGeneralPanelClass *klass)
-{
 }
 
 void trg_general_panel_update(TrgGeneralPanel *panel, JsonObject *t, TrgTorrentItem *item)
@@ -202,7 +188,7 @@ void trg_general_panel_update(TrgGeneralPanel *panel, JsonObject *t, TrgTorrentI
     g_free(comment);
 
     errorStr = torrent_get_errorstr(t);
-    keyLabel = gen_panel_label_get_key_label(GTK_LABEL(panel->gen_error_label));
+    keyLabel = panel->error_key_label;
     if (strlen(errorStr) > 0) {
         markup = g_markup_printf_escaped("<span fgcolor=\"red\">%s</span>", errorStr);
         gtk_label_set_markup(GTK_LABEL(panel->gen_error_label), markup);
@@ -230,87 +216,53 @@ void trg_general_panel_update(TrgGeneralPanel *panel, JsonObject *t, TrgTorrentI
     gtk_label_set_text(GTK_LABEL(panel->gen_leechers_label), buf);
 }
 
-static GtkLabel *trg_general_panel_add_label_with_width(TrgGeneralPanel *gp, char *key, guint col,
-                                                        guint row, gint width)
+static void trg_general_panel_dispose(GObject *object)
 {
-    GtkWidget *value, *keyLabel;
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_GENERAL_PANEL);
 
-    guint startCol = col * 2;
-    guint endCol = (guint)(width < 0 ? (TRG_GENERAL_PANEL_COLUMNS) : width);
-
-    keyLabel = gtk_label_new(NULL);
-    gtk_label_set_xalign(GTK_LABEL(keyLabel), 0.0f);
-    gtk_label_set_yalign(GTK_LABEL(keyLabel), 0.0f);
-    gtk_label_set_width_chars(GTK_LABEL(keyLabel), 10);
-
-    if (strlen(key) > 0) {
-        gchar *keyMarkup = g_markup_printf_escaped("<b>%s:</b>", key);
-        gtk_label_set_markup(GTK_LABEL(keyLabel), keyMarkup);
-        g_free(keyMarkup);
-    }
-    gtk_grid_attach(GTK_GRID(gp), keyLabel, startCol, row, 1, 1);
-
-    value = gtk_label_new(NULL);
-    gtk_label_set_xalign(GTK_LABEL(value), 0.0f);
-    gtk_label_set_yalign(GTK_LABEL(value), 0.0f);
-    gtk_label_set_width_chars(GTK_LABEL(value), 10);
-
-    g_object_set_data(G_OBJECT(value), "key-label", keyLabel);
-    gtk_label_set_selectable(GTK_LABEL(value), TRUE);
-    gtk_grid_attach(GTK_GRID(gp), value, startCol + 1, row, endCol, 1);
-
-    return GTK_LABEL(value);
+    G_OBJECT_CLASS(trg_general_panel_parent_class)->dispose(object);
 }
 
-static GtkLabel *trg_general_panel_add_label(TrgGeneralPanel *gp, char *key, guint col, guint row)
+static void trg_general_panel_class_init(TrgGeneralPanelClass *klass)
 {
-    return trg_general_panel_add_label_with_width(gp, key, col, row, 1);
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+
+    object_class->dispose = trg_general_panel_dispose;
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-general-panel.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_name_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_size_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_down_rate_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_completed_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_eta_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_up_rate_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_downloaded_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_seeders_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_ratio_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_uploaded_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_leechers_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_limit_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_corrupted_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_status_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_priority_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_completedat_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_downloaddir_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_comment_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_hash_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, gen_error_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgGeneralPanel, error_key_label);
 }
 
 static void trg_general_panel_init(TrgGeneralPanel *self)
 {
-    self->gen_name_label = trg_general_panel_add_label_with_width(self, _("Name"), 0, 0, -1);
-
-    self->gen_size_label = trg_general_panel_add_label(self, _("Size"), 0, 1);
-    self->gen_down_rate_label = trg_general_panel_add_label(self, _("Rate Down"), 1, 1);
-    self->gen_completed_label = trg_general_panel_add_label(self, _("Completed"), 2, 1);
-
-    self->gen_eta_label = trg_general_panel_add_label(self, _("ETA"), 0, 2);
-    self->gen_up_rate_label = trg_general_panel_add_label(self, _("Rate Up"), 1, 2);
-    self->gen_downloaded_label = trg_general_panel_add_label(self, _("Downloaded"), 2, 2);
-
-    self->gen_seeders_label = trg_general_panel_add_label(self, _("Seeders"), 0, 3);
-    self->gen_ratio_label = trg_general_panel_add_label(self, _("Ratio"), 1, 3);
-    self->gen_uploaded_label = trg_general_panel_add_label(self, _("Uploaded"), 2, 3);
-
-    self->gen_leechers_label = trg_general_panel_add_label(self, _("Leechers"), 0, 4);
-    self->gen_limit_label = trg_general_panel_add_label(self, _("Ratio limit"), 1, 4);
-    self->gen_corrupted_label = trg_general_panel_add_label(self, _("Corrupted"), 2, 4);
-
-    self->gen_status_label = trg_general_panel_add_label(self, _("Status"), 0, 5);
-    self->gen_priority_label = trg_general_panel_add_label(self, _("Priority"), 1, 5);
-    self->gen_completedat_label = trg_general_panel_add_label(self, _("Completed At"), 2, 5);
-
-    self->gen_downloaddir_label
-        = trg_general_panel_add_label_with_width(self, _("Location"), 0, 6, -1);
-
-    self->gen_comment_label = trg_general_panel_add_label(self, _("Comment"), 0, 7);
-
-    self->gen_hash_label = trg_general_panel_add_label(self, _("Hash"), 0, 8);
-
-    self->gen_error_label = trg_general_panel_add_label_with_width(self, "", 0, 9, -1);
-
-    gtk_grid_set_row_homogeneous(GTK_GRID(self), TRUE);
-    gtk_grid_set_column_spacing(GTK_GRID(self), TRG_GENERAL_PANEL_SPACING_X);
-    gtk_grid_set_row_spacing(GTK_GRID(self), TRG_GENERAL_PANEL_SPACING_Y);
-    gtk_widget_set_sensitive(GTK_WIDGET(self), FALSE);
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 TrgGeneralPanel *trg_general_panel_new(TrgClient *tc)
 {
-    TrgGeneralPanel *obj
-        = TRG_GENERAL_PANEL(g_object_new(TRG_TYPE_GENERAL_PANEL, "row-homogeneous", FALSE,
-                                         "row-spacing", 6, "column-spacing", 8, NULL));
+    TrgGeneralPanel *obj = g_object_new(TRG_TYPE_GENERAL_PANEL, NULL);
 
     obj->tc = tc;
 
