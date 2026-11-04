@@ -3,7 +3,6 @@ data/io.github.TransmissionRemoteGtk.appdata.xml.in
 src/bencode.c
 src/json.c
 src/main.c
-src/remote-exec.c
 src/requests.c
 src/session-get.c
 src/torrent.c
@@ -14,6 +13,8 @@ src/trg-client.c
 src/trg-destination-combo.blp
 src/trg-destination-combo.c
 src/trg-file-parser.c
+src/trg-file-rename-dialog.blp
+src/trg-file-rename-dialog.c
 src/trg-files-model.c
 src/trg-files-tree-view.blp
 src/trg-files-tree-view.c
@@ -28,6 +29,7 @@ src/trg-menu-bar.c
 src/trg-model.c
 src/trg-peers-model.c
 src/trg-peers-tree-view.c
+src/trg-persistent-tree-view.c
 src/trg-preferences-dialog.blp
 src/trg-preferences-dialog.c
 src/trg-prefs.c
@@ -44,7 +46,6 @@ src/trg-torrent-add-dialog.blp
 src/trg-torrent-add-dialog.c
 src/trg-torrent-add-url-dialog.blp
 src/trg-torrent-add-url-dialog.c
-src/trg-torrent-graph.c
 src/trg-torrent-model.c
 src/trg-torrent-move-dialog.blp
 src/trg-torrent-move-dialog.c
