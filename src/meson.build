@@ -61,6 +61,7 @@ blueprint_files = files(
   'trg-stats-dialog.blp',
   'trg-status-bar.blp',
   'trg-toolbar.blp',
+  'trg-torrent-add-dialog.blp',
   'trg-torrent-add-url-dialog.blp',
   'trg-torrent-move-dialog.blp',
   'trg-torrent-props-dialog.blp',

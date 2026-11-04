@@ -1,0 +1,211 @@
+using Gtk 4.0;
+
+template $TrgTorrentAddDialog: $TrgDialog {
+  title: _("Add Torrent");
+  destroy-with-parent: true;
+  default-widget: open_button;
+  focus-widget: open_button;
+
+  Grid {
+    row-spacing: 6;
+    column-spacing: 12;
+    margin-start: 12;
+    margin-end: 12;
+    margin-top: 12;
+    margin-bottom: 12;
+
+    Label {
+      label: _("_Torrent file:");
+      xalign: 0;
+      mnemonic-widget: source_chooser;
+      use-underline: true;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 0;
+      }
+    }
+
+    Button source_chooser {
+      clicked => $source_click_cb();
+      hexpand: true;
+
+      layout {
+        column: 1;
+        row: 0;
+      }
+    }
+
+    Label dest_label {
+      label: _("_Destination folder:");
+      xalign: 0;
+      mnemonic-widget: dest_box;
+      use-underline: true;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 1;
+      }
+    }
+
+    Box dest_box {
+      hexpand: true;
+
+      layout {
+        column: 1;
+        row: 1;
+      }
+    }
+
+    Box file_list_box {
+      orientation: vertical;
+      hexpand: true;
+      margin-start: 18;
+      vexpand: true;
+
+      layout {
+        column: 0;
+        row: 2;
+        column-span: 2;
+      }
+    }
+
+    Label {
+      label: _("Apply to all:");
+      xalign: 0;
+      mnemonic-widget: apply_all_button;
+      use-underline: true;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 3;
+      }
+    }
+
+    MenuButton apply_all_button {
+      halign: start;
+      always-show-arrow: true;
+      menu-model: apply_all_menu;
+      hexpand: true;
+
+      layout {
+        column: 1;
+        row: 3;
+      }
+    }
+
+    Label {
+      label: _("Torrent _priority:");
+      xalign: 0;
+      mnemonic-widget: priority_combo;
+      use-underline: true;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 4;
+      }
+    }
+
+    DropDown priority_combo {
+      model: StringList {
+        strings [
+          _("Low"),
+          _("Normal"),
+          _("High"),
+        ]
+      };
+
+      hexpand: true;
+
+      layout {
+        column: 1;
+        row: 4;
+      }
+    }
+
+    CheckButton paused_check {
+      label: _("Start _paused");
+      use-underline: true;
+      hexpand: true;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 5;
+        column-span: 2;
+      }
+    }
+
+    CheckButton delete_check {
+      label: _("Delete local .torrent file after adding");
+      use-underline: true;
+      hexpand: true;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 6;
+        column-span: 2;
+      }
+    }
+  }
+
+  [action]
+  Button {
+    label: _("_Cancel");
+    use-underline: true;
+    action-name: "dialog.cancel";
+  }
+
+  [action]
+  Button open_button {
+    label: _("_Open");
+    use-underline: true;
+    action-name: "dialog.accept";
+
+    styles [
+      "suggested-action",
+    ]
+  }
+}
+
+// "Apply to all" is an action rather than a setting, so a menu button
+menu apply_all_menu {
+  section {
+    item {
+      label: _("High Priority");
+      action: "add.apply-all";
+      target: "high";
+    }
+
+    item {
+      label: _("Normal Priority");
+      action: "add.apply-all";
+      target: "normal";
+    }
+
+    item {
+      label: _("Low Priority");
+      action: "add.apply-all";
+      target: "low";
+    }
+  }
+
+  section {
+    item {
+      label: _("Download");
+      action: "add.apply-all";
+      target: "download";
+    }
+
+    item {
+      label: _("Skip");
+      action: "add.apply-all";
+      target: "skip";
+    }
+  }
+}
