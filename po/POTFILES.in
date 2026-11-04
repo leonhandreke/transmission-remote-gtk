@@ -37,6 +37,7 @@ src/trg-torrent-add-url-dialog.blp
 src/trg-torrent-add-url-dialog.c
 src/trg-torrent-graph.c
 src/trg-torrent-model.c
+src/trg-torrent-move-dialog.blp
 src/trg-torrent-move-dialog.c
 src/trg-torrent-props-dialog.c
 src/trg-torrent-tree-view.c

@@ -1,0 +1,56 @@
+using Gtk 4.0;
+
+template $TrgFileRenameDialog: $TrgDialog {
+  destroy-with-parent: true;
+  default-widget: rename_button;
+
+  Grid {
+    row-spacing: 6;
+    column-spacing: 12;
+    margin-start: 6;
+    margin-end: 6;
+    margin-top: 6;
+    margin-bottom: 6;
+    vexpand: true;
+
+    Label {
+      label: _("Name:");
+      xalign: 0;
+      margin-start: 18;
+      mnemonic-widget: name_entry;
+
+      layout {
+        column: 0;
+        row: 0;
+      }
+    }
+
+    Entry name_entry {
+      hexpand: true;
+      activates-default: true;
+      changed => $name_changed();
+
+      layout {
+        column: 1;
+        row: 0;
+      }
+    }
+  }
+
+  [action]
+  Button {
+    label: _("_Close");
+    use-underline: true;
+    action-name: "dialog.cancel";
+  }
+
+  [action]
+  Button rename_button {
+    label: _("Rename");
+    action-name: "dialog.accept";
+
+    styles [
+      "suggested-action",
+    ]
+  }
+}

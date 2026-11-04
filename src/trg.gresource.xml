@@ -4,5 +4,7 @@
     <file preprocess="xml-stripblanks">trg-status-bar.ui</file>
     <file preprocess="xml-stripblanks">trg-toolbar.ui</file>
     <file preprocess="xml-stripblanks">trg-torrent-add-url-dialog.ui</file>
+    <file preprocess="xml-stripblanks">trg-torrent-move-dialog.ui</file>
+    <file preprocess="xml-stripblanks">trg-file-rename-dialog.ui</file>
   </gresource>
 </gresources>

@@ -1,0 +1,58 @@
+using Gtk 4.0;
+
+template $TrgTorrentMoveDialog: $TrgDialog {
+  destroy-with-parent: true;
+  default-widget: move_button;
+
+  Grid grid {
+    row-spacing: 6;
+    column-spacing: 12;
+    margin-start: 6;
+    margin-end: 6;
+    margin-top: 6;
+    margin-bottom: 6;
+    vexpand: true;
+
+    Label location_label {
+      label: _("Location:");
+      xalign: 0;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 0;
+      }
+    }
+
+    // The location (a TrgDestinationCombo) is added at column 1, row 0, once
+    // the client is known.
+    CheckButton move_check {
+      label: _("Move");
+      active: true;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 1;
+        column-span: 2;
+      }
+    }
+  }
+
+  [action]
+  Button {
+    label: _("_Close");
+    use-underline: true;
+    action-name: "dialog.cancel";
+  }
+
+  [action]
+  Button move_button {
+    label: _("Move");
+    action-name: "dialog.accept";
+
+    styles [
+      "suggested-action",
+    ]
+  }
+}

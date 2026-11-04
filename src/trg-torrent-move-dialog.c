@@ -24,7 +24,6 @@
 #include <json-glib/json-glib.h>
 #include <string.h>
 
-#include "hig.h"
 #include "requests.h"
 #include "torrent.h"
 #include "trg-client.h"
@@ -40,9 +39,10 @@ struct _TrgTorrentMoveDialog {
     TrgMainWindow *win;
     TrgTorrentTreeView *treeview;
     JsonArray *ids;
+    GtkWidget *grid;
+    GtkWidget *location_label;
     GtkWidget *location_combo;
     GtkWidget *move_check;
-    GtkWidget *move_button;
 };
 
 G_DEFINE_TYPE(TrgTorrentMoveDialog, trg_torrent_move_dialog, TRG_TYPE_DIALOG)
@@ -74,50 +74,26 @@ static void trg_torrent_move_response_cb(TrgDialog *dialog, gint res_id, gpointe
 static void location_changed(TrgDestinationCombo *w, gpointer data)
 {
     TrgTorrentMoveDialog *dlg = TRG_TORRENT_MOVE_DIALOG(data);
-    gtk_widget_set_sensitive(
-        dlg->move_button,
+    gtk_widget_action_set_enabled(
+        GTK_WIDGET(dlg), "dialog.accept",
         trg_destination_combo_has_text(TRG_DESTINATION_COMBO(dlg->location_combo)));
 }
 
-static GObject *trg_torrent_move_dialog_constructor(GType type, guint n_construct_properties,
-                                                    GObjectConstructParam *construct_params)
+static void trg_torrent_move_dialog_constructed(GObject *object)
 {
-    GObject *object = G_OBJECT_CLASS(trg_torrent_move_dialog_parent_class)
-                          ->constructor(type, n_construct_properties, construct_params);
     TrgTorrentMoveDialog *self = TRG_TORRENT_MOVE_DIALOG(object);
-
     gint count;
     gchar *msg;
 
-    GtkWidget *w, *t;
-    guint row = 0;
+    G_OBJECT_CLASS(trg_torrent_move_dialog_parent_class)->constructed(object);
 
-    t = hig_workarea_create();
-
-    w = self->location_combo
+    self->location_combo
         = trg_destination_combo_new(self->client, TRG_PREFS_KEY_LAST_MOVE_DESTINATION);
-    g_signal_connect(w, "changed", G_CALLBACK(location_changed), object);
-    hig_workarea_add_row(t, &row, _("Location:"), w, NULL);
-
-    self->move_check = hig_workarea_add_wide_checkbutton(t, &row, _("Move"), TRUE);
-
-    gtk_window_set_destroy_with_parent(GTK_WINDOW(object), TRUE);
-
-    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CANCEL);
-    self->move_button = trg_dialog_add_button(TRG_DIALOG(object), _("Move"), GTK_RESPONSE_ACCEPT);
-
-    gtk_widget_set_sensitive(
-        self->move_button,
-        trg_destination_combo_has_text(TRG_DESTINATION_COMBO(self->location_combo)));
-
-    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
-
-    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_ACCEPT);
-
-    trg_widget_set_margins(t, GUI_PAD);
-
-    gtk_widget_set_vexpand(t, TRUE);
-    gtk_box_append(GTK_BOX(trg_dialog_get_content_area(TRG_DIALOG(object))), t);
+    gtk_widget_set_hexpand(self->location_combo, TRUE);
+    g_signal_connect(self->location_combo, "changed", G_CALLBACK(location_changed), object);
+    gtk_grid_attach(GTK_GRID(self->grid), self->location_combo, 1, 0, 1, 1);
+    gtk_label_set_mnemonic_widget(GTK_LABEL(self->location_label), self->location_combo);
+    location_changed(TRG_DESTINATION_COMBO(self->location_combo), self);
 
     count = trg_tree_view_count_selected(TRG_TREE_VIEW(self->treeview));
     self->ids = build_json_id_array(self->treeview);
@@ -141,8 +117,13 @@ static GObject *trg_torrent_move_dialog_constructor(GType type, guint n_construc
                      self->win);
 
     g_free(msg);
+}
 
-    return object;
+static void trg_torrent_move_dialog_dispose(GObject *object)
+{
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_TORRENT_MOVE_DIALOG);
+
+    G_OBJECT_CLASS(trg_torrent_move_dialog_parent_class)->dispose(object);
 }
 
 static void trg_torrent_move_dialog_get_property(GObject *object, guint property_id, GValue *value,
@@ -188,10 +169,18 @@ static void trg_torrent_move_dialog_set_property(GObject *object, guint property
 static void trg_torrent_move_dialog_class_init(TrgTorrentMoveDialogClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 
     object_class->get_property = trg_torrent_move_dialog_get_property;
     object_class->set_property = trg_torrent_move_dialog_set_property;
-    object_class->constructor = trg_torrent_move_dialog_constructor;
+    object_class->constructed = trg_torrent_move_dialog_constructed;
+    object_class->dispose = trg_torrent_move_dialog_dispose;
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-torrent-move-dialog.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentMoveDialog, grid);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentMoveDialog, location_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgTorrentMoveDialog, move_check);
 
     g_object_class_install_property(
         object_class, PROP_TREEVIEW,
@@ -215,6 +204,7 @@ static void trg_torrent_move_dialog_class_init(TrgTorrentMoveDialogClass *klass)
 
 static void trg_torrent_move_dialog_init(TrgTorrentMoveDialog *self)
 {
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 TrgTorrentMoveDialog *trg_torrent_move_dialog_new(TrgMainWindow *win, TrgClient *client,

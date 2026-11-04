@@ -24,7 +24,6 @@
 #include <json-glib/json-glib.h>
 #include <string.h>
 
-#include "hig.h"
 #include "requests.h"
 #include "trg-client.h"
 #include "trg-file-rename-dialog.h"
@@ -41,8 +40,7 @@ struct _TrgFileRenameDialog {
     TrgFilesTreeView *treeview;
     JsonArray *ids;
     gchar *orig_path;
-    GtkWidget *rename_button;
-    GtkEntryBuffer *name_entry_buf;
+    GtkWidget *name_entry;
 };
 
 typedef struct {
@@ -63,7 +61,7 @@ static void trg_file_rename_response_cb(TrgDialog *dlg, gint res_id, gpointer da
     TrgFileRenameDialog *self = TRG_FILE_RENAME_DIALOG(dlg);
 
     if (res_id == GTK_RESPONSE_ACCEPT) {
-        const gchar *name = gtk_entry_buffer_get_text(self->name_entry_buf);
+        const gchar *name = gtk_editable_get_text(GTK_EDITABLE(self->name_entry));
         JsonNode *request = torrent_rename_path(self->ids, self->orig_path, name);
 
         trg_files_model_set_accept(trg_files_tree_view_get_files_model(self->treeview), FALSE);
@@ -76,34 +74,25 @@ static void trg_file_rename_response_cb(TrgDialog *dlg, gint res_id, gpointer da
     gtk_window_destroy(GTK_WINDOW(dlg));
 }
 
-static void name_changed(GtkEditable *w, gpointer data)
+static void name_changed(GtkEditable *editable, TrgFileRenameDialog *self)
 {
-    TrgFileRenameDialog *self = TRG_FILE_RENAME_DIALOG(data);
-    gtk_widget_set_sensitive(self->rename_button,
-                             gtk_entry_buffer_get_length(self->name_entry_buf));
+    gtk_widget_action_set_enabled(GTK_WIDGET(self), "dialog.accept",
+                                  gtk_entry_get_text_length(GTK_ENTRY(editable)) > 0);
 }
 
-static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct_properties,
-                                                   GObjectConstructParam *construct_params)
+static void trg_file_rename_dialog_constructed(GObject *object)
 {
-    GObject *object = G_OBJECT_CLASS(trg_file_rename_dialog_parent_class)
-                          ->constructor(type, n_construct_properties, construct_params);
     TrgFileRenameDialog *self = TRG_FILE_RENAME_DIALOG(object);
-
-    gint64 target_id;
-    guint count;
-    gchar *msg;
-
-    GtkWidget *t;
-    guint row = 0;
-
-    /* Get file selection info */
-
     TrgTreeView *tv = TRG_TREE_VIEW(self->treeview);
     TrgFileItem *item = trg_tree_view_get_first_selected(tv);
+    guint count = trg_tree_view_count_selected(tv);
+    gint64 target_id;
     gchar *orig_filename;
+    gchar *msg;
 
-    count = trg_tree_view_count_selected(tv);
+    G_OBJECT_CLASS(trg_file_rename_dialog_parent_class)->constructed(object);
+
+    /* Get file selection info */
 
     if (item) {
         orig_filename = g_strdup(trg_item_get_string(item, FILESCOL_NAME));
@@ -113,34 +102,7 @@ static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct
         self->orig_path = NULL;
     }
 
-    /* Populate dialog widget */
-
-    t = hig_workarea_create();
-
-    self->name_entry_buf = gtk_entry_buffer_new(orig_filename, strlen(orig_filename));
-    GtkWidget *name_entry = gtk_entry_new_with_buffer(self->name_entry_buf);
-    gtk_entry_set_activates_default(GTK_ENTRY(name_entry), TRUE);
-
-    g_signal_connect(name_entry, "changed", G_CALLBACK(name_changed), object);
-    hig_workarea_add_row(t, &row, _("Name:"), name_entry, NULL);
-
-    gtk_window_set_destroy_with_parent(GTK_WINDOW(object), TRUE);
-
-    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CANCEL);
-    self->rename_button
-        = trg_dialog_add_button(TRG_DIALOG(object), _("Rename"), GTK_RESPONSE_ACCEPT);
-
-    gtk_widget_set_sensitive(self->rename_button,
-                             gtk_entry_buffer_get_length(self->name_entry_buf));
-
-    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
-
-    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_ACCEPT);
-
-    trg_widget_set_margins(t, GUI_PAD);
-
-    gtk_widget_set_vexpand(t, TRUE);
-    gtk_box_append(GTK_BOX(trg_dialog_get_content_area(TRG_DIALOG(object))), t);
+    gtk_editable_set_text(GTK_EDITABLE(self->name_entry), orig_filename);
 
     target_id = trg_files_model_get_torrent_id(trg_files_tree_view_get_files_model(self->treeview));
     self->ids = json_array_new();
@@ -152,8 +114,8 @@ static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct
         /* this really shouldn't happen since TrgFilesTreeView checks number of
          * selected files before allowing rename */
         msg = g_strdup_printf(_("INTERNAL ERROR: Rename %d files not supported"), count);
-        gtk_widget_set_sensitive(self->rename_button, FALSE);
-        gtk_widget_set_sensitive(name_entry, FALSE);
+        gtk_widget_action_set_enabled(GTK_WIDGET(self), "dialog.accept", FALSE);
+        gtk_widget_set_sensitive(self->name_entry, FALSE);
     }
 
     gtk_window_set_transient_for(GTK_WINDOW(object), GTK_WINDOW(self->win));
@@ -164,8 +126,13 @@ static GObject *trg_file_rename_dialog_constructor(GType type, guint n_construct
 
     g_free(msg);
     g_free(orig_filename);
+}
 
-    return object;
+static void trg_file_rename_dialog_dispose(GObject *object)
+{
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_FILE_RENAME_DIALOG);
+
+    G_OBJECT_CLASS(trg_file_rename_dialog_parent_class)->dispose(object);
 }
 
 static void trg_file_rename_dialog_get_property(GObject *object, guint property_id, GValue *value,
@@ -211,10 +178,17 @@ static void trg_file_rename_dialog_set_property(GObject *object, guint property_
 static void trg_file_rename_dialog_class_init(TrgFileRenameDialogClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
 
     object_class->get_property = trg_file_rename_dialog_get_property;
     object_class->set_property = trg_file_rename_dialog_set_property;
-    object_class->constructor = trg_file_rename_dialog_constructor;
+    object_class->constructed = trg_file_rename_dialog_constructed;
+    object_class->dispose = trg_file_rename_dialog_dispose;
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-file-rename-dialog.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgFileRenameDialog, name_entry);
+    gtk_widget_class_bind_template_callback(widget_class, name_changed);
 
     g_object_class_install_property(
         object_class, PROP_TREEVIEW,
@@ -238,6 +212,7 @@ static void trg_file_rename_dialog_class_init(TrgFileRenameDialogClass *klass)
 
 static void trg_file_rename_dialog_init(TrgFileRenameDialog *self)
 {
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 TrgFileRenameDialog *trg_file_rename_dialog_new(TrgMainWindow *win, TrgClient *client,
