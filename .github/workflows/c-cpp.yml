@@ -1,4 +1,4 @@
-name: C/C++ CI
+name: CI
 
 on:
   push:
@@ -19,12 +19,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # gtk4-rs needs a newer Rust than Ubuntu's
+      - uses: dtolnay/rust-toolchain@stable
       - name: install deps
         run: |
           sudo apt-get update
           sudo apt-get install -y meson gcc \
                                   libgtk-4-dev \
-                                  libjson-glib-dev \
                                   libsoup-3.0-dev \
                                   gettext \
                                   \
@@ -52,9 +53,9 @@ jobs:
       - name: install deps
         run: |
           brew install meson \
+                       rust \
                        blueprint-compiler \
                        gtk4 \
-                       json-glib \
                        libsoup \
                        gettext \
                        librsvg \
@@ -90,6 +91,7 @@ jobs:
           install: git
           pacboy: >-
             gcc:p
+            rust:p
             meson:p
             ninja:p
             pkg-config:p
@@ -98,7 +100,6 @@ jobs:
             libsoup3:p
             glib2:p
             gettext:p
-            json-glib:p
             appstream:p
             desktop-file-utils:p
       - name: setup git eol

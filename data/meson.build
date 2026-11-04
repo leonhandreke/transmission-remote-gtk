@@ -45,10 +45,8 @@ if rst2man.found()
   )
 endif
 
-# gresources.xml
-gnome = import('gnome')
-gresource_xml = '@0@.gresource.xml'.format(app_id)
-gresources = gnome.compile_resources('trg-resources', gresource_xml)
+# The icons of the user interface are compiled into the executable as
+# GResources by build.rs.
 
 # desktop file
 po_dir = meson.project_source_root() / 'po'

@@ -1,0 +1,46 @@
+name: formatting
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  formatting-check:
+    name: Rust Formatting Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Run rustfmt style check
+        run: cargo fmt --check
+
+  blueprint-formatting-check:
+    name: Blueprint Formatting Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install blueprint-compiler dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi
+      - name: Get blueprint-compiler
+        run: |
+          # Use the same version as the meson wrap fallback
+          revision=$(sed -n 's/^revision *= *//p' subprojects/blueprint-compiler.wrap)
+          git clone --depth 1 --branch "$revision" \
+            https://gitlab.gnome.org/GNOME/blueprint-compiler.git \
+            "$RUNNER_TEMP/blueprint-compiler"
+      - name: Run blueprint-compiler format check
+        run: python3 "$RUNNER_TEMP/blueprint-compiler/blueprint-compiler.py" format src/*.blp

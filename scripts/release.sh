@@ -2,7 +2,7 @@
 set -eo pipefail
 
 # Things to remember:
-# 1. Change `version:` in meson project to $VERSION
+# 1. Change `version:` in meson project and Cargo.toml to $VERSION
 # 2. Update appdata.xml with "release notes" for $VERSION (high level)
 # 3. Commit changes with message "Release $VERSION"
 # 4. tag new commit with $VERSION

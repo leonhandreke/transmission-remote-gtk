@@ -3,6 +3,8 @@
 transmission-remote-gtk is a GTK client for remote management of
 the Transmission BitTorrent client, using its HTTP RPC protocol.
 
+It is written in Rust, with [gtk4-rs](https://gtk-rs.org) and libsoup.
+
 
 # DEPENDENCIES
 
@@ -11,8 +13,7 @@ The following packages are required dependencies for building and running
 transmission-remote-gtk:
 
  - gtk >= 4.10
- - glib >= 2.56 (including gio and gthread)
- - json-glib >= 1.2.8
+ - glib >= 2.70 (including gio)
  - libsoup >= 3.0
  - GNU gettext
 
@@ -20,7 +21,7 @@ An example command for getting the packages required for an Ubuntu/Debian
 system:
 
 ```
-# apt install libgtk-4-dev gettext libsoup-3.0-dev libjson-glib-dev
+# apt install libgtk-4-dev gettext libsoup-3.0-dev
 ```
 
 ### Optional Dependencies
@@ -29,10 +30,12 @@ libappindicator or libayatana-appindicator3, which are only available for
 GTK 3, so it is not available in the GTK 4 version.
 
 ### Build Only Dependencies
-transmission-remote-gtk uses meson for its build system. A relatively new
-version of meson is required.
+transmission-remote-gtk uses meson for its build system, which builds the
+executable with cargo. A relatively new version of meson is required.
 
- - meson >= 0.59.0
+ - Rust >= 1.92 and cargo (from your distribution if it's new enough, otherwise
+   from [rustup](https://rustup.rs)); the Rust libraries are downloaded by cargo
+ - meson >= 0.60.0
  - blueprint-compiler >= 0.16 (the user interface is written in
    [Blueprint](https://gnome.pages.gitlab.gnome.org/blueprint-compiler/); if
    it's missing or too old, meson fetches it with git)
@@ -43,7 +46,7 @@ version of meson is required.
 An example of getting the build dependencies for an Ubuntu/Debian system:
 
 ```
-# apt install gcc meson blueprint-compiler appstream python-docutils
+# apt install gcc cargo meson blueprint-compiler appstream python-docutils
 ```
 
 **NOTE:** Ubuntu and other stable or LTS distros may have outdated versions of
@@ -69,12 +72,17 @@ $ meson compile -C "$builddir"
 # meson install -C "$builddir"
 ```
 
+For development, cargo can also be used on its own (`cargo build`, `cargo run`,
+`cargo test`). Then the translations are compiled into cargo's build directory,
+and GTK's data is used from its prefix. `meson devenv -C "$builddir"` gives a
+shell with meson's configuration for cargo.
+
 ### macOS
 
 On macOS, install the dependencies with [Homebrew](https://brew.sh):
 
 ```
-$ brew install meson blueprint-compiler gtk4 json-glib libsoup gettext librsvg adwaita-icon-theme glib-networking
+$ brew install meson rust blueprint-compiler gtk4 libsoup gettext librsvg adwaita-icon-theme glib-networking
 ```
 
 Building also creates an application bundle, `"$builddir/Transmission Remote GTK.app"`,

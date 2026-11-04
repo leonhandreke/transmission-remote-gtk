@@ -17,3 +17,6 @@ __pycache__/
 
 # meson subprojects
 /subprojects/blueprint-compiler
+
+# cargo
+/target

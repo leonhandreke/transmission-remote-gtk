@@ -7,4 +7,4 @@
 [ -z "$TRG_SKIP_HOOKS" ] || exit 0
 
 root="$(git rev-parse --show-toplevel)"
-clang-format -n --Werror "${root}"/src/*.{c,h}
+cargo fmt --manifest-path "${root}/Cargo.toml" --check

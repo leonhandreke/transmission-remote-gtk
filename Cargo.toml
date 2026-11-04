@@ -1,0 +1,35 @@
+[package]
+name = "transmission-remote-gtk"
+version = "1.7.1"
+edition = "2024"
+rust-version = "1.92"
+license = "GPL-2.0-or-later"
+description = "GTK client for remote management of the Transmission BitTorrent client"
+repository = "https://github.com/transmission-remote-gtk/transmission-remote-gtk"
+build = "build.rs"
+
+[[bin]]
+name = "transmission-remote-gtk"
+path = "src/main.rs"
+
+[features]
+default = ["nl_langinfo"]
+# the names of the days of the week of the locale (remote preferences)
+nl_langinfo = []
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.11", features = ["v4_10"] }
+soup = { package = "soup3", version = "0.9" }
+serde_json = { version = "1", features = ["preserve_order"] }
+base64 = "0.22"
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+
+[build-dependencies]
+glib-build-tools = "0.22"
+
+[profile.release]
+lto = "thin"
