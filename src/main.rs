@@ -14,6 +14,8 @@
 mod app;
 mod bencode;
 mod client;
+#[cfg(feature = "debug-snapshot")]
+mod debug_snapshot;
 mod dialog;
 mod dialogs;
 mod files;

@@ -1,0 +1,333 @@
+#!/bin/bash
+# UI test environment for transmission-remote-gtk on macOS: an isolated
+# transmission-daemon with test torrents, a scratch app config, and real
+# input (clicks, keys) and screenshots for the app's windows.
+#
+# Nothing outside $TRG_UITEST_DIR is read or written: the app runs with
+# XDG_CONFIG_HOME (and the other XDG dirs) pointing there, so the real
+# ~/.config/transmission-remote-gtk is never used.
+#
+# Environment:
+#   TRG_UITEST_DIR   scratch dir (default: <repo>/target/ui-test/env)
+#   TRG_UITEST_PORT  RPC port of the test daemon (default: 19091)
+#   TRG_UITEST_BIN   the app binary (default: <repo>/target/debug/transmission-remote-gtk)
+#   TRG_CLIENT_DEBUG RPC log in app.log (default 1; 0 turns it off)
+#   GTK_DEBUG, G_MESSAGES_DEBUG, ... are passed on to the app.
+#
+# Run without arguments for the list of commands.
+
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo=$(cd "$here/../.." && pwd)
+dir=${TRG_UITEST_DIR:-$repo/target/ui-test/env}
+port=${TRG_UITEST_PORT:-19091}
+bin=${TRG_UITEST_BIN:-$repo/target/debug/transmission-remote-gtk}
+peerport=$((port + 1))
+tools=/opt/homebrew/bin
+helper=$repo/target/ui-test/bin/trgui
+
+die() { echo "uitest: $*" >&2; exit 1; }
+
+usage() {
+    cat <<EOF
+usage: $(basename "$0") <command> [args]
+
+environment
+  start [--no-app]     start the test daemon with test torrents, and the app
+  app                  (re)start the app only
+  stop                 stop the app and the daemon
+  status               what's running, the paths and the port
+  remote ARGS...       transmission-remote on the test daemon (e.g. -l, -t 1 -if)
+  log [daemon]         follow the app's log (stderr, RPC log), or the daemon's
+
+windows and screenshots (the app's windows, found by its pid)
+  windows              list the app's windows: id, bounds in points, scale, title
+  win                  the id of the main window
+  front                bring the app to the front (needed before input)
+  shot NAME [--win W]  screenshot to \$dir/shots/NAME.png: all of the app's
+                       windows (popovers and menus are windows of their own),
+                       or just window W
+  wait-window [TITLE] [TIMEOUT]  wait for a window (with this title)
+
+offscreen snapshots (needs cargo build --features debug-snapshot; works
+while the screen is locked)
+  snap [ACTION...]     activate actions on the main window (win.view-notebook,
+                       "win.connect 0", app.quit, ...), then render every
+                       window and popover to \$dir/snapshots/*.png
+
+input (coordinates are points relative to the main window, or to --win W;
+add --px for pixels of a screenshot of that window)
+  click X Y [--right] [--count 2] [--mods shift|cmd|...]
+  rclick X Y           right click
+  dclick X Y           double click
+  drag X1 Y1 X2 Y2
+  scroll DY [DX] [--at X Y]
+  key COMBO...         e.g. return escape cmd+a shift+f10 ctrl+tab down
+  type TEXT
+  ax [--depth N]       dump the app's accessibility tree (only the native
+                       title bar and menu bar; GTK doesn't expose its widgets)
+  menu TITLE...        press a menu bar item, e.g. menu File Quit
+  check                check the macOS permissions
+EOF
+}
+
+# --- helpers -------------------------------------------------------------
+
+build_helper() {
+    if [[ ! -x $helper || $here/trgui.swift -nt $helper ]]; then
+        mkdir -p "$(dirname "$helper")"
+        swiftc -O "$here/trgui.swift" -o "$helper" || die "couldn't build the input helper"
+    fi
+}
+
+trgui() { build_helper; "$helper" "$@"; }
+
+alive() { [[ -f $1 ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
+
+app_pid() {
+    alive "$dir/app.pid" || die "the app isn't running (uitest start / uitest app)"
+    cat "$dir/app.pid"
+}
+
+rpc() { "$tools/transmission-remote" "127.0.0.1:$port" "$@"; }
+
+# The main window: the biggest normal window of the app
+main_win() {
+    local pid
+    pid=$(app_pid)
+    trgui windows --pid "$pid" | awk -F'\t' '$3 == "layer=0" {
+        split($4, a, " "); split(a[2], s, "x"); area = s[1] * s[2]
+        if (area > best) { best = area; id = $1 } } END { if (id) print id }'
+}
+
+# Adds --win <main window> unless a --win was given
+with_win() {
+    local a
+    for a in "$@"; do [[ $a == --win ]] && { trgui "$@"; return; }; done
+    local w
+    w=$(main_win)
+    [[ -n $w ]] || die "the app has no window"
+    local cmd=$1
+    shift
+    trgui "$cmd" --win "$w" "$@"
+}
+
+# --- environment ---------------------------------------------------------
+
+start_daemon() {
+    alive "$dir/daemon.pid" && die "the daemon is already running (uitest stop)"
+    rm -rf "$dir"
+    mkdir -p "$dir"/{daemon,downloads,seed,torrents,xdg/config,xdg/data,xdg/cache,xdg/state,shots}
+    # No DHT, LPD, PEX, port mapping, µTP; RPC only on localhost, no auth
+    cat >"$dir/daemon/settings.json" <<EOF
+{
+    "rpc-enabled": true,
+    "rpc-port": $port,
+    "rpc-bind-address": "127.0.0.1",
+    "rpc-whitelist-enabled": true,
+    "rpc-whitelist": "127.0.0.1,::1",
+    "rpc-host-whitelist-enabled": false,
+    "rpc-authentication-required": false,
+    "dht-enabled": false,
+    "lpd-enabled": false,
+    "pex-enabled": false,
+    "utp-enabled": false,
+    "port-forwarding-enabled": false,
+    "peer-port": $peerport,
+    "peer-port-random-on-start": false,
+    "bind-address-ipv4": "127.0.0.1",
+    "bind-address-ipv6": "::1",
+    "blocklist-enabled": false,
+    "download-dir": "$dir/downloads",
+    "incomplete-dir-enabled": false,
+    "watch-dir-enabled": false,
+    "message-level": 4
+}
+EOF
+    "$tools/transmission-daemon" -f -g "$dir/daemon" -p "$port" -T -O -Y -M -P "$peerport" \
+        -w "$dir/downloads" -r 127.0.0.1 >"$dir/daemon.log" 2>&1 &
+    echo $! >"$dir/daemon.pid"
+    local i
+    for i in $(seq 50); do
+        rpc -si >/dev/null 2>&1 && return
+        alive "$dir/daemon.pid" || { cat "$dir/daemon.log" >&2; die "the daemon exited"; }
+        sleep 0.2
+    done
+    die "the daemon doesn't answer on port $port"
+}
+
+add_torrents() {
+    # single file, complete (the data is in its download dir)
+    head -c 3000000 /dev/urandom >"$dir/seed/single-file.bin"
+    # several files in directories, nothing downloaded (no peers)
+    mkdir -p "$dir/seed/multi/sub dir"
+    head -c 700000 /dev/urandom >"$dir/seed/multi/a.txt"
+    head -c 1200000 /dev/urandom >"$dir/seed/multi/b.bin"
+    head -c 400000 /dev/urandom >"$dir/seed/multi/sub dir/c.dat"
+    head -c 900000 /dev/urandom >"$dir/seed/multi/sub dir/d.dat"
+    "$tools/transmission-create" -o "$dir/torrents/single-file.torrent" -c "UI test" \
+        "$dir/seed/single-file.bin" >/dev/null
+    "$tools/transmission-create" -o "$dir/torrents/multi.torrent" -c "UI test" \
+        "$dir/seed/multi" >/dev/null
+    rpc -a "$dir/torrents/single-file.torrent" -w "$dir/seed" >/dev/null
+    rpc -a "$dir/torrents/multi.torrent" -w "$dir/downloads" >/dev/null
+}
+
+write_config() {
+    mkdir -p "$dir/xdg/config/transmission-remote-gtk"
+    cat >"$dir/xdg/config/transmission-remote-gtk/config.json" <<EOF
+{
+    "profiles": [
+        {
+            "profile-name": "UI test",
+            "hostname": "127.0.0.1",
+            "port": $port,
+            "auto-connect": true,
+            "update-interval": 1,
+            "ssl": false
+        }
+    ],
+    "profile-id": 0,
+    "show-notebook": true,
+    "complete-notify": false,
+    "add-notify": false,
+    "window-width": 1000,
+    "window-height": 700,
+    "notebook-paned-pos": 300
+}
+EOF
+}
+
+start_app() {
+    [[ -x $bin ]] || die "no app binary at $bin (cargo build)"
+    stop_app
+    [[ -d $dir/xdg/config ]] || die "no test environment in $dir (uitest start)"
+    : >"$dir/app.log"
+    # the app logs RPC when TRG_CLIENT_DEBUG is set at all; 0 turns it off here
+    local debug=(TRG_CLIENT_DEBUG=1)
+    [[ ${TRG_CLIENT_DEBUG-1} == 0 ]] && debug=(-u TRG_CLIENT_DEBUG)
+    env "${debug[@]}" XDG_CONFIG_HOME="$dir/xdg/config" XDG_DATA_HOME="$dir/xdg/data" \
+        XDG_CACHE_HOME="$dir/xdg/cache" XDG_STATE_HOME="$dir/xdg/state" \
+        TRG_DEBUG_SNAPSHOT="$dir/snapshots" \
+        "$bin" >>"$dir/app.log" 2>&1 &
+    echo $! >"$dir/app.pid"
+    local i
+    for i in $(seq 100); do
+        alive "$dir/app.pid" || { tail -20 "$dir/app.log" >&2; die "the app exited"; }
+        [[ -n $(main_win 2>/dev/null) ]] && { echo "app pid $(cat "$dir/app.pid"), window $(main_win)"; return; }
+        sleep 0.2
+    done
+    die "the app has no window after 20 s"
+}
+
+stop_pid() {
+    local f=$1 i
+    if alive "$f"; then
+        kill "$(cat "$f")"
+        for i in $(seq 25); do alive "$f" || break; sleep 0.2; done
+        alive "$f" && kill -9 "$(cat "$f")"
+    fi
+    rm -f "$f"
+}
+
+stop_app() { stop_pid "$dir/app.pid"; }
+
+# --- commands ------------------------------------------------------------
+
+cmd=${1:-}
+[[ -n $cmd ]] || { usage; exit 2; }
+shift
+
+case $cmd in
+start)
+    # only a warning: the offscreen snapshots (uitest snap) work regardless
+    trgui check >/dev/null || { trgui check; echo "uitest: warning: real input and screenshots won't work" >&2; }
+    start_daemon
+    add_torrents
+    write_config
+    echo "daemon on 127.0.0.1:$port, scratch dir $dir"
+    rpc -l
+    [[ ${1:-} == --no-app ]] || start_app
+    ;;
+app) start_app ;;
+stop)
+    stop_app
+    stop_pid "$dir/daemon.pid"
+    echo "stopped"
+    ;;
+status)
+    echo "dir:    $dir"
+    echo "port:   $port"
+    echo "daemon: $(alive "$dir/daemon.pid" && cat "$dir/daemon.pid" || echo "not running")"
+    echo "app:    $(alive "$dir/app.pid" && cat "$dir/app.pid" || echo "not running")"
+    ;;
+remote) rpc "$@" ;;
+log)
+    if [[ ${1:-} == daemon ]]; then tail -f "$dir/daemon.log"; else tail -f "$dir/app.log"; fi
+    ;;
+check) trgui check ;;
+windows) trgui windows --pid "$(app_pid)" ;;
+win) main_win ;;
+front) trgui frontmost --pid "$(app_pid)" ;;
+wait-window)
+    title=${1:-} timeout=${2:-10}
+    for _ in $(seq $((timeout * 5))); do
+        if trgui windows --pid "$(app_pid)" | awk -F'\t' -v t="\"$title\"" \
+            '$3 == "layer=0" && (t == "\"\"" || $7 == t) { found = 1 } END { exit !found }'; then
+            exit 0
+        fi
+        sleep 0.2
+    done
+    die "no window ${title:+\"$title\" }after $timeout s"
+    ;;
+shot)
+    name=${1:?a name}
+    shift
+    out=$dir/shots/$name.png
+    mkdir -p "$dir/shots"
+    if [[ ${1:-} == --win ]]; then
+        screencapture -x -o -l "${2:?a window id}" "$out"
+    else
+        # the union of the app's on-screen windows, in points
+        region=$(trgui windows --pid "$(app_pid)" | awk -F'\t' '{
+            split($4, a, " "); split(a[1], p, ","); split(a[2], s, "x")
+            if (s[1] < 2 || s[2] < 2) next
+            x1 = p[1]; y1 = p[2]; x2 = p[1] + s[1]; y2 = p[2] + s[2]
+            if (!n++ || x1 < X1) X1 = x1; if (n == 1 || y1 < Y1) Y1 = y1
+            if (n == 1 || x2 > X2) X2 = x2; if (n == 1 || y2 > Y2) Y2 = y2
+        } END { if (n) printf "%d,%d,%d,%d", X1, Y1, X2 - X1, Y2 - Y1 }')
+        [[ -n $region ]] || die "the app has no window on screen"
+        screencapture -x -R "$region" "$out"
+        echo "region $region (points)"
+    fi
+    echo "$out ($(sips -g pixelWidth -g pixelHeight "$out" | awk '/pixel/ { printf "%s ", $2 }' | sed 's/ $//;s/ /x/') px)"
+    ;;
+click | drag | scroll | move) with_win "$cmd" "$@" ;;
+rclick) with_win click --right "$@" ;;
+dclick) with_win click --count 2 "$@" ;;
+key | type) trgui "$cmd" "$@" ;;
+snap)
+    # offscreen snapshots (cargo build --features debug-snapshot)
+    snaps=$dir/snapshots
+    app_pid >/dev/null
+    mkdir -p "$snaps"
+    rm -f "$snaps"/*.png "$snaps/index.txt"
+    printf '%s\n' "$@" >"$snaps/request.tmp"
+    mv "$snaps/request.tmp" "$snaps/request"
+    for _ in $(seq 25); do
+        if [[ -f $snaps/index.txt ]]; then
+            sed "s|^|$snaps/|" "$snaps/index.txt"
+            exit 0
+        fi
+        alive "$dir/app.pid" || { echo "the app exited"; exit 0; }
+        sleep 0.2
+    done
+    rm -f "$snaps/request"
+    die "no snapshots; is the app built with --features debug-snapshot?"
+    ;;
+ax) trgui ax --pid "$(app_pid)" "$@" ;;
+menu) trgui menu --pid "$(app_pid)" "$@" ;;
+-h | --help | help) usage ;;
+*) usage; exit 2 ;;
+esac

@@ -159,6 +159,8 @@ impl App {
             self.macos_startup(&window);
         }
         window.present();
+        #[cfg(feature = "debug-snapshot")]
+        crate::debug_snapshot::init(self.upcast_ref());
     }
 
     fn handle_command_line(&self, cmdline: &gio::ApplicationCommandLine) -> glib::ExitCode {
