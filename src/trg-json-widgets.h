@@ -31,6 +31,7 @@ typedef struct {
 
 void toggle_active_arg_is_sensitive(GtkCheckButton *b, gpointer data);
 
+void trg_json_widget_add(GList **wl, GtkWidget *w, JsonObject *obj, const gchar *key);
 GtkWidget *trg_json_widget_check_new(GList **wl, JsonObject *obj, const gchar *key,
                                      const gchar *label, GtkWidget *toggleDep);
 GtkWidget *trg_json_widget_entry_new(GList **wl, JsonObject *obj, const gchar *key,

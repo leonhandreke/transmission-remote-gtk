@@ -29,7 +29,6 @@
 #endif
 #include <libsoup/soup.h>
 
-#include "hig.h"
 #include "json.h"
 #include "requests.h"
 #include "session-get.h"
@@ -57,6 +56,13 @@ struct _TrgRemotePrefsDialog {
     GtkWidget *port_test_label, *port_test_button;
     GtkWidget *blocklist_update_button, *blocklist_check;
     GtkWidget *alt_check, *alt_time_check;
+    GtkWidget *alt_speed_down_spin, *alt_speed_up_spin;
+    GtkWidget *alt_begin_hours_spin, *alt_begin_mins_spin;
+    GtkWidget *alt_end_hours_spin, *alt_end_mins_spin;
+    GtkWidget *alt_days_grid;
+    GtkWidget *cache_size_label, *cache_size_spin;
+    GtkWidget *blocklist_url_label, *blocklist_url_entry;
+    GtkWidget *queues_label;
 };
 
 G_DEFINE_TYPE(TrgRemotePrefsDialog, trg_remote_prefs_dialog, TRG_TYPE_DIALOG)
@@ -68,6 +74,58 @@ enum {
 };
 
 static GObject *instance = NULL;
+
+/* The widgets of the template that show a value of the session, which aren't
+ * always there */
+static const struct {
+    const gchar *id;
+    const gchar *key;
+} session_widgets[] = {
+    /* General */
+    { "download_dir_entry", SGET_DOWNLOAD_DIR },
+    { "incomplete_dir_check", SGET_INCOMPLETE_DIR_ENABLED },
+    { "incomplete_dir_entry", SGET_INCOMPLETE_DIR },
+    { "script_torrent_done_check", SGET_SCRIPT_TORRENT_DONE_ENABLED },
+    { "script_torrent_done_entry", SGET_SCRIPT_TORRENT_DONE_FILENAME },
+    { "rename_partial_check", SGET_RENAME_PARTIAL_FILES },
+    { "trash_original_check", SGET_TRASH_ORIGINAL_TORRENT_FILES },
+    { "start_added_check", SGET_START_ADDED_TORRENTS },
+    /* Connections */
+    { "peer_port_spin", SGET_PEER_PORT },
+    { "peer_port_random_check", SGET_PEER_PORT_RANDOM_ON_START },
+    { "port_forwarding_check", SGET_PORT_FORWARDING_ENABLED },
+    { "pex_check", SGET_PEX_ENABLED },
+    { "dht_check", SGET_DHT_ENABLED },
+    { "lpd_check", SGET_LPD_ENABLED },
+    { "blocklist_check", SGET_BLOCKLIST_ENABLED },
+    /* Bandwidth */
+    { "speed_limit_down_check", SGET_SPEED_LIMIT_DOWN_ENABLED },
+    { "speed_limit_down_spin", SGET_SPEED_LIMIT_DOWN },
+    { "speed_limit_up_check", SGET_SPEED_LIMIT_UP_ENABLED },
+    { "speed_limit_up_spin", SGET_SPEED_LIMIT_UP },
+    { "alt_check", SGET_ALT_SPEED_ENABLED },
+    { "alt_time_check", SGET_ALT_SPEED_TIME_ENABLED },
+    { "alt_speed_down_spin", SGET_ALT_SPEED_DOWN },
+    { "alt_speed_up_spin", SGET_ALT_SPEED_UP },
+    /* Limits */
+    { "seed_ratio_limited_check", SGET_SEED_RATIO_LIMITED },
+    { "seed_ratio_limit_spin", SGET_SEED_RATIO_LIMIT },
+    { "peer_limit_global_spin", SGET_PEER_LIMIT_GLOBAL },
+    { "peer_limit_per_torrent_spin", SGET_PEER_LIMIT_PER_TORRENT },
+};
+
+/* With servers that have queues */
+static const struct {
+    const gchar *id;
+    const gchar *key;
+} queue_widgets[] = {
+    { "download_queue_check", SGET_DOWNLOAD_QUEUE_ENABLED },
+    { "download_queue_spin", SGET_DOWNLOAD_QUEUE_SIZE },
+    { "seed_queue_check", SGET_SEED_QUEUE_ENABLED },
+    { "seed_queue_spin", SGET_SEED_QUEUE_SIZE },
+    { "queue_stalled_check", SGET_QUEUE_STALLED_ENABLED },
+    { "queue_stalled_spin", SGET_QUEUE_STALLED_MINUTES },
+};
 
 static void update_session(TrgRemotePrefsDialog *dlg)
 {
@@ -143,115 +201,62 @@ static void trg_remote_prefs_dialog_set_property(GObject *object, guint property
     }
 }
 
-static void trg_remote_prefs_double_special_dependent(GtkWidget *widget, gpointer data)
+/* The alternate limits apply when they're on, or at the alternate times */
+static void alt_speed_dependency_cb(GObject *object, GParamSpec *pspec, TrgRemotePrefsDialog *self)
 {
-    TrgRemotePrefsDialog *self = TRG_REMOTE_PREFS_DIALOG(gtk_widget_get_root(GTK_WIDGET(widget)));
+    gboolean sensitive;
 
-    gtk_widget_set_sensitive(GTK_WIDGET(data),
-                             gtk_check_button_get_active(GTK_CHECK_BUTTON(self->alt_time_check))
-                                 || gtk_check_button_get_active(GTK_CHECK_BUTTON(self->alt_check)));
+    if (!self->alt_speed_down_spin)
+        return;
+
+    sensitive = gtk_check_button_get_active(GTK_CHECK_BUTTON(self->alt_time_check))
+        || gtk_check_button_get_active(GTK_CHECK_BUTTON(self->alt_check));
+
+    gtk_widget_set_sensitive(self->alt_speed_down_spin, sensitive);
+    gtk_widget_set_sensitive(self->alt_speed_up_spin, sensitive);
 }
 
+/* A time of day in minutes, in a spin button for the hours and one for the
+ * minutes */
 static void trg_rprefs_time_widget_savefunc(GtkWidget *w, JsonObject *obj, gchar *key)
 {
-    GtkWidget *hourSpin = g_object_get_data(G_OBJECT(w), "hours-spin");
     GtkWidget *minutesSpin = g_object_get_data(G_OBJECT(w), "mins-spin");
-    gint hoursValue = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(hourSpin));
+    gint hoursValue = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(w));
     gint minutesValue = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(minutesSpin));
 
     json_object_set_int_member(obj, key, (gint64)((hoursValue * 60) + minutesValue));
 }
 
-static gboolean on_output(GtkSpinButton *spin, gpointer data)
+static void trg_rprefs_time_widget_add(TrgRemotePrefsDialog *self, JsonObject *obj,
+                                       const gchar *key, GtkWidget *hourSpin,
+                                       GtkWidget *minutesSpin)
 {
-    GtkAdjustment *adj;
-    gchar *text;
-    int value;
-    adj = gtk_spin_button_get_adjustment(spin);
-    value = (int)gtk_adjustment_get_value(adj);
-    text = g_strdup_printf("%02d", value);
+    gint64 value = json_object_get_int_member(obj, key);
+    trg_json_widget_desc *wd = g_new0(trg_json_widget_desc, 1);
+
+    wd->key = g_strdup(key);
+    wd->widget = hourSpin;
+    wd->saveFunc = trg_rprefs_time_widget_savefunc;
+    g_object_set_data(G_OBJECT(hourSpin), "mins-spin", minutesSpin);
+
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(hourSpin), floor((gdouble)value / 60.0));
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(minutesSpin), (gdouble)(value % 60));
+
+    self->widgets = g_list_append(self->widgets, wd);
+}
+
+/* Two digits */
+static gboolean time_spin_output(GtkSpinButton *spin, gpointer data)
+{
+    gchar *text = g_strdup_printf("%02d", gtk_spin_button_get_value_as_int(spin));
+
     gtk_editable_set_text(GTK_EDITABLE(spin), text);
     g_free(text);
 
     return TRUE;
 }
 
-static GtkWidget *trg_rprefs_timer_widget_spin_new(gint max, GtkWidget *alt_time_check)
-{
-    GtkWidget *w = gtk_spin_button_new_with_range(0, max, 1);
-    gtk_widget_set_sensitive(w, gtk_check_button_get_active(GTK_CHECK_BUTTON(alt_time_check)));
-    g_signal_connect(G_OBJECT(alt_time_check), "toggled",
-                     G_CALLBACK(toggle_active_arg_is_sensitive), w);
-    g_signal_connect(G_OBJECT(w), "output", G_CALLBACK(on_output), NULL);
-    return w;
-}
-
-static GtkWidget *trg_rprefs_time_widget_new(GList **wl, JsonObject *obj, const gchar *key,
-                                             GtkWidget *alt_time_check)
-{
-    GtkWidget *hbox = trg_hbox_new(FALSE, 0);
-    GtkWidget *colonLabel = gtk_label_new(":");
-    GtkWidget *hourSpin = trg_rprefs_timer_widget_spin_new(23, alt_time_check);
-    GtkWidget *minutesSpin = trg_rprefs_timer_widget_spin_new(69, alt_time_check);
-    gint64 value = json_object_get_int_member(obj, key);
-
-    trg_json_widget_desc *wd = g_new0(trg_json_widget_desc, 1);
-    wd->key = g_strdup(key);
-    wd->widget = hbox;
-    wd->saveFunc = trg_rprefs_time_widget_savefunc;
-
-    g_object_set_data(G_OBJECT(hbox), "hours-spin", hourSpin);
-    g_object_set_data(G_OBJECT(hbox), "mins-spin", minutesSpin);
-
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(hourSpin), floor((gdouble)value / 60.0));
-    gtk_spin_button_set_value(GTK_SPIN_BUTTON(minutesSpin), (gdouble)(value % 60));
-
-    /* These expanded in GTK 3, but within a box that didn't, which doesn't
-     * work the same way in GTK 4 where hexpand propagates up. */
-    gtk_box_append(GTK_BOX(hbox), hourSpin);
-    gtk_widget_set_margin_start(colonLabel, 2);
-    gtk_widget_set_margin_end(colonLabel, 2);
-    gtk_box_append(GTK_BOX(hbox), colonLabel);
-    gtk_box_append(GTK_BOX(hbox), minutesSpin);
-
-    *wl = g_list_append(*wl, wd);
-
-    return hbox;
-}
-
-static GtkWidget *trg_rprefs_time_begin_end_new(GList **wl, JsonObject *obj,
-                                                GtkWidget *alt_time_check)
-{
-    GtkWidget *hbox = trg_hbox_new(FALSE, 0);
-    GtkWidget *begin
-        = trg_rprefs_time_widget_new(wl, obj, SGET_ALT_SPEED_TIME_BEGIN, alt_time_check);
-    GtkWidget *end = trg_rprefs_time_widget_new(wl, obj, SGET_ALT_SPEED_TIME_END, alt_time_check);
-
-    GtkWidget *dash = gtk_label_new("-");
-
-    gtk_box_append(GTK_BOX(hbox), begin);
-    gtk_widget_set_margin_start(dash, 10);
-    gtk_widget_set_margin_end(dash, 10);
-    gtk_box_append(GTK_BOX(hbox), dash);
-    gtk_box_append(GTK_BOX(hbox), end);
-
-    return hbox;
-}
-
-static GtkWidget *trg_rprefs_alt_speed_spin_new(GList **wl, JsonObject *obj, const gchar *key,
-                                                GtkWidget *alt_check, GtkWidget *alt_time_check)
-{
-    GtkWidget *w = trg_json_widget_spin_int_new(wl, obj, key, NULL, 0, INT_MAX, 5);
-    gtk_widget_set_sensitive(w,
-                             gtk_check_button_get_active(GTK_CHECK_BUTTON(alt_check))
-                                 || gtk_check_button_get_active(GTK_CHECK_BUTTON(alt_time_check)));
-    g_signal_connect(G_OBJECT(alt_time_check), "toggled",
-                     G_CALLBACK(trg_remote_prefs_double_special_dependent), w);
-    g_signal_connect(G_OBJECT(alt_check), "toggled",
-                     G_CALLBACK(trg_remote_prefs_double_special_dependent), w);
-    return w;
-}
-
+/* The days of the week, a bit each in a number */
 static void trg_rprefs_alt_days_savefunc(GtkWidget *grid, JsonObject *obj, gchar *key)
 {
     guint64 days = 0;
@@ -265,135 +270,32 @@ static void trg_rprefs_alt_days_savefunc(GtkWidget *grid, JsonObject *obj, gchar
     json_object_set_int_member(obj, key, days);
 }
 
-static GtkWidget *trg_rprefs_alt_days(GList **wl, JsonObject *Obj, const gchar *key,
-                                      GtkWidget *alt_time_check)
+static void trg_rprefs_alt_days_add(TrgRemotePrefsDialog *self, JsonObject *obj, const gchar *key)
 {
-    gchar *abdays_fallback[]
-        = { _("Sun"), _("Mon"), _("Tue"), _("Wed"), _("Thu"), _("Fri"), _("Sat") };
 #if ENABLE_NL_LANGINFO
     nl_item abdays[] = { ABDAY_1, ABDAY_2, ABDAY_3, ABDAY_4, ABDAY_5, ABDAY_6, ABDAY_7 };
 #endif
-    GtkWidget *grid = gtk_grid_new();
-    gtk_grid_set_column_homogeneous(GTK_GRID(grid), TRUE);
-    g_signal_connect(G_OBJECT(alt_time_check), "toggled",
-                     G_CALLBACK(toggle_active_arg_is_sensitive), grid);
-
-    gint64 days = json_object_get_int_member(Obj, key);
+    gint64 days = json_object_get_int_member(obj, key);
+    trg_json_widget_desc *wd;
 
     for (gint i = 0, x = 1; i < 7; i++, x <<= 1) {
+        GtkWidget *w = gtk_grid_get_child_at(GTK_GRID(self->alt_days_grid), i, 0);
 #if ENABLE_NL_LANGINFO
+        /* The names of the locale, rather than the translations */
         gchar *utf8 = g_convert_with_fallback(nl_langinfo(abdays[i]), -1, "utf-8",
                                               nl_langinfo(CODESET), NULL, NULL, NULL, NULL);
-        GtkWidget *w = gtk_check_button_new_with_label(utf8 ? utf8 : abdays_fallback[i]);
+        if (utf8)
+            gtk_check_button_set_label(GTK_CHECK_BUTTON(w), utf8);
         g_free(utf8);
-#else
-        GtkWidget *w = gtk_check_button_new_with_label(abdays_fallback[i]);
 #endif
         gtk_check_button_set_active(GTK_CHECK_BUTTON(w), (days & x) == x);
-        gtk_grid_attach(GTK_GRID(grid), w, i, 0, 1, 1);
     }
 
-    gtk_widget_set_sensitive(grid, gtk_check_button_get_active(GTK_CHECK_BUTTON(alt_time_check)));
-
-    trg_json_widget_desc *wd = g_new0(trg_json_widget_desc, 1);
+    wd = g_new0(trg_json_widget_desc, 1);
     wd->key = g_strdup(key);
-    wd->widget = grid;
+    wd->widget = self->alt_days_grid;
     wd->saveFunc = trg_rprefs_alt_days_savefunc;
-    *wl = g_list_append(*wl, wd);
-
-    return grid;
-}
-
-static GtkWidget *trg_rprefs_bandwidthPage(TrgRemotePrefsDialog *win, JsonObject *json)
-{
-    GtkWidget *w, *tb, *t;
-    guint row = 0;
-
-    t = hig_workarea_create();
-
-    hig_workarea_add_section_title(t, &row, _("Bandwidth limits"));
-
-    tb = trg_json_widget_check_new(&win->widgets, json, SGET_SPEED_LIMIT_DOWN_ENABLED,
-                                   _("Down Limit (KiB/s)"), NULL);
-    w = trg_json_widget_spin_int_new(&win->widgets, json, SGET_SPEED_LIMIT_DOWN, tb, 0, INT_MAX, 5);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    tb = trg_json_widget_check_new(&win->widgets, json, SGET_SPEED_LIMIT_UP_ENABLED,
-                                   _("Up Limit (KiB/s)"), NULL);
-    w = trg_json_widget_spin_int_new(&win->widgets, json, SGET_SPEED_LIMIT_UP, tb, 0, INT_MAX, 5);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    hig_workarea_add_section_title(t, &row, _("Alternate limits"));
-
-    w = win->alt_check = trg_json_widget_check_new(&win->widgets, json, SGET_ALT_SPEED_ENABLED,
-                                                   _("Alternate speed limits active"), NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    tb = win->alt_time_check = trg_json_widget_check_new(
-        &win->widgets, json, SGET_ALT_SPEED_TIME_ENABLED, _("Alternate time range"), NULL);
-    w = trg_rprefs_time_begin_end_new(&win->widgets, json, tb);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    w = trg_rprefs_alt_days(&win->widgets, json, SGET_ALT_SPEED_TIME_DAY, win->alt_time_check);
-    hig_workarea_add_row(t, &row, _("Alternate days"), w, NULL);
-
-    w = trg_rprefs_alt_speed_spin_new(&win->widgets, json, SGET_ALT_SPEED_DOWN, win->alt_check, tb);
-    hig_workarea_add_row(t, &row, _("Alternate down limit (KiB/s)"), w, w);
-
-    w = trg_rprefs_alt_speed_spin_new(&win->widgets, json, SGET_ALT_SPEED_UP, win->alt_check, tb);
-    hig_workarea_add_row(t, &row, _("Alternate up limit (KiB/s)"), w, w);
-
-    return t;
-}
-
-static GtkWidget *trg_rprefs_limitsPage(TrgRemotePrefsDialog *win, JsonObject *json)
-{
-    GtkWidget *w, *tb, *t;
-    guint row = 0;
-
-    t = hig_workarea_create();
-
-    hig_workarea_add_section_title(t, &row, _("Seeding"));
-
-    tb = trg_json_widget_check_new(&win->widgets, json, SGET_SEED_RATIO_LIMITED,
-                                   _("Seed ratio limit"), NULL);
-    w = trg_json_widget_spin_double_new(&win->widgets, json, SGET_SEED_RATIO_LIMIT, tb, 0, INT_MAX,
-                                        0.1);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    if (json_object_has_member(json, SGET_DOWNLOAD_QUEUE_ENABLED)) {
-        hig_workarea_add_section_title(t, &row, _("Queues"));
-
-        tb = trg_json_widget_check_new(&win->widgets, json, SGET_DOWNLOAD_QUEUE_ENABLED,
-                                       _("Download queue size"), NULL);
-        w = trg_json_widget_spin_int_new(&win->widgets, json, SGET_DOWNLOAD_QUEUE_SIZE, tb, 0,
-                                         INT_MAX, 1);
-        hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-        tb = trg_json_widget_check_new(&win->widgets, json, SGET_SEED_QUEUE_ENABLED,
-                                       _("Seed queue size"), NULL);
-        w = trg_json_widget_spin_int_new(&win->widgets, json, SGET_SEED_QUEUE_SIZE, tb, 0, INT_MAX,
-                                         1);
-        hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-        tb = trg_json_widget_check_new(&win->widgets, json, SGET_QUEUE_STALLED_ENABLED,
-                                       _("Ignore stalled (minutes)"), NULL);
-        w = trg_json_widget_spin_int_new(&win->widgets, json, SGET_QUEUE_STALLED_MINUTES, tb, 0,
-                                         INT_MAX, 1);
-        hig_workarea_add_row_w(t, &row, tb, w, NULL);
-    }
-
-    hig_workarea_add_section_title(t, &row, _("Peers"));
-
-    w = trg_json_widget_spin_int_new(&win->widgets, json, SGET_PEER_LIMIT_GLOBAL, NULL, 0, INT_MAX,
-                                     5);
-    hig_workarea_add_row(t, &row, _("Global peer limit"), w, w);
-
-    w = trg_json_widget_spin_int_new(&win->widgets, json, SGET_PEER_LIMIT_PER_TORRENT, NULL, 0,
-                                     INT_MAX, 5);
-    hig_workarea_add_row(t, &row, _("Per torrent peer limit"), w, w);
-
-    return t;
+    self->widgets = g_list_append(self->widgets, wd);
 }
 
 static gboolean on_port_tested(gpointer data)
@@ -426,16 +328,15 @@ static gboolean on_port_tested(gpointer data)
     return FALSE;
 }
 
-static void port_test_cb(GtkButton *b, gpointer data)
+static void port_test_cb(GtkButton *b, TrgRemotePrefsDialog *self)
 {
-    TrgRemotePrefsDialog *self = TRG_REMOTE_PREFS_DIALOG(data);
     JsonNode *req = port_test();
 
     gtk_label_set_text(GTK_LABEL(self->port_test_label), _("Port test"));
     gtk_button_set_label(b, _("Testing..."));
     gtk_widget_set_sensitive(GTK_WIDGET(b), FALSE);
 
-    dispatch_rpc_async(self->client, req, on_port_tested, data);
+    dispatch_rpc_async(self->client, req, on_port_tested, self);
 }
 
 static gboolean on_blocklist_updated(gpointer data)
@@ -464,198 +365,107 @@ static gboolean on_blocklist_updated(gpointer data)
     return FALSE;
 }
 
-static gboolean update_blocklist_cb(GtkButton *b, gpointer data)
+static void update_blocklist_cb(GtkButton *b, TrgRemotePrefsDialog *self)
 {
-    TrgRemotePrefsDialog *self = TRG_REMOTE_PREFS_DIALOG(data);
     JsonNode *req = blocklist_update();
 
     gtk_widget_set_sensitive(GTK_WIDGET(b), FALSE);
     gtk_button_set_label(b, _("Updating..."));
 
-    dispatch_rpc_async(self->client, req, on_blocklist_updated, data);
-
-    return FALSE;
+    dispatch_rpc_async(self->client, req, on_blocklist_updated, self);
 }
 
-static GtkWidget *trg_rprefs_connPage(TrgRemotePrefsDialog *win, JsonObject *s)
+static GtkWidget *trg_rprefs_template_child(TrgRemotePrefsDialog *self, const gchar *id)
 {
-    GtkWidget *w, *tb, *t;
-    const gchar *stringValue;
-    guint row = 0;
-
-    t = hig_workarea_create();
-
-    hig_workarea_add_section_title(t, &row, _("Connections"));
-
-    w = trg_json_widget_spin_int_new(&win->widgets, s, SGET_PEER_PORT, NULL, 0, 65535, 1);
-    hig_workarea_add_row(t, &row, _("Peer port"), w, w);
-
-    win->port_test_label = gtk_label_new(_("Port test"));
-    w = win->port_test_button = gtk_button_new_with_label(_("Test"));
-    g_signal_connect(w, "clicked", G_CALLBACK(port_test_cb), win);
-    hig_workarea_add_row_w(t, &row, win->port_test_label, w, NULL);
-
-    w = win->encryption_combo
-        = gtr_drop_down_new(_("Required"), _("Preferred"), _("Tolerated"), NULL);
-    stringValue = session_get_encryption(s);
-    if (!g_strcmp0(stringValue, "required")) {
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(w), 0);
-    } else if (!g_strcmp0(stringValue, "tolerated")) {
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(w), 2);
-    } else {
-        gtk_drop_down_set_selected(GTK_DROP_DOWN(w), 1);
-    }
-
-    hig_workarea_add_row(t, &row, _("Encryption"), w, NULL);
-
-    w = trg_json_widget_check_new(&win->widgets, s, SGET_PEER_PORT_RANDOM_ON_START,
-                                  _("Random peer port on start"), NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    w = trg_json_widget_check_new(&win->widgets, s, SGET_PORT_FORWARDING_ENABLED,
-                                  _("Request forwarding of the peer port using UPnP or NAT-PMP"),
-                                  NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    hig_workarea_add_section_title(t, &row, _("Protocol"));
-
-    w = trg_json_widget_check_new(&win->widgets, s, SGET_PEX_ENABLED, _("Peer exchange (PEX)"),
-                                  NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    w = trg_json_widget_check_new(&win->widgets, s, SGET_DHT_ENABLED,
-                                  _("Distributed Hash Table (DHT)"), NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    w = trg_json_widget_check_new(&win->widgets, s, SGET_LPD_ENABLED, _("Local peer discovery"),
-                                  NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    hig_workarea_add_section_title(t, &row, _("Blocklist"));
-
-    stringValue = g_strdup_printf(_("Blocklist (%" G_GINT64_FORMAT " entries)"),
-                                  session_get_blocklist_size(s));
-    tb = win->blocklist_check
-        = trg_json_widget_check_new(&win->widgets, s, SGET_BLOCKLIST_ENABLED, stringValue, NULL);
-    g_free((gchar *)stringValue);
-
-    w = win->blocklist_update_button = gtk_button_new_with_label(_("Update"));
-    g_signal_connect(G_OBJECT(w), "clicked", G_CALLBACK(update_blocklist_cb), win);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    stringValue = session_get_blocklist_url(s);
-    if (stringValue) {
-        w = trg_json_widget_entry_new(&win->widgets, s, SGET_BLOCKLIST_URL, NULL);
-        hig_workarea_add_row(t, &row, _("Blocklist URL:"), w, NULL);
-    }
-
-    return t;
+    return GTK_WIDGET(
+        gtk_widget_get_template_child(GTK_WIDGET(self), TRG_TYPE_REMOTE_PREFS_DIALOG, id));
 }
 
-static GtkWidget *trg_rprefs_generalPage(TrgRemotePrefsDialog *win, JsonObject *s)
+static void trg_remote_prefs_dialog_constructed(GObject *object)
 {
-    GtkWidget *w, *tb, *t;
-    guint row = 0;
-    gint64 cache_size_mb;
-
-    t = hig_workarea_create();
-
-    hig_workarea_add_section_title(t, &row, _("Environment"));
-
-    w = trg_json_widget_entry_new(&win->widgets, s, SGET_DOWNLOAD_DIR, NULL);
-    hig_workarea_add_row(t, &row, _("Download directory"), w, NULL);
-
-    tb = trg_json_widget_check_new(&win->widgets, s, SGET_INCOMPLETE_DIR_ENABLED,
-                                   _("Incomplete download dir"), NULL);
-    w = trg_json_widget_entry_new(&win->widgets, s, SGET_INCOMPLETE_DIR, tb);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    tb = trg_json_widget_check_new(&win->widgets, s, SGET_SCRIPT_TORRENT_DONE_ENABLED,
-                                   _("Torrent done script"), NULL);
-    w = trg_json_widget_entry_new(&win->widgets, s, SGET_SCRIPT_TORRENT_DONE_FILENAME, tb);
-    hig_workarea_add_row_w(t, &row, tb, w, NULL);
-
-    cache_size_mb = session_get_cache_size_mb(s);
-    if (cache_size_mb >= 0) {
-        w = trg_json_widget_spin_int_new(&win->widgets, s, SGET_CACHE_SIZE_MB, NULL, 0, INT_MAX, 1);
-        hig_workarea_add_row(t, &row, _("Cache size (MiB)"), w, w);
-    }
-
-    hig_workarea_add_section_title(t, &row, _("Behavior"));
-
-    w = trg_json_widget_check_new(&win->widgets, s, SGET_RENAME_PARTIAL_FILES,
-                                  _("Rename partial files"), NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    w = trg_json_widget_check_new(&win->widgets, s, SGET_TRASH_ORIGINAL_TORRENT_FILES,
-                                  _("Trash original torrent files"), NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    w = trg_json_widget_check_new(&win->widgets, s, SGET_START_ADDED_TORRENTS,
-                                  _("Start added torrents"), NULL);
-    hig_workarea_add_wide_control(t, &row, w);
-
-    return t;
-}
-
-static GObject *trg_remote_prefs_dialog_constructor(GType type, guint n_construct_properties,
-                                                    GObjectConstructParam *construct_params)
-{
-    GObject *object;
-    JsonObject *session;
-    GtkWidget *notebook, *contentvbox;
-
-    object = G_OBJECT_CLASS(trg_remote_prefs_dialog_parent_class)
-                 ->constructor(type, n_construct_properties, construct_params);
     TrgRemotePrefsDialog *self = TRG_REMOTE_PREFS_DIALOG(object);
-    session = trg_client_get_session(self->client);
+    JsonObject *s = trg_client_get_session(self->client);
+    const gchar *encryption = session_get_encryption(s);
+    gchar *blocklistLabel;
+    guint i;
 
-    contentvbox = trg_dialog_get_content_area(TRG_DIALOG(object));
+    G_OBJECT_CLASS(trg_remote_prefs_dialog_parent_class)->constructed(object);
 
-    gtk_window_set_title(GTK_WINDOW(object), _("Remote Preferences"));
     gtk_window_set_transient_for(GTK_WINDOW(object), GTK_WINDOW(self->parent_win));
-    gtk_window_set_destroy_with_parent(GTK_WINDOW(object), TRUE);
 
-    trg_dialog_add_button(TRG_DIALOG(object), _("_Close"), GTK_RESPONSE_CLOSE);
-    trg_dialog_add_button(TRG_DIALOG(object), _("_OK"), GTK_RESPONSE_OK);
+    /* These also show a value of the session */
+    self->blocklist_check = trg_rprefs_template_child(self, "blocklist_check");
+    self->alt_check = trg_rprefs_template_child(self, "alt_check");
+    self->alt_time_check = trg_rprefs_template_child(self, "alt_time_check");
+    self->alt_speed_down_spin = trg_rprefs_template_child(self, "alt_speed_down_spin");
+    self->alt_speed_up_spin = trg_rprefs_template_child(self, "alt_speed_up_spin");
 
-    trg_widget_set_margins(trg_dialog_get_content_area(TRG_DIALOG(object)), GUI_PAD);
+    for (i = 0; i < G_N_ELEMENTS(session_widgets); i++)
+        trg_json_widget_add(&self->widgets, trg_rprefs_template_child(self, session_widgets[i].id),
+                            s, session_widgets[i].key);
 
-    trg_dialog_set_default_response(TRG_DIALOG(object), GTK_RESPONSE_OK);
+    if (json_object_has_member(s, SGET_DOWNLOAD_QUEUE_ENABLED)) {
+        for (i = 0; i < G_N_ELEMENTS(queue_widgets); i++)
+            trg_json_widget_add(&self->widgets,
+                                trg_rprefs_template_child(self, queue_widgets[i].id), s,
+                                queue_widgets[i].key);
+    } else {
+        gtk_widget_set_visible(self->queues_label, FALSE);
+        for (i = 0; i < G_N_ELEMENTS(queue_widgets); i++)
+            gtk_widget_set_visible(trg_rprefs_template_child(self, queue_widgets[i].id), FALSE);
+    }
+
+    if (session_get_cache_size_mb(s) >= 0) {
+        trg_json_widget_add(&self->widgets, self->cache_size_spin, s, SGET_CACHE_SIZE_MB);
+    } else {
+        gtk_widget_set_visible(self->cache_size_label, FALSE);
+        gtk_widget_set_visible(self->cache_size_spin, FALSE);
+    }
+
+    if (session_get_blocklist_url(s)) {
+        trg_json_widget_add(&self->widgets, self->blocklist_url_entry, s, SGET_BLOCKLIST_URL);
+    } else {
+        gtk_widget_set_visible(self->blocklist_url_label, FALSE);
+        gtk_widget_set_visible(self->blocklist_url_entry, FALSE);
+    }
+
+    trg_rprefs_time_widget_add(self, s, SGET_ALT_SPEED_TIME_BEGIN, self->alt_begin_hours_spin,
+                               self->alt_begin_mins_spin);
+    trg_rprefs_time_widget_add(self, s, SGET_ALT_SPEED_TIME_END, self->alt_end_hours_spin,
+                               self->alt_end_mins_spin);
+    trg_rprefs_alt_days_add(self, s, SGET_ALT_SPEED_TIME_DAY);
+    alt_speed_dependency_cb(NULL, NULL, self);
+
+    if (!g_strcmp0(encryption, "required"))
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(self->encryption_combo), 0);
+    else if (!g_strcmp0(encryption, "tolerated"))
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(self->encryption_combo), 2);
+    else
+        gtk_drop_down_set_selected(GTK_DROP_DOWN(self->encryption_combo), 1);
+
+    blocklistLabel = g_strdup_printf(_("Blocklist (%" G_GINT64_FORMAT " entries)"),
+                                     session_get_blocklist_size(s));
+    gtk_check_button_set_label(GTK_CHECK_BUTTON(self->blocklist_check), blocklistLabel);
+    g_free(blocklistLabel);
 
     g_signal_connect(G_OBJECT(object), "response", G_CALLBACK(trg_remote_prefs_response_cb), NULL);
+}
 
-    notebook = gtk_notebook_new();
+static void trg_remote_prefs_dialog_dispose(GObject *object)
+{
+    gtk_widget_dispose_template(GTK_WIDGET(object), TRG_TYPE_REMOTE_PREFS_DIALOG);
 
-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
-                             trg_rprefs_generalPage(TRG_REMOTE_PREFS_DIALOG(object), session),
-                             gtk_label_new(_("General")));
-
-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
-                             trg_rprefs_connPage(TRG_REMOTE_PREFS_DIALOG(object), session),
-                             gtk_label_new(_("Connections")));
-
-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
-                             trg_rprefs_bandwidthPage(TRG_REMOTE_PREFS_DIALOG(object), session),
-                             gtk_label_new(_("Bandwidth")));
-
-    gtk_notebook_append_page(GTK_NOTEBOOK(notebook),
-                             trg_rprefs_limitsPage(TRG_REMOTE_PREFS_DIALOG(object), session),
-                             gtk_label_new(_("Limits")));
-
-    trg_widget_set_margins(notebook, GUI_PAD);
-
-    gtk_widget_set_vexpand(notebook, TRUE);
-    gtk_box_append(GTK_BOX(contentvbox), notebook);
-
-    return object;
+    G_OBJECT_CLASS(trg_remote_prefs_dialog_parent_class)->dispose(object);
 }
 
 static void trg_remote_prefs_dialog_class_init(TrgRemotePrefsDialogClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    GtkWidgetClass *widget_class = GTK_WIDGET_CLASS(klass);
+    guint i;
 
-    object_class->constructor = trg_remote_prefs_dialog_constructor;
+    object_class->constructed = trg_remote_prefs_dialog_constructed;
+    object_class->dispose = trg_remote_prefs_dialog_dispose;
     object_class->get_property = trg_remote_prefs_dialog_get_property;
     object_class->set_property = trg_remote_prefs_dialog_set_property;
 
@@ -670,10 +480,40 @@ static void trg_remote_prefs_dialog_class_init(TrgRemotePrefsDialogClass *klass)
         g_param_spec_object("parent-window", "Parent window", "Parent window", TRG_TYPE_MAIN_WINDOW,
                             G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_NAME
                                 | G_PARAM_STATIC_NICK | G_PARAM_STATIC_BLURB));
+
+    gtk_widget_class_set_template_from_resource(
+        widget_class, "/io/github/TransmissionRemoteGtk/ui/trg-remote-prefs-dialog.ui");
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, encryption_combo);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, port_test_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, port_test_button);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog,
+                                         blocklist_update_button);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, alt_begin_hours_spin);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, alt_begin_mins_spin);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, alt_end_hours_spin);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, alt_end_mins_spin);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, alt_days_grid);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, cache_size_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, cache_size_spin);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, blocklist_url_label);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, blocklist_url_entry);
+    gtk_widget_class_bind_template_child(widget_class, TrgRemotePrefsDialog, queues_label);
+
+    /* Declared, for gtk_widget_get_template_child() */
+    for (i = 0; i < G_N_ELEMENTS(session_widgets); i++)
+        gtk_widget_class_bind_template_child_full(widget_class, session_widgets[i].id, FALSE, 0);
+    for (i = 0; i < G_N_ELEMENTS(queue_widgets); i++)
+        gtk_widget_class_bind_template_child_full(widget_class, queue_widgets[i].id, FALSE, 0);
+
+    gtk_widget_class_bind_template_callback(widget_class, alt_speed_dependency_cb);
+    gtk_widget_class_bind_template_callback(widget_class, time_spin_output);
+    gtk_widget_class_bind_template_callback(widget_class, port_test_cb);
+    gtk_widget_class_bind_template_callback(widget_class, update_blocklist_cb);
 }
 
-static void trg_remote_prefs_dialog_init(TrgRemotePrefsDialog *self G_GNUC_UNUSED)
+static void trg_remote_prefs_dialog_init(TrgRemotePrefsDialog *self)
 {
+    gtk_widget_init_template(GTK_WIDGET(self));
 }
 
 TrgRemotePrefsDialog *trg_remote_prefs_dialog_get_instance(TrgMainWindow *parent, TrgClient *client)

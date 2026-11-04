@@ -1,0 +1,1062 @@
+using Gtk 4.0;
+
+template $TrgRemotePrefsDialog: $TrgDialog {
+  title: _("Remote Preferences");
+  destroy-with-parent: true;
+  default-widget: ok_button;
+
+  Notebook {
+    vexpand: true;
+    margin-start: 6;
+    margin-end: 6;
+    margin-top: 6;
+    margin-bottom: 6;
+
+    Grid {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("Environment");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Download directory");
+        xalign: 0;
+        mnemonic-widget: download_dir_entry;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 1;
+        }
+      }
+
+      Entry download_dir_entry {
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 1;
+        }
+      }
+
+      CheckButton incomplete_dir_check {
+        label: _("Incomplete download dir");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 2;
+        }
+      }
+
+      Entry incomplete_dir_entry {
+        sensitive: bind incomplete_dir_check.active;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 2;
+        }
+      }
+
+      CheckButton script_torrent_done_check {
+        label: _("Torrent done script");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 3;
+        }
+      }
+
+      Entry script_torrent_done_entry {
+        sensitive: bind script_torrent_done_check.active;
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 3;
+        }
+      }
+
+      Label cache_size_label {
+        label: _("Cache size (MiB)");
+        xalign: 0;
+        mnemonic-widget: cache_size_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+        }
+      }
+
+      SpinButton cache_size_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 4;
+        }
+      }
+
+      Label {
+        label: _("Behavior");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 5;
+          column-span: 2;
+        }
+      }
+
+      CheckButton rename_partial_check {
+        label: _("Rename partial files");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 6;
+          column-span: 2;
+        }
+      }
+
+      CheckButton trash_original_check {
+        label: _("Trash original torrent files");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 7;
+          column-span: 2;
+        }
+      }
+
+      CheckButton start_added_check {
+        label: _("Start added torrents");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 8;
+          column-span: 2;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("General");
+    }
+
+    Grid {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("Connections");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Peer port");
+        xalign: 0;
+        mnemonic-widget: peer_port_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 1;
+        }
+      }
+
+      SpinButton peer_port_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 65535;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 1;
+        }
+      }
+
+      Label port_test_label {
+        label: _("Port test");
+        xalign: 0;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 2;
+        }
+      }
+
+      Button port_test_button {
+        label: _("Test");
+        clicked => $port_test_cb();
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 2;
+        }
+      }
+
+      Label {
+        label: _("Encryption");
+        xalign: 0;
+        mnemonic-widget: encryption_combo;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 3;
+        }
+      }
+
+      DropDown encryption_combo {
+        model: StringList {
+          strings [
+            _("Required"),
+            _("Preferred"),
+            _("Tolerated"),
+          ]
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 3;
+        }
+      }
+
+      CheckButton peer_port_random_check {
+        label: _("Random peer port on start");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+          column-span: 2;
+        }
+      }
+
+      CheckButton port_forwarding_check {
+        label: _("Request forwarding of the peer port using UPnP or NAT-PMP");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 5;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Protocol");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 6;
+          column-span: 2;
+        }
+      }
+
+      CheckButton pex_check {
+        label: _("Peer exchange (PEX)");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 7;
+          column-span: 2;
+        }
+      }
+
+      CheckButton dht_check {
+        label: _("Distributed Hash Table (DHT)");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 8;
+          column-span: 2;
+        }
+      }
+
+      CheckButton lpd_check {
+        label: _("Local peer discovery");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 9;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Blocklist");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 10;
+          column-span: 2;
+        }
+      }
+
+      CheckButton blocklist_check {
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 11;
+        }
+      }
+
+      Button blocklist_update_button {
+        label: _("Update");
+        clicked => $update_blocklist_cb();
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 11;
+        }
+      }
+
+      Label blocklist_url_label {
+        label: _("Blocklist URL:");
+        xalign: 0;
+        mnemonic-widget: blocklist_url_entry;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 12;
+        }
+      }
+
+      Entry blocklist_url_entry {
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 12;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("Connections");
+    }
+
+    Grid {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("Bandwidth limits");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      CheckButton speed_limit_down_check {
+        label: _("Down Limit (KiB/s)");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 1;
+        }
+      }
+
+      SpinButton speed_limit_down_spin {
+        digits: 0;
+        sensitive: bind speed_limit_down_check.active;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 5;
+          page-increment: 50;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 1;
+        }
+      }
+
+      CheckButton speed_limit_up_check {
+        label: _("Up Limit (KiB/s)");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 2;
+        }
+      }
+
+      SpinButton speed_limit_up_spin {
+        digits: 0;
+        sensitive: bind speed_limit_up_check.active;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 5;
+          page-increment: 50;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 2;
+        }
+      }
+
+      Label {
+        label: _("Alternate limits");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 3;
+          column-span: 2;
+        }
+      }
+
+      CheckButton alt_check {
+        label: _("Alternate speed limits active");
+        use-underline: true;
+        notify::active => $alt_speed_dependency_cb();
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+          column-span: 2;
+        }
+      }
+
+      CheckButton alt_time_check {
+        label: _("Alternate time range");
+        use-underline: true;
+        notify::active => $alt_speed_dependency_cb();
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 5;
+        }
+      }
+
+      Box {
+        SpinButton alt_begin_hours_spin {
+          sensitive: bind alt_time_check.active;
+          output => $time_spin_output();
+
+          adjustment: Adjustment {
+            upper: 23;
+            step-increment: 1;
+            page-increment: 10;
+          };
+        }
+
+        Label {
+          label: ":";
+          margin-start: 2;
+          margin-end: 2;
+        }
+
+        SpinButton alt_begin_mins_spin {
+          sensitive: bind alt_time_check.active;
+          output => $time_spin_output();
+
+          adjustment: Adjustment {
+            upper: 69;
+            step-increment: 1;
+            page-increment: 10;
+          };
+        }
+
+        Label {
+          label: "-";
+          margin-start: 10;
+          margin-end: 10;
+        }
+
+        SpinButton alt_end_hours_spin {
+          sensitive: bind alt_time_check.active;
+          output => $time_spin_output();
+
+          adjustment: Adjustment {
+            upper: 23;
+            step-increment: 1;
+            page-increment: 10;
+          };
+        }
+
+        Label {
+          label: ":";
+          margin-start: 2;
+          margin-end: 2;
+        }
+
+        SpinButton alt_end_mins_spin {
+          sensitive: bind alt_time_check.active;
+          output => $time_spin_output();
+
+          adjustment: Adjustment {
+            upper: 69;
+            step-increment: 1;
+            page-increment: 10;
+          };
+        }
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 5;
+        }
+      }
+
+      Label {
+        label: _("Alternate days");
+        xalign: 0;
+        mnemonic-widget: alt_days_grid;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 6;
+        }
+      }
+
+      Grid alt_days_grid {
+        column-homogeneous: true;
+        sensitive: bind alt_time_check.active;
+
+        CheckButton {
+          label: _("Sun");
+
+          layout {
+            column: 0;
+            row: 0;
+          }
+        }
+
+        CheckButton {
+          label: _("Mon");
+
+          layout {
+            column: 1;
+            row: 0;
+          }
+        }
+
+        CheckButton {
+          label: _("Tue");
+
+          layout {
+            column: 2;
+            row: 0;
+          }
+        }
+
+        CheckButton {
+          label: _("Wed");
+
+          layout {
+            column: 3;
+            row: 0;
+          }
+        }
+
+        CheckButton {
+          label: _("Thu");
+
+          layout {
+            column: 4;
+            row: 0;
+          }
+        }
+
+        CheckButton {
+          label: _("Fri");
+
+          layout {
+            column: 5;
+            row: 0;
+          }
+        }
+
+        CheckButton {
+          label: _("Sat");
+
+          layout {
+            column: 6;
+            row: 0;
+          }
+        }
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 6;
+        }
+      }
+
+      Label {
+        label: _("Alternate down limit (KiB/s)");
+        xalign: 0;
+        mnemonic-widget: alt_speed_down_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 7;
+        }
+      }
+
+      SpinButton alt_speed_down_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 5;
+          page-increment: 50;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 7;
+        }
+      }
+
+      Label {
+        label: _("Alternate up limit (KiB/s)");
+        xalign: 0;
+        mnemonic-widget: alt_speed_up_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 8;
+        }
+      }
+
+      SpinButton alt_speed_up_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 5;
+          page-increment: 50;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 8;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("Bandwidth");
+    }
+
+    Grid limits_grid {
+      row-spacing: 6;
+      column-spacing: 12;
+      margin-start: 12;
+      margin-end: 12;
+      margin-top: 12;
+      margin-bottom: 12;
+
+      Label {
+        label: _("Seeding");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 0;
+          column-span: 2;
+        }
+      }
+
+      CheckButton seed_ratio_limited_check {
+        label: _("Seed ratio limit");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 1;
+        }
+      }
+
+      SpinButton seed_ratio_limit_spin {
+        digits: 2;
+        sensitive: bind seed_ratio_limited_check.active;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 0.1;
+          page-increment: 1.0;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 1;
+        }
+      }
+
+      Label queues_label {
+        label: _("Queues");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 2;
+          column-span: 2;
+        }
+      }
+
+      CheckButton download_queue_check {
+        label: _("Download queue size");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 3;
+        }
+      }
+
+      SpinButton download_queue_spin {
+        digits: 0;
+        sensitive: bind download_queue_check.active;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 3;
+        }
+      }
+
+      CheckButton seed_queue_check {
+        label: _("Seed queue size");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+        }
+      }
+
+      SpinButton seed_queue_spin {
+        digits: 0;
+        sensitive: bind seed_queue_check.active;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 4;
+        }
+      }
+
+      CheckButton queue_stalled_check {
+        label: _("Ignore stalled (minutes)");
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 5;
+        }
+      }
+
+      SpinButton queue_stalled_spin {
+        digits: 0;
+        sensitive: bind queue_stalled_check.active;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 10;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 5;
+        }
+      }
+
+      Label {
+        label: _("Peers");
+        xalign: 0;
+        hexpand: true;
+
+        styles [
+          "heading",
+        ]
+
+        layout {
+          column: 0;
+          row: 6;
+          column-span: 2;
+        }
+      }
+
+      Label {
+        label: _("Global peer limit");
+        xalign: 0;
+        mnemonic-widget: peer_limit_global_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 7;
+        }
+      }
+
+      SpinButton peer_limit_global_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 5;
+          page-increment: 50;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 7;
+        }
+      }
+
+      Label {
+        label: _("Per torrent peer limit");
+        xalign: 0;
+        mnemonic-widget: peer_limit_per_torrent_spin;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 8;
+        }
+      }
+
+      SpinButton peer_limit_per_torrent_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 5;
+          page-increment: 50;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 8;
+        }
+      }
+    }
+
+    [tab]
+    Label {
+      label: _("Limits");
+    }
+  }
+
+  [action]
+  Button {
+    label: _("_Close");
+    use-underline: true;
+    action-name: "dialog.close";
+  }
+
+  [action]
+  Button ok_button {
+    label: _("_OK");
+    use-underline: true;
+    action-name: "dialog.ok";
+
+    styles [
+      "suggested-action",
+    ]
+  }
+}

@@ -28,6 +28,7 @@ src/trg-peers-tree-view.c
 src/trg-preferences-dialog.blp
 src/trg-preferences-dialog.c
 src/trg-prefs.c
+src/trg-remote-prefs-dialog.blp
 src/trg-remote-prefs-dialog.c
 src/trg-state-selector.c
 src/trg-stats-dialog.blp

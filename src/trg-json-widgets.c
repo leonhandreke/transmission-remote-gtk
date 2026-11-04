@@ -156,6 +156,33 @@ GtkWidget *trg_json_widget_spin_double_new(GList **wl, JsonObject *obj, const gc
     return w;
 }
 
+/* Loads a value into a widget from a GtkBuilder file, and saves it with the
+ * others: a check button is a boolean, a spin button an integer (or a double
+ * if it has digits) and other editables a string. */
+void trg_json_widget_add(GList **wl, GtkWidget *w, JsonObject *obj, const gchar *key)
+{
+    trg_json_widget_desc *wd = g_new0(trg_json_widget_desc, 1);
+
+    wd->key = g_strdup(key);
+    wd->widget = w;
+
+    if (GTK_IS_CHECK_BUTTON(w)) {
+        wd->saveFunc = trg_json_widget_check_save;
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(w), json_object_get_boolean_member(obj, key));
+    } else if (GTK_IS_SPIN_BUTTON(w) && gtk_spin_button_get_digits(GTK_SPIN_BUTTON(w)) == 0) {
+        wd->saveFunc = trg_json_widget_spin_int_save;
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w), (double)json_object_get_int_member(obj, key));
+    } else if (GTK_IS_SPIN_BUTTON(w)) {
+        wd->saveFunc = trg_json_widget_spin_double_save;
+        gtk_spin_button_set_value(GTK_SPIN_BUTTON(w), json_object_get_double_member(obj, key));
+    } else {
+        wd->saveFunc = trg_json_widget_entry_save;
+        gtk_editable_set_text(GTK_EDITABLE(w), json_object_get_string_member(obj, key));
+    }
+
+    *wl = g_list_append(*wl, wd);
+}
+
 void trg_json_widget_check_save(GtkWidget *widget, JsonObject *obj, gchar *key)
 {
     gboolean active = gtk_check_button_get_active(GTK_CHECK_BUTTON(widget));

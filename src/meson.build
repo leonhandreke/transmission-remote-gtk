@@ -57,6 +57,7 @@ blueprint_files = files(
   'trg-general-panel.blp',
   'trg-menu-bar.blp',
   'trg-preferences-dialog.blp',
+  'trg-remote-prefs-dialog.blp',
   'trg-stats-dialog.blp',
   'trg-status-bar.blp',
   'trg-toolbar.blp',
