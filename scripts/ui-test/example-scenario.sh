@@ -20,9 +20,10 @@ fail() { echo "FAIL: $*" >&2; "$u" stop; exit 1; }
 "$u" start
 id=$("$u" remote -l | awk '$NF == "multi" { print $1 }')
 
-# connected once the first torrent-get response with our torrents is logged
-for _ in $(seq 50); do grep -q '"name":"multi"' "$dir/app.log" && break; sleep 0.2; done
-grep -q '"name":"multi"' "$dir/app.log" || fail "the app didn't connect"
+# connected once the first torrent_get response with our torrents is logged
+# (in the table format: the values without their keys)
+for _ in $(seq 50); do grep -q '"multi"' "$dir/app.log" && break; sleep 0.2; done
+grep -q '"multi"' "$dir/app.log" || fail "the app didn't connect"
 sleep 1
 
 "$u" front

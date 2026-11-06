@@ -7,7 +7,7 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 
-use crate::client::{Response, make_error_message};
+use crate::client::Error;
 use crate::i18n::{ctr, ntr, qtr, sprintf, tr};
 
 /* Sizes and speeds, as Transmission formats them */
@@ -263,8 +263,8 @@ pub fn error_dialog(parent: Option<&impl IsA<gtk::Window>>, msg: &str) {
     error_dialog_full(parent, msg, None);
 }
 
-pub fn client_error_dialog(parent: Option<&impl IsA<gtk::Window>>, response: &Response) {
-    error_dialog(parent, &make_error_message(response));
+pub fn client_error_dialog(parent: Option<&impl IsA<gtk::Window>>, error: &Error) {
+    error_dialog(parent, &error.to_string());
 }
 
 /// Context menus: a click gesture for the secondary button and a shortcut for

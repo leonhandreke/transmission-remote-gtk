@@ -152,6 +152,19 @@ template $TrgTorrentAddDialog: $TrgDialog {
         column-span: 2;
       }
     }
+
+    CheckButton sequential_check {
+      label: _("Download _sequentially");
+      use-underline: true;
+      hexpand: true;
+      margin-start: 18;
+
+      layout {
+        column: 0;
+        row: 7;
+        column-span: 2;
+      }
+    }
   }
 
   [action]

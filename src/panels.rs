@@ -6,14 +6,13 @@ use std::cell::RefCell;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
-use serde_json::json;
 
 use crate::client::Client;
 use crate::dialog;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
 use crate::main_window::MainWindow;
-use crate::prefs;
+use crate::prefs::{self, value_as_i64};
 use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
 use crate::torrent_model::{self as tm, Stats};
 use crate::util;
@@ -281,16 +280,9 @@ impl StatusBar {
             "alt-speed-on"
         }));
 
-        let mut req = p::session_set();
-        p::args_mut(&mut req).insert(p::SGET_ALT_SPEED_ENABLED.into(), json!(!alt_speed_on));
-
-        let win = imp.win.clone();
-        if let Some(client) = imp.client.borrow().as_ref() {
-            client.dispatch(req, move |response| {
-                if let Some(win) = win.upgrade() {
-                    win.on_session_set(response);
-                }
-            });
+        let req = p::session_set().with(p::SGET_ALT_SPEED_ENABLED, !alt_speed_on);
+        if let Some(win) = imp.win.upgrade() {
+            win.dispatch_session_set(req);
         }
     }
 
@@ -327,7 +319,7 @@ impl StatusBar {
 
     pub fn session_update(&self, session: &Obj) {
         let imp = self.imp();
-        let free = get_i64(session, p::SGET_DOWNLOAD_DIR_FREE_SPACE);
+        let free = session.get(p::SGET_DOWNLOAD_DIR_FREE_SPACE).map(value_as_i64).unwrap_or(-1);
         let alt = get_bool(session, p::SGET_ALT_SPEED_ENABLED);
 
         if free >= 0 {

@@ -16,7 +16,7 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 use serde_json::Value;
 
-use crate::client::{Client, Response};
+use crate::client::Client;
 use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
 use crate::i18n::{sprintf, tr};
 use crate::item::{self, Item, Val};
@@ -552,42 +552,40 @@ impl FilesView {
         Self::create(model, prefs, config_id, false, None, None)
     }
 
-    /// The callback for a request changing the files
-    pub fn on_files_update(self: &Rc<Self>) -> impl FnOnce(Response) + 'static {
+    /// Sends a request changing the files, which then get updated. Updates
+    /// from the server are ignored meanwhile.
+    pub fn dispatch_files_update(self: &Rc<Self>, req: p::Request) {
+        let Some(win) = self.win.as_ref().and_then(|w| w.upgrade()) else { return };
+        self.model.set_accept(false);
         let view = self.clone();
-        move |response| {
-            view.model.set_accept(true);
-            if let Some(win) = view.win.as_ref().and_then(|w| w.upgrade()) {
-                win.on_generic_interactive_action(response);
-            }
-        }
+        win.dispatch_interactive_with(req, move |_| view.model.set_accept(true));
     }
 
     /// Sends the wanted state and priority of all the files
     fn send_updated_file_prefs(self: &Rc<Self>) {
-        let Some(client) = &self.client else { return };
+        if self.client.is_none() {
+            return;
+        }
         let model = &self.model;
         let mut req = p::torrent_set(&[model.torrent_id()]);
-        let args = p::args_mut(&mut req);
 
         for i in 0..model.n_files() {
             let Some(item) = model.file(i) else { continue };
             let i = i as i64;
             if item.int64(COL_WANTED) != 0 {
-                p::add_file_id_to_array(args, p::FIELD_FILES_WANTED, i);
+                p::add_file_id_to_array(&mut req, p::FIELD_FILES_WANTED, i);
             } else {
-                p::add_file_id_to_array(args, p::FIELD_FILES_UNWANTED, i);
+                p::add_file_id_to_array(&mut req, p::FIELD_FILES_UNWANTED, i);
             }
             let key = match item.int64(COL_PRIORITY) {
                 TR_PRI_LOW => p::FIELD_FILES_PRIORITY_LOW,
                 TR_PRI_HIGH => p::FIELD_FILES_PRIORITY_HIGH,
                 _ => p::FIELD_FILES_PRIORITY_NORMAL,
             };
-            p::add_file_id_to_array(args, key, i);
+            p::add_file_id_to_array(&mut req, key, i);
         }
 
-        model.set_accept(false);
-        client.dispatch(req, self.on_files_update());
+        self.dispatch_files_update(req);
     }
 
     fn files_changed(self: &Rc<Self>) {
@@ -771,11 +769,8 @@ impl FileRenameDialog {
                 let name = imp.name_entry.text();
                 let path = imp.orig_path.borrow().clone().unwrap_or_default();
                 let req = p::torrent_rename_path(&[imp.torrent_id.get()], &path, &name);
-                if let (Some(view), Some(client)) =
-                    (imp.view.borrow().clone(), imp.client.borrow().clone())
-                {
-                    view.model.set_accept(false);
-                    client.dispatch(req, view.on_files_update());
+                if let Some(view) = imp.view.borrow().clone() {
+                    view.dispatch_files_update(req);
                 }
             }
             imp.view.take();

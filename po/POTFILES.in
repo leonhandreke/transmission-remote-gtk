@@ -1,6 +1,5 @@
 data/io.github.TransmissionRemoteGtk.desktop.in
 data/io.github.TransmissionRemoteGtk.appdata.xml.in
-src/client.rs
 src/dialogs/add.rs
 src/dialogs/add_url.rs
 src/dialogs/move_dialog.rs
@@ -15,6 +14,7 @@ src/panels.rs
 src/peers.rs
 src/prefs.rs
 src/protocol.rs
+src/rpc/mod.rs
 src/state_selector.rs
 src/torrent_model.rs
 src/torrent_view.rs
@@ -37,4 +37,5 @@ src/trg-torrent-add-url-dialog.blp
 src/trg-torrent-move-dialog.blp
 src/trg-torrent-props-dialog.blp
 src/trg-trackers-tree-view.blp
+src/upload.rs
 src/util.rs

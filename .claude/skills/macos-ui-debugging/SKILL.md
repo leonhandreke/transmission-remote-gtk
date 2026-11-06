@@ -97,9 +97,14 @@ $U wait-window "multi" 5      # wait until a window with this title appears
 - `env/app.log` has the app's stderr. With `TRG_CLIENT_DEBUG=1` (the default
   in `uitest`; pass `TRG_CLIENT_DEBUG=0` to turn it off), it also has every
   RPC request and response. `>` lines are requests and `<` lines are
-  responses. Look for a request like this:
-  `grep '"method":"torrent-set"' target/ui-test/env/app.log`.
-  One `409 Conflict` at startup is the normal session-id handshake.
+  responses. They're JSON-RPC 2.0 with snake_case names, often batches
+  (arrays): an action and the torrent_get that follows it go in one
+  request. Look for a request like this:
+  `grep '"method":"torrent_set"' target/ui-test/env/app.log`.
+  torrent_get uses the table format (an array of keys, then arrays of
+  values), so grep for values (`'"multi"'`) rather than `"name":"multi"`.
+  One `409 Conflict` at startup is the normal session-id handshake; its
+  `X-Transmission-Rpc-Version` header tells the server's RPC version.
 - To find GTK warnings, use `grep -E 'WARNING|CRITICAL' target/ui-test/env/app.log`.
   `Gdk-WARNING ... gdk_frame_timings_presented() called on skipped frame`
   is harmless noise of the macOS backend.

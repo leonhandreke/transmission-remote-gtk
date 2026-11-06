@@ -38,6 +38,8 @@ mod imp {
         #[template_child]
         pub delete_check: TemplateChild<gtk::CheckButton>,
         #[template_child]
+        pub sequential_check: TemplateChild<gtk::CheckButton>,
+        #[template_child]
         pub dest_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub dest_box: TemplateChild<gtk::Box>,
@@ -216,6 +218,12 @@ impl TorrentAddDialog {
         imp.paused_check.set_active(prefs.get_bool(prefs::KEY_START_PAUSED, prefs::GLOBAL));
         imp.delete_check.set_active(prefs.get_bool(prefs::KEY_DELETE_LOCAL_TORRENT, prefs::GLOBAL));
 
+        // the server's default for added torrents
+        match client.session().and_then(|s| s.get(p::SGET_SEQUENTIAL_DOWNLOAD).cloned()) {
+            Some(v) => imp.sequential_check.set_active(v.as_bool().unwrap_or(false)),
+            None => imp.sequential_check.set_visible(false),
+        }
+
         // the selected position - 1 is the priority (TR_PRI_LOW is -1)
         imp.priority_combo.set_selected(1);
 
@@ -338,6 +346,9 @@ impl TorrentAddDialog {
                 up.dir = Some(dest.dir());
                 up.priority = imp.priority_combo.selected() as i64 - 1;
                 up.extra_args = true;
+                if imp.sequential_check.is_visible() {
+                    up.sequential_download = Some(imp.sequential_check.is_active());
+                }
 
                 // The wanted state and priority of each file of the torrent
                 let n = model.n_files();

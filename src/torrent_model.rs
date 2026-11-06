@@ -342,7 +342,6 @@ impl TorrentModel {
     fn update_item(
         &self,
         client: &Client,
-        rpcv: i64,
         serial: i64,
         item: &Item,
         t: Rc<Obj>,
@@ -364,9 +363,8 @@ impl TorrentModel {
         let id = p::torrent_get_id(&t);
         let status = get_i64(&t, p::FIELD_STATUS);
         let file_count = p::torrent_get_files(&t).len() as u32;
-        let new_flags =
-            p::torrent_get_flags(&t, rpcv, status, file_count as i64, down_rate, up_rate);
-        let status_string = p::torrent_get_status_string(rpcv, status, new_flags);
+        let new_flags = p::torrent_get_flags(&t, status, file_count as i64);
+        let status_string = p::torrent_get_status_string(status, new_flags);
         let status_icon = p::torrent_get_status_icon(new_flags);
         let empty = Obj::new();
         let pf = p::get_obj(&t, p::FIELD_PEERSFROM).unwrap_or(&empty);
@@ -488,11 +486,8 @@ impl TorrentModel {
         }) > 0
     }
 
-    pub fn update(&self, client: &Client, response: &Obj, mode: i32) -> Stats {
+    pub fn update(&self, client: &Client, args: &Obj, mode: i32) -> Stats {
         let serial = client.serial();
-        let rpcv = client.rpc_version();
-        let empty = Obj::new();
-        let args = p::arguments(response).unwrap_or(&empty);
         let mut changed = 0u32;
         let mut added = Vec::new();
 
@@ -509,12 +504,12 @@ impl TorrentModel {
             match existing {
                 None => {
                     let item = new_torrent_item();
-                    self.update_item(client, rpcv, serial, &item, t, &mut changed);
+                    self.update_item(client, serial, &item, t, &mut changed);
                     self.imp().ht.borrow_mut().insert(id, item.clone());
                     added.push(item);
                     changed |= UPDATE_ADDREMOVE;
                 }
-                Some(item) => self.update_item(client, rpcv, serial, &item, t, &mut changed),
+                Some(item) => self.update_item(client, serial, &item, t, &mut changed),
             }
         }
 

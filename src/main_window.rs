@@ -7,9 +7,8 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gdk, gio, glib};
-use serde_json::json;
 
-use crate::client::{self, Client, Response};
+use crate::client::{Client, Response};
 use crate::dialog;
 use crate::dialogs;
 use crate::files::{FilesModel, FilesView};
@@ -309,12 +308,57 @@ impl MainWindow {
         torrent_view::selected_ids(&self.torrent_tv())
     }
 
-    /// Sends a request about the torrents, then updates them
-    fn dispatch_interactive(&self, req: p::Request) {
+    /// Sends a request about torrents, and in the same batch, which the
+    /// server executes in order, gets them again (all of them if it's about
+    /// all of them, the recently active ones and removed IDs for a
+    /// removal). Shows its error.
+    pub fn dispatch_interactive(&self, req: p::Request) {
+        self.dispatch_interactive_with(req, |_| {});
+    }
+
+    /// dispatch_interactive(), after() gets the result of the request first
+    pub fn dispatch_interactive_with(
+        &self,
+        req: p::Request,
+        after: impl FnOnce(&Response) + 'static,
+    ) {
+        let refresh = if req.method == p::METHOD_TORRENT_REMOVE {
+            p::Torrents::RecentlyActive
+        } else {
+            p::Torrents::of(&req)
+        };
         let weak = self.downgrade();
-        self.client().dispatch(req, move |response| {
+        self.client().dispatch_batch(vec![req, p::torrent_get(&refresh)], move |mut results| {
+            let Some(win) = weak.upgrade() else { return };
+            let (Some(torrents), Some(result)) = (results.pop(), results.pop()) else { return };
+            after(&result);
+            if !win.client().is_connected() {
+                return;
+            }
+            win.dialog_error_handler(&result);
+            win.on_torrent_get(torrents, p::TORRENT_GET_MODE_INTERACTION);
+        });
+    }
+
+    /// Sends a session_set, and in the same batch gets the session again
+    pub fn dispatch_session_set(&self, req: p::Request) {
+        let weak = self.downgrade();
+        self.client().update_session_after(vec![req], move |results, session| {
+            let Some(win) = weak.upgrade() else { return };
+            if let Some(result) = results.first() {
+                win.dialog_error_handler(result);
+            }
+            win.on_session_get(session);
+        });
+    }
+
+    /// Gets torrents (after they changed outside of a batch, such as adding
+    /// them)
+    pub fn refresh_torrents(&self, torrents: &p::Torrents) {
+        let weak = self.downgrade();
+        self.client().dispatch(p::torrent_get(torrents), move |r| {
             if let Some(win) = weak.upgrade() {
-                win.on_generic_interactive_action(response);
+                win.on_torrent_get(r, p::TORRENT_GET_MODE_INTERACTION);
             }
         });
     }
@@ -377,11 +421,24 @@ impl MainWindow {
         self.imp().status_bar.push_connection_msg(&tr("Connecting..."));
         client.inc_connid();
         let weak = self.downgrade();
-        client.dispatch(p::session_get(), move |response| {
-            if let Some(win) = weak.upgrade() {
-                win.on_session_get(response);
-            }
-        });
+        // the session and the torrents in one go
+        client.dispatch_batch(
+            vec![p::session_get(), p::torrent_get(&p::Torrents::All)],
+            move |mut results| {
+                let Some(win) = weak.upgrade() else { return };
+                let (Some(torrents), Some(session)) = (results.pop(), results.pop()) else {
+                    return;
+                };
+                let was_connected = win.client().is_connected();
+                win.on_session_get(session);
+                if !was_connected && win.client().is_connected() {
+                    win.on_torrent_get(torrents, p::TORRENT_GET_MODE_FIRST);
+                    if let Some(args) = win.imp().args.take() {
+                        win.add_from_filenames(args);
+                    }
+                }
+            },
+        );
     }
 
     fn open_local_prefs(&self) {
@@ -444,16 +501,18 @@ impl MainWindow {
                 return;
             }
             let req = p::torrent_remove(&ids, delete_data);
-            if delete_data {
-                let w = win.downgrade();
-                win.client().dispatch(req, move |response| {
-                    if let Some(win) = w.upgrade() {
-                        win.on_delete_complete(response);
-                    }
-                });
-            } else {
-                win.dispatch_interactive(req);
-            }
+            let w = win.downgrade();
+            win.dispatch_interactive_with(req, move |r| {
+                // the free space changed
+                if let (true, Ok(_), Some(win)) = (delete_data, r, w.upgrade()) {
+                    let w = win.downgrade();
+                    win.client().update_session(move |r| {
+                        if let Some(win) = w.upgrade() {
+                            win.on_session_get(r);
+                        }
+                    });
+                }
+            });
         });
     }
 
@@ -480,20 +539,6 @@ impl MainWindow {
         parts.files_view = Some(files_view);
         parts.peers_model = Some(peers_model);
         parts.peers_tv = Some(peers_tv);
-    }
-
-    pub fn on_session_set(&self, response: Response) {
-        if response.status == client::STATUS_OK
-            || response.status == client::FAIL_RESULT_UNSUCCESSFUL
-        {
-            let weak = self.downgrade();
-            self.client().update_session(move |r| {
-                if let Some(win) = weak.upgrade() {
-                    win.on_session_get(r);
-                }
-            });
-        }
-        self.dialog_error_handler(&response);
     }
 
     fn start_session_timer(&self) {
@@ -542,13 +587,13 @@ impl MainWindow {
         let active_only = prefs.get_bool(prefs::KEY_UPDATE_ACTIVE_ONLY, prefs::CONNECTION)
             && (!prefs.get_bool(prefs::ACTIVEONLY_FULLSYNC_ENABLED, prefs::CONNECTION)
                 || (every != 0 && client.serial() % every != 0));
-        let (tag, mode) = if active_only {
-            (p::TORRENT_GET_TAG_MODE_UPDATE, p::TORRENT_GET_MODE_ACTIVE)
+        let (torrents, mode) = if active_only {
+            (p::Torrents::RecentlyActive, p::TORRENT_GET_MODE_ACTIVE)
         } else {
-            (p::TORRENT_GET_TAG_MODE_FULL, p::TORRENT_GET_MODE_UPDATE)
+            (p::Torrents::All, p::TORRENT_GET_MODE_UPDATE)
         };
         let weak = self.downgrade();
-        client.dispatch(p::torrent_get(tag), move |r| {
+        client.dispatch(p::torrent_get(&torrents), move |r| {
             if let Some(win) = weak.upgrade() {
                 win.on_torrent_get(r, mode);
             }
@@ -559,20 +604,11 @@ impl MainWindow {
         let client = self.client();
         let is_connected = client.is_connected();
         let last_session = client.session_clone();
-        let new_session = response.arguments().cloned();
+        let new_session = response.as_ref().ok().cloned();
 
+        // servers older than 4.1 fail with Error::Unsupported
         if !is_connected {
             if self.dialog_error_handler(&response) {
-                self.reset_connect_args();
-                return;
-            }
-            let version = p::session_get_version(new_session.as_ref());
-            if version < client::TRANSMISSION_MIN_SUPPORTED {
-                let msg = sprintf(
-                    &tr("This application supports Transmission %g and later, you have %g."),
-                    &[&client::TRANSMISSION_MIN_SUPPORTED, &version],
-                );
-                util::error_dialog(Some(self), &msg);
                 self.reset_connect_args();
                 return;
             }
@@ -604,22 +640,10 @@ impl MainWindow {
 
         if !is_connected {
             self.conn_changed(true);
-            if let Some(tv) = self.imp().parts.borrow().trackers_view.as_ref() {
-                tv.new_connection(&client);
-            }
-            let weak = self.downgrade();
-            client.dispatch(p::torrent_get(p::TORRENT_GET_TAG_MODE_FULL), move |r| {
-                if let Some(win) = weak.upgrade() {
-                    win.on_torrent_get(r, p::TORRENT_GET_MODE_FIRST);
-                    if let Some(args) = win.imp().args.take() {
-                        win.add_from_filenames(args);
-                    }
-                }
-            });
         }
     }
 
-    /// The callback for a torrent-get response
+    /// The callback for a torrent_get response
     fn on_torrent_get(&self, response: Response, mode: i32) {
         let client = self.client();
         let prefs = client.prefs().clone();
@@ -636,28 +660,18 @@ impl MainWindow {
         }
         let interval = interval as u32;
 
-        if response.status != client::STATUS_OK {
-            let max_retries = prefs.get_int(prefs::KEY_RETRIES, prefs::CONNECTION);
-            if client.inc_fail_count() as i64 >= max_retries {
-                self.conn_changed(false);
-                self.dialog_error_handler(&response);
-            } else {
-                let msg = client::make_error_message(&response);
-                let status_msg = sprintf(
-                    &tr("Request %d/%d failed: %s"),
-                    &[&client.fail_count(), &max_retries, &msg],
-                );
-                imp.status_bar.push_connection_msg(&status_msg);
-                self.start_torrents_timer(interval);
+        let obj = match response {
+            Ok(obj) => obj,
+            Err(error) => {
+                self.on_torrent_get_failed(&error, interval);
+                return;
             }
-            return;
-        }
+        };
 
         client.reset_fail_count();
         client.inc_serial();
 
-        let Some(obj) = response.obj.as_ref() else { return };
-        let stats = self.torrent_model().update(&client, obj, mode);
+        let stats = self.torrent_model().update(&client, &obj, mode);
 
         // The filter and sorter don't watch the items, so the values they
         // look at may have changed.
@@ -672,6 +686,25 @@ impl MainWindow {
         imp.status_bar.update(&stats, &client);
 
         if mode != p::TORRENT_GET_MODE_INTERACTION {
+            self.start_torrents_timer(interval);
+        }
+    }
+
+    /// A failed torrent_get: retried with the next update, until there were
+    /// too many failures, which disconnects
+    fn on_torrent_get_failed(&self, error: &crate::client::Error, interval: u32) {
+        let client = self.client();
+        let prefs = client.prefs().clone();
+        let max_retries = prefs.get_int(prefs::KEY_RETRIES, prefs::CONNECTION);
+        if client.inc_fail_count() as i64 >= max_retries {
+            self.conn_changed(false);
+            self.show_error(&error.to_string());
+        } else {
+            let status_msg = sprintf(
+                &tr("Request %d/%d failed: %s"),
+                &[&client.fail_count(), &max_retries, &error.to_string()],
+            );
+            self.imp().status_bar.push_connection_msg(&status_msg);
             self.start_torrents_timer(interval);
         }
     }
@@ -736,58 +769,26 @@ impl MainWindow {
         self.torrent_model().reload_dir_aliases(&self.client());
     }
 
+    /// Shows the error of a failed request. Returns whether it failed.
     fn dialog_error_handler(&self, response: &Response) -> bool {
-        if response.status != client::STATUS_OK {
-            let msg = client::make_error_message(response);
-            let sb = &self.imp().status_bar;
-            sb.clear_indicators();
-            sb.push_connection_msg(&msg);
-            util::error_dialog(Some(self), &msg);
-            true
-        } else {
-            false
+        match response {
+            Err(error) => {
+                self.show_error(&error.to_string());
+                true
+            }
+            Ok(_) => false,
         }
+    }
+
+    fn show_error(&self, msg: &str) {
+        let sb = &self.imp().status_bar;
+        sb.clear_indicators();
+        sb.push_connection_msg(msg);
+        util::error_dialog(Some(self), msg);
     }
 
     fn first_selected_id(&self) -> i64 {
         self.torrent_tv().first_selected().map(|i| i.torrent_id()).unwrap_or(-1)
-    }
-
-    fn on_delete_complete(&self, response: Response) {
-        let client = self.client();
-        if client.is_connected() && response.ok() {
-            let weak = self.downgrade();
-            client.update_session(move |r| {
-                if let Some(win) = weak.upgrade() {
-                    win.on_session_get(r);
-                }
-            });
-        }
-        self.on_generic_interactive_action(response);
-    }
-
-    /// After a request about torrents: show its error, or update the
-    /// torrent(s) of its tag
-    pub fn on_generic_interactive_action(&self, response: Response) {
-        let client = self.client();
-        if !client.is_connected() {
-            return;
-        }
-        self.dialog_error_handler(&response);
-        if response.ok() {
-            let id = response
-                .obj
-                .as_ref()
-                .filter(|o| o.contains_key(p::PARAM_TAG))
-                .map(|o| get_i64(o, p::PARAM_TAG))
-                .unwrap_or(p::TORRENT_GET_TAG_MODE_FULL);
-            let weak = self.downgrade();
-            client.dispatch(p::torrent_get(id), move |r| {
-                if let Some(win) = weak.upgrade() {
-                    win.on_torrent_get(r, p::TORRENT_GET_MODE_INTERACTION);
-                }
-            });
-        }
     }
 
     fn torrent_scrub(&self) {
@@ -1015,21 +1016,15 @@ impl MainWindow {
             Some(ids) => p::torrent_set(ids),
             None => p::session_set(),
         };
-        let args = p::args_mut(&mut req);
         if value >= 0 {
-            args.insert(speed_key.into(), json!(value));
+            req.set(speed_key, value);
         }
-        args.insert(enabled_key.into(), json!(value >= 0));
+        req.set(enabled_key, value >= 0);
 
         if ids.is_some() {
             self.dispatch_interactive(req);
         } else {
-            let weak = self.downgrade();
-            self.client().dispatch(req, move |r| {
-                if let Some(win) = weak.upgrade() {
-                    win.on_session_set(r);
-                }
-            });
+            self.dispatch_session_set(req);
         }
     }
 
@@ -1053,7 +1048,7 @@ impl MainWindow {
             };
             action.set_state(&v.to_variant());
             let mut req = p::torrent_set(&ids);
-            p::args_mut(&mut req).insert(p::FIELD_BANDWIDTH_PRIORITY.into(), json!(v));
+            req.set(p::FIELD_BANDWIDTH_PRIORITY, v);
             win.dispatch_interactive(req);
         });
         actions.add_action(&action);

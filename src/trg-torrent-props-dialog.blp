@@ -693,6 +693,51 @@ template $TrgTorrentPropsDialog: $TrgDialog {
           row: 10;
         }
       }
+
+      CheckButton sequential_download_check {
+        label: _("Download _sequentially");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+        toggled => $sequential_download_toggled_cb();
+
+        layout {
+          column: 0;
+          row: 11;
+          column-span: 2;
+        }
+      }
+
+      Label sequential_from_piece_label {
+        label: _("From _piece:");
+        xalign: 0;
+        mnemonic-widget: sequential_from_piece_spin;
+        use-underline: true;
+        margin-start: 36;
+
+        layout {
+          column: 0;
+          row: 12;
+        }
+      }
+
+      SpinButton sequential_from_piece_spin {
+        digits: 0;
+
+        adjustment: Adjustment {
+          lower: 0;
+          upper: 2147483647;
+          step-increment: 1;
+          page-increment: 100;
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 12;
+        }
+      }
     }
 
     [tab]

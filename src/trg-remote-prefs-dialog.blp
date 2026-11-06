@@ -185,6 +185,19 @@ template $TrgRemotePrefsDialog: $TrgDialog {
           column-span: 2;
         }
       }
+
+      CheckButton sequential_download_check {
+        label: _("Download added torrents _sequentially");
+        use-underline: true;
+        hexpand: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 9;
+          column-span: 2;
+        }
+      }
     }
 
     [tab]
@@ -299,6 +312,37 @@ template $TrgRemotePrefsDialog: $TrgDialog {
         }
       }
 
+      Label transport_label {
+        label: _("_Transport");
+        xalign: 0;
+        mnemonic-widget: transport_combo;
+        use-underline: true;
+        margin-start: 18;
+
+        layout {
+          column: 0;
+          row: 4;
+        }
+      }
+
+      DropDown transport_combo {
+        model: StringList {
+          strings [
+            _("µTP, then TCP"),
+            _("TCP, then µTP"),
+            _("TCP only"),
+            _("µTP only"),
+          ]
+        };
+
+        hexpand: true;
+
+        layout {
+          column: 1;
+          row: 4;
+        }
+      }
+
       CheckButton peer_port_random_check {
         label: _("Random peer port on start");
         use-underline: true;
@@ -307,7 +351,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 4;
+          row: 5;
           column-span: 2;
         }
       }
@@ -320,7 +364,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 5;
+          row: 6;
           column-span: 2;
         }
       }
@@ -336,7 +380,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 6;
+          row: 7;
           column-span: 2;
         }
       }
@@ -349,7 +393,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 7;
+          row: 8;
           column-span: 2;
         }
       }
@@ -362,7 +406,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 8;
+          row: 9;
           column-span: 2;
         }
       }
@@ -375,7 +419,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 9;
+          row: 10;
           column-span: 2;
         }
       }
@@ -391,7 +435,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 10;
+          row: 11;
           column-span: 2;
         }
       }
@@ -401,7 +445,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 11;
+          row: 12;
         }
       }
 
@@ -412,7 +456,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 1;
-          row: 11;
+          row: 12;
         }
       }
 
@@ -425,7 +469,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 12;
+          row: 13;
         }
       }
 
@@ -434,7 +478,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
 
         layout {
           column: 1;
-          row: 12;
+          row: 13;
         }
       }
     }

@@ -1,13 +1,13 @@
 //! The trackers of the selected torrent (trg-trackers-model.c and
 //! trg-trackers-tree-view.c): editing an announce URL replaces the tracker,
-//! the context menu adds and deletes them.
+//! the context menu adds and deletes them. Changes send the whole list of
+//! the rows (tracker_list).
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
-use serde_json::json;
 
 use crate::client::Client;
 use crate::i18n::tr;
@@ -32,6 +32,7 @@ pub const COL_LEECHERCOUNT: usize = 9;
 pub const COL_HOST: usize = 10;
 pub const COL_LAST_ANNOUNCE_RESULT: usize = 11;
 pub const COL_UPDATESERIAL: usize = 12;
+pub const COL_DOWNLOADERCOUNT: usize = 13;
 
 fn new_tracker_item() -> Item {
     Item::new(vec![
@@ -47,6 +48,7 @@ fn new_tracker_item() -> Item {
         Val::I64(0),
         Val::Str(None),
         Val::Str(None),
+        Val::I64(0),
         Val::I64(0),
     ])
 }
@@ -85,9 +87,11 @@ impl TrackersModel {
 
     /// A new row for a tracker to add, which the user edits the announce URL of
     pub fn add_new(&self) -> Item {
+        let tier = item::items(&self.store).map(|i| i.int64(COL_TIER) + 1).max().unwrap_or(0);
         let item = new_tracker_item();
         item.set(COL_ICON, "list-add");
         item.set(COL_ID, -1i64);
+        item.set(COL_TIER, tier);
         self.store.append(&item);
         item
     }
@@ -130,21 +134,17 @@ impl TrackersModel {
             );
             item.set(COL_LEECHERCOUNT, get_i64(tracker, p::FIELD_LEECHERCOUNT));
             item.set(COL_SEEDERCOUNT, get_i64(tracker, p::FIELD_SEEDERCOUNT));
+            item.set(COL_DOWNLOADERCOUNT, get_i64(tracker, p::FIELD_DOWNLOADER_COUNT));
         }
 
         item::remove_removed(&self.store, COL_UPDATESERIAL, serial);
     }
 }
 
-fn is_tracker_edit_supported(client: &Client) -> bool {
-    client.rpc_version() >= 10
-}
-
 /// The trackers view
 pub struct TrackersView {
     pub tv: TreeView,
     model: Rc<TrackersModel>,
-    client: Client,
     win: glib::WeakRef<MainWindow>,
     announce_column: Rc<ColumnDesc>,
 }
@@ -174,7 +174,7 @@ impl TrackersView {
             "announce-url",
             COLUMN_UNREMOVABLE | COLUMN_EDITABLE,
         );
-        announce.set_editable(false);
+        announce.set_editable(true);
 
         let reg = |t, c: usize, h: &str, id: &str, f| {
             tv.reg_column(t, c as i32, h, id, f);
@@ -188,6 +188,13 @@ impl TrackersView {
         );
         reg(ColType::NumGtZero, COL_SEEDERCOUNT, &tr("Seeder Count"), "seeder-count", 0);
         reg(ColType::NumGtZero, COL_LEECHERCOUNT, &tr("Leecher Count"), "leecher-count", 0);
+        reg(
+            ColType::NumGtZero,
+            COL_DOWNLOADERCOUNT,
+            &tr("Downloader Count"),
+            "downloader-count",
+            COLUMN_EXTRA,
+        );
         reg(ColType::Epoch, COL_LAST_ANNOUNCE_TIME, &tr("Last Announce"), "last-announce-time", 0);
         reg(ColType::Text, COL_LAST_ANNOUNCE_RESULT, &tr("Last Result"), "last-result", 0);
         reg(ColType::Text, COL_SCRAPE, &tr("Scrape URL"), "scrape-url", 0);
@@ -203,7 +210,6 @@ impl TrackersView {
         let view = Rc::new(Self {
             tv: tv.clone(),
             model: model.clone(),
-            client: client.clone(),
             win: win.downgrade(),
             announce_column: announce.clone(),
         });
@@ -227,19 +233,19 @@ impl TrackersView {
         view
     }
 
-    pub fn new_connection(&self, client: &Client) {
-        self.announce_column.set_editable(is_tracker_edit_supported(client));
-    }
-
-    fn on_trackers_update(self: &Rc<Self>) -> impl FnOnce(crate::client::Response) + 'static {
+    /// Sends the announce URLs of the rows as the torrent's tracker list,
+    /// ignoring updates from the server meanwhile
+    fn send_tracker_list(self: &Rc<Self>) {
+        let Some(win) = self.win.upgrade() else { return };
+        let trackers: Vec<(i64, String)> = item::items(&self.model.store)
+            .filter_map(|i| Some((i.int64(COL_TIER), i.string(COL_ANNOUNCE)?)))
+            .filter(|(_, url)| !url.is_empty())
+            .collect();
+        let req = p::torrent_set(&[self.model.torrent_id()])
+            .with(p::FIELD_TRACKER_LIST, p::tracker_list(&trackers));
+        self.model.set_accept(false);
         let model = self.model.clone();
-        let win = self.win.clone();
-        move |response| {
-            model.set_accept(true);
-            if let Some(win) = win.upgrade() {
-                win.on_generic_interactive_action(response);
-            }
-        }
+        win.dispatch_interactive_with(req, move |_| model.set_accept(true));
     }
 
     /// Editing an announce URL replaces the tracker, or adds it for a new row
@@ -254,16 +260,7 @@ impl TrackersView {
         };
 
         item.set(COL_ANNOUNCE, new_text);
-
-        let mut req = p::torrent_set(&[self.model.torrent_id()]);
-        let args = p::args_mut(&mut req);
-        if item.string(COL_ICON).as_deref() == Some("list-add") {
-            args.insert("trackerAdd".into(), json!([new_text]));
-        } else {
-            args.insert("trackerReplace".into(), json!([item.int64(COL_ID), new_text]));
-        }
-
-        self.client.dispatch(req, self.on_trackers_update());
+        self.send_tracker_list();
     }
 
     fn add_tracker(&self) {
@@ -273,18 +270,12 @@ impl TrackersView {
     }
 
     fn delete_tracker(self: &Rc<Self>) {
-        let mut ids = Vec::new();
         for item in self.tv.selected_items() {
-            ids.push(item.int64(COL_ID));
             if let Some(pos) = self.model.store.find(&item) {
                 self.model.store.remove(pos);
             }
         }
-
-        let mut req = p::torrent_set(&[self.model.torrent_id()]);
-        p::args_mut(&mut req).insert("trackerRemove".into(), json!(ids));
-        self.model.set_accept(false);
-        self.client.dispatch(req, self.on_trackers_update());
+        self.send_tracker_list();
     }
 
     fn popup_menu(self: &Rc<Self>, x: f64, y: f64, with_delete: bool) {
@@ -323,9 +314,6 @@ impl TrackersView {
     }
 
     fn context_menu(self: &Rc<Self>, x: f64, y: f64) -> bool {
-        if !is_tracker_edit_supported(&self.client) {
-            return false;
-        }
         // from the keyboard
         if x < 0.0 {
             self.popup_menu(x, y, self.tv.count_selected() > 0);

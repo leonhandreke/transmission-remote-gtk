@@ -78,6 +78,12 @@ mod imp {
         #[template_child]
         pub port_forwarding_check: TemplateChild<gtk::Widget>,
         #[template_child]
+        pub sequential_download_check: TemplateChild<gtk::Widget>,
+        #[template_child]
+        pub transport_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub transport_combo: TemplateChild<gtk::DropDown>,
+        #[template_child]
         pub pex_check: TemplateChild<gtk::Widget>,
         #[template_child]
         pub dht_check: TemplateChild<gtk::Widget>,
@@ -221,22 +227,47 @@ impl RemotePrefsDialog {
         button.set_label(&tr("Testing..."));
         button.set_sensitive(false);
 
+        // IPv4 and IPv6 separately, in one go
+        let families = [(p::IP_PROTOCOL_IPV4, "IPv4"), (p::IP_PROTOCOL_IPV6, "IPv6")];
+        let reqs = families.iter().map(|(ip, _)| p::port_test(Some(ip))).collect();
         let weak = d.downgrade();
-        d.client().dispatch(p::port_test(), move |response| {
+        d.client().dispatch_batch(reqs, move |results| {
             let Some(d) = weak.upgrade() else { return };
             let imp = d.imp();
             imp.port_test_button.set_label(&tr("Retest"));
             imp.port_test_button.set_sensitive(true);
-            if response.ok() {
-                let open = response.arguments().is_some_and(|a| get_bool(a, "port-is-open"));
-                imp.port_test_label.set_markup(&if open {
-                    tr("Port is <span font_weight=\"bold\" fgcolor=\"darkgreen\">open</span>")
-                } else {
-                    tr("Port is <span font_weight=\"bold\" fgcolor=\"red\">closed</span>")
-                });
-            } else {
-                util::client_error_dialog(Some(&d), &response);
+
+            // couldn't reach the server
+            if let Some(Err(e)) = results.iter().find(|r| matches!(r, Err(e) if e.is_transport())) {
+                util::client_error_dialog(Some(&d), e);
+                return;
             }
+
+            let mut markup = Vec::new();
+            let mut errors = Vec::new();
+            for ((_, name), result) in families.iter().zip(&results) {
+                let state = match result {
+                    Ok(r) if get_bool(r, p::FIELD_PORT_IS_OPEN) => {
+                        format!(
+                            "<span font_weight=\"bold\" fgcolor=\"darkgreen\">{}</span>",
+                            tr("open")
+                        )
+                    }
+                    Ok(_) => format!(
+                        "<span font_weight=\"bold\" fgcolor=\"red\">{}</span>",
+                        tr("closed")
+                    ),
+                    // eg. no IPv6 connectivity
+                    Err(e) => {
+                        errors.push(format!("{name}: {e}"));
+                        tr("unavailable")
+                    }
+                };
+                markup.push(format!("{name}: {state}"));
+            }
+            imp.port_test_label.set_markup(&markup.join("\n"));
+            imp.port_test_label
+                .set_tooltip_text((!errors.is_empty()).then(|| errors.join("\n")).as_deref());
         });
     }
 
@@ -252,13 +283,13 @@ impl RemotePrefsDialog {
             let imp = d.imp();
             imp.blocklist_update_button.set_sensitive(true);
             imp.blocklist_update_button.set_label(&tr("Update"));
-            if response.ok() {
-                let size =
-                    response.arguments().map(|a| get_i64(a, p::SGET_BLOCKLIST_SIZE)).unwrap_or(0);
-                imp.blocklist_check
-                    .set_label(Some(&sprintf(&tr("Blocklist (%ld entries)"), &[&size])));
-            } else {
-                util::client_error_dialog(Some(&d), &response);
+            match response {
+                Ok(r) => {
+                    let size = get_i64(&r, p::SGET_BLOCKLIST_SIZE);
+                    imp.blocklist_check
+                        .set_label(Some(&sprintf(&tr("Blocklist (%ld entries)"), &[&size])));
+                }
+                Err(e) => util::client_error_dialog(Some(&d), &e),
             }
         });
     }
@@ -294,6 +325,10 @@ impl RemotePrefsDialog {
                 p::SGET_TRASH_ORIGINAL_TORRENT_FILES,
             ),
             (imp.start_added_check.get().upcast::<gtk::Widget>(), p::SGET_START_ADDED_TORRENTS),
+            (
+                imp.sequential_download_check.get().upcast::<gtk::Widget>(),
+                p::SGET_SEQUENTIAL_DOWNLOAD,
+            ),
             (imp.peer_port_spin.get().upcast::<gtk::Widget>(), p::SGET_PEER_PORT),
             (
                 imp.peer_port_random_check.get().upcast::<gtk::Widget>(),
@@ -358,8 +393,8 @@ impl RemotePrefsDialog {
             }
         }
 
-        if p::session_get_cache_size_mb(&s) >= 0 {
-            widgets.add(&imp.cache_size_spin.get(), &s, p::SGET_CACHE_SIZE_MB);
+        if p::session_get_cache_size_mib(&s) >= 0 {
+            widgets.add(&imp.cache_size_spin.get(), &s, p::SGET_CACHE_SIZE_MIB);
         } else {
             imp.cache_size_label.set_visible(false);
             imp.cache_size_spin.set_visible(false);
@@ -392,10 +427,12 @@ impl RemotePrefsDialog {
 
         let encryption = get_str(&s, p::SGET_ENCRYPTION).unwrap_or("");
         imp.encryption_combo.set_selected(match encryption {
-            "required" => 0,
-            "tolerated" => 2,
+            p::ENCRYPTION_REQUIRED => 0,
+            p::ENCRYPTION_ALLOWED => 2,
             _ => 1,
         });
+
+        d.transports_add(&mut imp.widgets.borrow_mut(), &s);
 
         imp.blocklist_check.set_label(Some(&sprintf(
             &tr("Blocklist (%ld entries)"),
@@ -440,6 +477,30 @@ impl RemotePrefsDialog {
             .add_custom(key, move || json!(h.value_as_int() as i64 * 60 + m.value_as_int() as i64));
     }
 
+    /// The preferred transports, in the order of the transport combo
+    const TRANSPORTS: [&'static [&'static str]; 4] = [
+        &[p::TRANSPORT_UTP, p::TRANSPORT_TCP],
+        &[p::TRANSPORT_TCP, p::TRANSPORT_UTP],
+        &[p::TRANSPORT_TCP],
+        &[p::TRANSPORT_UTP],
+    ];
+
+    fn transports_add(&self, widgets: &mut JsonWidgets, s: &Obj) {
+        let imp = self.imp();
+        let Some(current) = s.get(p::SGET_PREFERRED_TRANSPORTS).and_then(|v| v.as_array()) else {
+            imp.transport_label.set_visible(false);
+            imp.transport_combo.set_visible(false);
+            return;
+        };
+        let current: Vec<&str> = current.iter().filter_map(|v| v.as_str()).collect();
+        let index = Self::TRANSPORTS.iter().position(|t| *t == current.as_slice()).unwrap_or(0);
+        imp.transport_combo.set_selected(index as u32);
+        let combo = imp.transport_combo.get();
+        widgets.add_custom(p::SGET_PREFERRED_TRANSPORTS, move || {
+            json!(Self::TRANSPORTS.get(combo.selected() as usize).unwrap_or(&Self::TRANSPORTS[0]))
+        });
+    }
+
     /// The days of the week, a bit each in a number
     fn alt_days_add(&self, widgets: &mut JsonWidgets, obj: &Obj, key: &str) {
         let grid = self.imp().alt_days_grid.get();
@@ -470,23 +531,16 @@ impl RemotePrefsDialog {
 
     fn update_session(&self) {
         let imp = self.imp();
-        let mut req = p::session_set();
-        let args = p::args_mut(&mut req);
-
         let encryption = match imp.encryption_combo.selected() {
-            0 => "required",
-            2 => "tolerated",
-            _ => "preferred",
+            0 => p::ENCRYPTION_REQUIRED,
+            2 => p::ENCRYPTION_ALLOWED,
+            _ => p::ENCRYPTION_PREFERRED,
         };
-        args.insert(p::SGET_ENCRYPTION.into(), json!(encryption));
+        let mut req = p::session_set().with(p::SGET_ENCRYPTION, encryption);
+        imp.widgets.borrow().save(req.params_mut());
 
-        imp.widgets.borrow().save(args);
-
-        let w = imp.win.clone();
-        self.client().dispatch(req, move |r| {
-            if let Some(win) = w.upgrade() {
-                win.on_session_set(r);
-            }
-        });
+        if let Some(win) = imp.win.upgrade() {
+            win.dispatch_session_set(req);
+        }
     }
 }

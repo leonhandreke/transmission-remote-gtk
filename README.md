@@ -2,6 +2,7 @@
 
 transmission-remote-gtk is a GTK client for remote management of
 the Transmission BitTorrent client, using its HTTP RPC protocol.
+It requires Transmission 4.1 or later, which speaks JSON-RPC 2.0.
 
 It is written in Rust, with [gtk4-rs](https://gtk-rs.org) and libsoup.
 

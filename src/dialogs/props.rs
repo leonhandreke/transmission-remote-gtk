@@ -14,7 +14,6 @@ use std::rc::Rc;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
-use serde_json::json;
 
 use crate::client::Client;
 use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
@@ -76,6 +75,12 @@ mod imp {
         pub upload_limit_spin: TemplateChild<gtk::SpinButton>,
         #[template_child]
         pub peer_limit_spin: TemplateChild<gtk::SpinButton>,
+        #[template_child]
+        pub sequential_download_check: TemplateChild<gtk::CheckButton>,
+        #[template_child]
+        pub sequential_from_piece_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub sequential_from_piece_spin: TemplateChild<gtk::SpinButton>,
         #[template_child]
         pub size_lb: TemplateChild<gtk::Label>,
         #[template_child]
@@ -162,6 +167,14 @@ impl TorrentPropsDialog {
         }
     }
 
+    /// The first piece is for sequential downloads
+    #[template_callback]
+    fn sequential_download_toggled_cb(check: &gtk::CheckButton) {
+        if let Some(d) = dialog::ancestor::<TorrentPropsDialog>(check) {
+            d.imp().sequential_from_piece_spin.set_sensitive(check.is_active());
+        }
+    }
+
     pub fn new(win: &MainWindow, tv: &TreeView, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
@@ -223,7 +236,6 @@ impl TorrentPropsDialog {
             let trackers_model = TrackersModel::new();
             let trackers_view =
                 TrackersView::new(&trackers_model, client, win, Some("TrgTrackersTreeView-dialog"));
-            trackers_view.new_connection(client);
             trackers_model.update(serial, &json, p::TORRENT_GET_MODE_FIRST);
             notebook.insert_page(
                 &trackers_view.tv,
@@ -291,24 +303,17 @@ impl TorrentPropsDialog {
         }
 
         if response == dialog::RESPONSE_OK {
-            let mut req = p::torrent_set(&imp.target_ids.borrow());
-            let args = p::args_mut(&mut req);
-            args.insert(
-                p::FIELD_SEED_RATIO_MODE.into(),
-                json!(imp.seed_ratio_mode_combo.selected()),
-            );
-            args.insert(
-                p::FIELD_BANDWIDTH_PRIORITY.into(),
-                json!(imp.bandwidth_priority_combo.selected() as i64 - 1),
-            );
-            imp.widgets.borrow().save(args);
+            let mut req = p::torrent_set(&imp.target_ids.borrow())
+                .with(p::FIELD_SEED_RATIO_MODE, imp.seed_ratio_mode_combo.selected())
+                .with(
+                    p::FIELD_BANDWIDTH_PRIORITY,
+                    imp.bandwidth_priority_combo.selected() as i64 - 1,
+                );
+            imp.widgets.borrow().save(req.params_mut());
 
-            let w = imp.win.clone();
-            self.client().dispatch(req, move |r| {
-                if let Some(win) = w.upgrade() {
-                    win.on_generic_interactive_action(r);
-                }
-            });
+            if let Some(win) = imp.win.upgrade() {
+                win.dispatch_interactive(req);
+            }
         }
 
         self.destroy();
@@ -388,6 +393,29 @@ impl TorrentPropsDialog {
         } else {
             imp.queue_position_label.set_visible(false);
             imp.queue_position_spin.set_visible(false);
+        }
+
+        if json.contains_key(p::FIELD_SEQUENTIAL_DOWNLOAD) {
+            widgets.add(&imp.sequential_download_check.get(), json, p::FIELD_SEQUENTIAL_DOWNLOAD);
+            // the pieces of one torrent
+            let pieces = get_i64(json, p::FIELD_PIECE_COUNT);
+            if imp.target_ids.borrow().len() == 1 && pieces > 0 {
+                imp.sequential_from_piece_spin.set_range(0.0, (pieces - 1) as f64);
+                widgets.add(
+                    &imp.sequential_from_piece_spin.get(),
+                    json,
+                    p::FIELD_SEQUENTIAL_DOWNLOAD_FROM_PIECE,
+                );
+                imp.sequential_from_piece_spin
+                    .set_sensitive(imp.sequential_download_check.is_active());
+            } else {
+                imp.sequential_from_piece_label.set_visible(false);
+                imp.sequential_from_piece_spin.set_visible(false);
+            }
+        } else {
+            imp.sequential_download_check.set_visible(false);
+            imp.sequential_from_piece_label.set_visible(false);
+            imp.sequential_from_piece_spin.set_visible(false);
         }
 
         imp.bandwidth_priority_combo

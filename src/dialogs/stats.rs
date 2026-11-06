@@ -7,7 +7,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
-use crate::client::{self, Client, Response};
+use crate::client::{Client, Response};
 use crate::dialog::{Dialog, DialogImpl, TrgDialogExt};
 use crate::main_window::MainWindow;
 use crate::protocol::{self as p, Obj, get_f64, get_i64};
@@ -181,11 +181,27 @@ impl StatsDialog {
         let imp = self.imp();
         imp.in_flight_ticks.set(0);
 
-        if response.ok() {
+        match response {
+            Ok(args) => self.show_stats(&args),
+            // The main window reports (and retries) failed connections.
+            // Other errors once until the next successful update, not on
+            // every refresh.
+            Err(e)
+                if !e.is_transport() && !imp.error_shown.get() && self.client().is_connected() =>
+            {
+                imp.error_shown.set(true);
+                util::client_error_dialog(Some(self), &e);
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn show_stats(&self, args: &Obj) {
+        let imp = self.imp();
+        {
             let empty = Obj::new();
-            let args = response.arguments().unwrap_or(&empty);
-            let session = stats(args, "current-stats").unwrap_or(&empty);
-            let cumulat = stats(args, "cumulative-stats").unwrap_or(&empty);
+            let session = stats(args, p::STATS_CURRENT).unwrap_or(&empty);
+            let cumulat = stats(args, p::STATS_CUMULATIVE).unwrap_or(&empty);
 
             imp.version_session.set_text(&format!(
                 "Transmission {}",
@@ -197,35 +213,28 @@ impl StatsDialog {
                 c.set_text(&f(cumulat));
             };
             set(&imp.up_session, &imp.up_cumulat, &|o| {
-                util::format_size(get_i64(o, "uploadedBytes"))
+                util::format_size(get_i64(o, p::STATS_UPLOADED_BYTES))
             });
             set(&imp.down_session, &imp.down_cumulat, &|o| {
-                util::format_size(get_i64(o, "downloadedBytes"))
+                util::format_size(get_i64(o, p::STATS_DOWNLOADED_BYTES))
             });
             // NAN and INFINITY are handled by format_ratio
             set(&imp.ratio_session, &imp.ratio_cumulat, &|o| {
-                util::format_ratio(get_f64(o, "uploadedBytes") / get_f64(o, "downloadedBytes"))
+                util::format_ratio(
+                    get_f64(o, p::STATS_UPLOADED_BYTES) / get_f64(o, p::STATS_DOWNLOADED_BYTES),
+                )
             });
             set(&imp.files_added_session, &imp.files_added_cumulat, &|o| {
-                get_i64(o, "filesAdded").to_string()
+                get_i64(o, p::STATS_FILES_ADDED).to_string()
             });
             set(&imp.session_count_session, &imp.session_count_cumulat, &|o| {
-                get_i64(o, "sessionCount").to_string()
+                get_i64(o, p::STATS_SESSION_COUNT).to_string()
             });
             set(&imp.active_session, &imp.active_cumulat, &|o| {
-                util::format_time_long(get_i64(o, "secondsActive"))
+                util::format_time_long(get_i64(o, p::STATS_SECONDS_ACTIVE))
             });
 
             imp.error_shown.set(false);
-        } else if response.status != client::FAIL_HTTP_UNSUCCESSFUL
-            && !imp.error_shown.get()
-            && self.client().is_connected()
-        {
-            // The main window reports (and retries) failed connections.
-            // Other errors once until the next successful update, not on
-            // every refresh.
-            imp.error_shown.set(true);
-            util::client_error_dialog(Some(self), &response);
         }
     }
 }

@@ -28,6 +28,7 @@ mod panels;
 mod peers;
 mod prefs;
 mod protocol;
+mod rpc;
 mod state_selector;
 mod torrent_model;
 mod torrent_view;
