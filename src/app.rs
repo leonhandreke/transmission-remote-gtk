@@ -177,12 +177,14 @@ impl App {
             .map(|a| {
                 let a = a.to_string_lossy().into_owned();
                 let path = std::path::Path::new(&a);
-                if !util::is_url(&a) && !util::is_magnet(&a) && path.is_relative() {
-                    if let Some(cwd) = &cwd {
-                        let full = cwd.join(path);
-                        if full.is_file() {
-                            return full.to_string_lossy().into_owned();
-                        }
+                if !util::is_url(&a)
+                    && !util::is_magnet(&a)
+                    && path.is_relative()
+                    && let Some(cwd) = &cwd
+                {
+                    let full = cwd.join(path);
+                    if full.is_file() {
+                        return full.to_string_lossy().into_owned();
                     }
                 }
                 a

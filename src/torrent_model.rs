@@ -205,10 +205,10 @@ pub fn shorten_download_dir(client: &Client, download_dir: &str) -> String {
     let prefs = client.prefs();
     if let Some(labels) = prefs.get_array(prefs::KEY_DESTINATIONS, prefs::CONNECTION) {
         for label in p::objects(&labels) {
-            if get_str(label, prefs::KEY_DESTINATIONS_SUBKEY_DIR) == Some(download_dir) {
-                if let Some(l) = get_str(label, prefs::SUBKEY_LABEL) {
-                    return l.to_string();
-                }
+            if get_str(label, prefs::KEY_DESTINATIONS_SUBKEY_DIR) == Some(download_dir)
+                && let Some(l) = get_str(label, prefs::SUBKEY_LABEL)
+            {
+                return l.to_string();
             }
         }
     }
@@ -222,12 +222,12 @@ pub fn shorten_download_dir(client: &Client, download_dir: &str) -> String {
         return tr("Default");
     }
 
-    if !default_dir.is_empty() {
-        if let Some(rest) = download_dir.strip_prefix(&default_dir) {
-            let rest = rest.strip_prefix('/').unwrap_or(rest);
-            if !rest.is_empty() {
-                return rest.to_string();
-            }
+    if !default_dir.is_empty()
+        && let Some(rest) = download_dir.strip_prefix(&default_dir)
+    {
+        let rest = rest.strip_prefix('/').unwrap_or(rest);
+        if !rest.is_empty() {
+            return rest.to_string();
         }
     }
 
@@ -529,17 +529,17 @@ impl TorrentModel {
             if self.remove_stale(serial) {
                 changed |= UPDATE_ADDREMOVE;
             }
-        } else if mode > p::TORRENT_GET_MODE_FIRST {
-            if let Some(removed) = p::get_torrents_removed(args).filter(|r| !r.is_empty()) {
-                for id in removed.iter().map(prefs::value_as_i64) {
-                    // mark it, the stale ones are removed below
-                    if let Some(item) = self.find(id) {
-                        item.set(COL_UPDATESERIAL, -1i64);
-                    }
+        } else if mode > p::TORRENT_GET_MODE_FIRST
+            && let Some(removed) = p::get_torrents_removed(args).filter(|r| !r.is_empty())
+        {
+            for id in removed.iter().map(prefs::value_as_i64) {
+                // mark it, the stale ones are removed below
+                if let Some(item) = self.find(id) {
+                    item.set(COL_UPDATESERIAL, -1i64);
                 }
-                self.remove_stale(-1);
-                changed |= UPDATE_ADDREMOVE;
             }
+            self.remove_stale(-1);
+            changed |= UPDATE_ADDREMOVE;
         }
 
         if changed != 0 {

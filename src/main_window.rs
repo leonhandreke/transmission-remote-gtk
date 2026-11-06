@@ -675,10 +675,10 @@ impl MainWindow {
 
         // The filter and sorter don't watch the items, so the values they
         // look at may have changed.
-        if imp.filter_criteria.get() != 0 || imp.filter_text.borrow().is_some() {
-            if let Some(f) = imp.parts.borrow().torrent_filter.as_ref() {
-                f.changed(gtk::FilterChange::Different);
-            }
+        if (imp.filter_criteria.get() != 0 || imp.filter_text.borrow().is_some())
+            && let Some(f) = imp.parts.borrow().torrent_filter.as_ref()
+        {
+            f.changed(gtk::FilterChange::Different);
         }
         self.torrent_tv().resort();
 
@@ -735,10 +735,10 @@ impl MainWindow {
             }
         }
 
-        if let Some(text) = imp.filter_text.borrow().as_ref() {
-            if let Some(name) = item.string(tm::COL_NAME) {
-                return glib::casefold(&name).contains(text.as_str());
-            }
+        if let Some(text) = imp.filter_text.borrow().as_ref()
+            && let Some(name) = item.string(tm::COL_NAME)
+        {
+            return glib::casefold(&name).contains(text.as_str());
         }
 
         true

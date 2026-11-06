@@ -4,9 +4,6 @@
 //! (protocol-constants.h, requests.c, torrent.c, session-get.c and json.c
 //! in the C version). The wire format is in rpc.
 
-// the protocol's constants, not all of which are used
-#![allow(dead_code)]
-
 use serde_json::{Value, json};
 
 use crate::i18n::tr;
@@ -152,9 +149,6 @@ pub const TPEER_CLIENT_NAME: &str = "client_name";
 pub const TPEER_PROGRESS: &str = "progress";
 pub const TPEER_RATE_TO_CLIENT: &str = "rate_to_client";
 pub const TPEER_RATE_TO_PEER: &str = "rate_to_peer";
-pub const TPEER_IS_ENCRYPTED: &str = "is_encrypted";
-pub const TPEER_IS_DOWNLOADING_FROM: &str = "is_downloading_from";
-pub const TPEER_IS_UPLOADING_TO: &str = "is_uploading_to";
 pub const TPEER_FLAGSTR: &str = "flag_str";
 
 pub const TPEERFROM_FROMPEX: &str = "from_pex";
@@ -752,26 +746,6 @@ pub fn get_torrents(args: &Obj) -> &[Value] {
 
 pub fn get_torrents_removed(args: &Obj) -> Option<&[Value]> {
     args.get(FIELD_REMOVED).and_then(Value::as_array).map(Vec::as_slice)
-}
-
-pub fn torrent_get_full_path(t: &Obj) -> String {
-    format!(
-        "{}/{}",
-        get_str(t, FIELD_DOWNLOAD_DIR).unwrap_or(""),
-        get_str(t, FIELD_NAME).unwrap_or("")
-    )
-}
-
-/// The directory containing the torrent's files: its download directory, or
-/// the directory its (first) file is in below that.
-pub fn torrent_get_full_dir(t: &Obj) -> String {
-    let location = get_str(t, FIELD_DOWNLOAD_DIR).unwrap_or("");
-    let name =
-        objects(torrent_get_files(t)).next().and_then(|f| get_str(f, TFILE_NAME)).unwrap_or("");
-    match name.find('/') {
-        Some(i) => format!("{location}/{}", &name[..i]),
-        None => location.to_string(),
-    }
 }
 
 /* Peers */

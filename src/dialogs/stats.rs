@@ -153,10 +153,10 @@ impl StatsDialog {
         imp.in_flight_ticks.set(1);
         let generation = imp.generation.get();
         self.client().dispatch(p::session_stats(), move |response| {
-            if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade()) {
-                if d.imp().generation.get() == generation {
-                    d.on_stats_reply(response);
-                }
+            if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade())
+                && d.imp().generation.get() == generation
+            {
+                d.on_stats_reply(response);
             }
         });
     }

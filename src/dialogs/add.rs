@@ -338,34 +338,34 @@ impl TorrentAddDialog {
             flags |= p::TORRENT_ADD_FLAG_DELETE;
         }
 
-        if response == dialog::RESPONSE_ACCEPT {
-            if let Some(win) = imp.win.upgrade() {
-                let dest = imp.dest_combo.borrow().clone().unwrap();
-                let model = self.files_model();
-                let mut up = Upload::new(imp.filenames.take(), &self.client(), &win, flags);
-                up.dir = Some(dest.dir());
-                up.priority = imp.priority_combo.selected() as i64 - 1;
-                up.extra_args = true;
-                if imp.sequential_check.is_visible() {
-                    up.sequential_download = Some(imp.sequential_check.is_active());
-                }
-
-                // The wanted state and priority of each file of the torrent
-                let n = model.n_files();
-                let mut wanted = vec![false; n];
-                let mut priorities = vec![0; n];
-                for i in 0..n {
-                    if let Some(item) = model.file(i) {
-                        wanted[i] = item.int64(files::COL_WANTED) != 0;
-                        priorities[i] = item.int64(files::COL_PRIORITY);
-                    }
-                }
-                up.file_wanted = Some(wanted);
-                up.file_priorities = Some(priorities);
-
-                upload::do_upload(up);
-                dest.save_selection();
+        if response == dialog::RESPONSE_ACCEPT
+            && let Some(win) = imp.win.upgrade()
+        {
+            let dest = imp.dest_combo.borrow().clone().unwrap();
+            let model = self.files_model();
+            let mut up = Upload::new(imp.filenames.take(), &self.client(), &win, flags);
+            up.dir = Some(dest.dir());
+            up.priority = imp.priority_combo.selected() as i64 - 1;
+            up.extra_args = true;
+            if imp.sequential_check.is_visible() {
+                up.sequential_download = Some(imp.sequential_check.is_active());
             }
+
+            // The wanted state and priority of each file of the torrent
+            let n = model.n_files();
+            let mut wanted = vec![false; n];
+            let mut priorities = vec![0; n];
+            for i in 0..n {
+                if let Some(item) = model.file(i) {
+                    wanted[i] = item.int64(files::COL_WANTED) != 0;
+                    priorities[i] = item.int64(files::COL_PRIORITY);
+                }
+            }
+            up.file_wanted = Some(wanted);
+            up.file_priorities = Some(priorities);
+
+            upload::do_upload(up);
+            dest.save_selection();
         }
 
         self.destroy();

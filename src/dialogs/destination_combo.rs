@@ -190,10 +190,9 @@ impl DestinationCombo {
         let imp = self.imp();
         if let (Some(key), Some(client)) =
             (imp.last_selection.borrow().as_ref(), imp.client.borrow().as_ref())
+            && self.has_text()
         {
-            if self.has_text() {
-                client.prefs().set_string(key, &self.dir(), prefs::CONNECTION);
-            }
+            client.prefs().set_string(key, &self.dir(), prefs::CONNECTION);
         }
     }
 }

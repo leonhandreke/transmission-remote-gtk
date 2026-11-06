@@ -116,8 +116,6 @@ pub fn decode(data: &[u8]) -> Option<Be> {
 
 /// A parsed .torrent file
 pub struct TorrentFile {
-    #[allow(dead_code)]
-    pub name: String,
     pub top_node: FileNode,
 }
 
@@ -152,7 +150,7 @@ pub fn parse_torrent_data(data: &[u8]) -> Option<TorrentFile> {
         }
     };
 
-    Some(TorrentFile { name, top_node })
+    Some(TorrentFile { top_node })
 }
 
 pub fn parse_torrent_file(filename: &str) -> Result<Option<TorrentFile>, String> {
@@ -173,7 +171,6 @@ mod tests {
         let data =
             b"d4:infod5:filesld6:lengthi5e4:pathl1:a1:beed6:lengthi7e4:pathl1:ceee4:name1:xee";
         let t = parse_torrent_data(data).unwrap();
-        assert_eq!(t.name, "x");
         assert_eq!(t.top_node.children.len(), 2);
         let single = parse_torrent_data(b"d4:infod6:lengthi3e4:name1:yee").unwrap();
         assert_eq!(single.top_node.name.as_deref(), Some("y"));

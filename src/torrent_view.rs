@@ -100,10 +100,10 @@ pub fn torrent_tree_view_new(client: &Client, model: &impl IsA<gio::ListModel>) 
     let weak = tv.downgrade();
     let c = client.downgrade();
     prefs.connect_changed(move |prefs, key| {
-        if key == Some(prefs::KEY_STYLE) {
-            if let (Some(tv), Some(client)) = (weak.upgrade(), c.upgrade()) {
-                set_style(&tv, &client, prefs.get_int(prefs::KEY_STYLE, prefs::GLOBAL));
-            }
+        if key == Some(prefs::KEY_STYLE)
+            && let (Some(tv), Some(client)) = (weak.upgrade(), c.upgrade())
+        {
+            set_style(&tv, &client, prefs.get_int(prefs::KEY_STYLE, prefs::GLOBAL));
         }
     });
 

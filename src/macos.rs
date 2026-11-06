@@ -39,20 +39,20 @@ pub fn setup_environment() {
     let libdir = resources.as_ref().map(|r| r.join("lib"));
     let datadir = resources.as_ref().map(|r| r.join("share"));
 
-    if let (Some(resources), Some(libdir), Some(datadir)) = (&resources, &libdir, &datadir) {
-        if libdir.is_dir() {
-            let pixbuf_cache = libdir.join("gdk-pixbuf-2.0").join("2.10.0").join("loaders.cache");
-            let gio_modules = libdir.join("gio").join("modules");
-            // SAFETY: called at the start of main, before any other thread exists
-            unsafe {
-                std::env::set_var("XDG_DATA_DIRS", datadir);
-                std::env::set_var("GDK_PIXBUF_MODULE_FILE", pixbuf_cache);
-                std::env::set_var("GIO_MODULE_DIR", gio_modules);
-                std::env::set_var("GTK_DATA_PREFIX", resources);
-                std::env::set_var("GTK_EXE_PREFIX", resources);
-            }
-            return;
+    if let (Some(resources), Some(libdir), Some(datadir)) = (&resources, &libdir, &datadir)
+        && libdir.is_dir()
+    {
+        let pixbuf_cache = libdir.join("gdk-pixbuf-2.0").join("2.10.0").join("loaders.cache");
+        let gio_modules = libdir.join("gio").join("modules");
+        // SAFETY: called at the start of main, before any other thread exists
+        unsafe {
+            std::env::set_var("XDG_DATA_DIRS", datadir);
+            std::env::set_var("GDK_PIXBUF_MODULE_FILE", pixbuf_cache);
+            std::env::set_var("GIO_MODULE_DIR", gio_modules);
+            std::env::set_var("GTK_DATA_PREFIX", resources);
+            std::env::set_var("GTK_EXE_PREFIX", resources);
         }
+        return;
     }
 
     prepend_data_dir(Path::new(env!("TRG_DATADIR")));
@@ -95,7 +95,7 @@ mod appearance {
             }
             CFType::wrap_under_create_rule(value)
                 .downcast::<CFString>()
-                .is_some_and(|s| s.to_string() == "Dark")
+                .is_some_and(|s| s == "Dark")
         }
     }
 
@@ -103,16 +103,13 @@ mod appearance {
         let dark = is_dark();
         let Some(settings) = gtk::Settings::default() else { return };
         // gtk-interface-color-scheme is new in GTK 4.20
-        if gtk::check_version(4, 20, 0).is_none() {
-            if let Some(pspec) = settings.find_property("gtk-interface-color-scheme") {
-                if let Some(class) = glib::EnumClass::with_type(pspec.value_type()) {
-                    if let Some(value) = class.to_value_by_nick(if dark { "dark" } else { "light" })
-                    {
-                        settings.set_property_from_value("gtk-interface-color-scheme", &value);
-                        return;
-                    }
-                }
-            }
+        if gtk::check_version(4, 20, 0).is_none()
+            && let Some(pspec) = settings.find_property("gtk-interface-color-scheme")
+            && let Some(class) = glib::EnumClass::with_type(pspec.value_type())
+            && let Some(value) = class.to_value_by_nick(if dark { "dark" } else { "light" })
+        {
+            settings.set_property_from_value("gtk-interface-color-scheme", &value);
+            return;
         }
         settings.set_gtk_application_prefer_dark_theme(dark);
     }

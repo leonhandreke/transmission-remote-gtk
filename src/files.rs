@@ -439,6 +439,9 @@ impl FilesModel {
 }
 
 /// The files view, of a torrent on the server (with a client) or local
+/// An action of the files view's context menu
+type FilesAction = Box<dyn Fn(&Rc<FilesView>)>;
+
 pub struct FilesView {
     pub tv: TreeView,
     pub model: Rc<FilesModel>,
@@ -514,10 +517,10 @@ impl FilesView {
 
         // Enter or a double click opens or closes a directory
         tv.connect_row_activated(|tv, position| {
-            if let Some(row) = tv.selection().item(position).and_downcast::<gtk::TreeListRow>() {
-                if row.is_expandable() {
-                    row.set_expanded(!row.is_expanded());
-                }
+            if let Some(row) = tv.selection().item(position).and_downcast::<gtk::TreeListRow>()
+                && row.is_expandable()
+            {
+                row.set_expanded(!row.is_expanded());
             }
         });
 
@@ -608,7 +611,7 @@ impl FilesView {
         let actions = gio::SimpleActionGroup::new();
         let n_selected = self.tv.count_selected();
 
-        let add = |name: &str, f: Box<dyn Fn(&Rc<Self>)>, enabled: bool| {
+        let add = |name: &str, f: FilesAction, enabled: bool| {
             let action = gio::SimpleAction::new(name, None);
             let weak = Rc::downgrade(self);
             action.connect_activate(move |_, _| {
@@ -647,10 +650,10 @@ impl FilesView {
         let menu = gio::Menu::new();
 
         // Files of a torrent on the server can be renamed
-        if self.client.is_some() {
-            if let Some(m) = builder.object::<gio::MenuModel>("rename_menu") {
-                menu.append_section(None, &m);
-            }
+        if self.client.is_some()
+            && let Some(m) = builder.object::<gio::MenuModel>("rename_menu")
+        {
+            menu.append_section(None, &m);
         }
 
         // its sections, as sections of this menu

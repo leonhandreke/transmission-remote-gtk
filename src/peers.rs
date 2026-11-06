@@ -76,19 +76,17 @@ impl PeersModel {
                     self.peers.borrow_mut().insert(address.clone(), item.clone());
                     added.push(item.clone());
 
-                    if do_host_lookup {
-                        if let Some(addr) = gio::InetAddress::from_string(&address) {
-                            let weak = item.downgrade();
-                            gio::Resolver::default().lookup_by_address_async(
-                                &addr,
-                                gio::Cancellable::NONE,
-                                move |res| {
-                                    if let (Ok(name), Some(item)) = (res, weak.upgrade()) {
-                                        item.set(COL_HOST, name.as_str());
-                                    }
-                                },
-                            );
-                        }
+                    if do_host_lookup && let Some(addr) = gio::InetAddress::from_string(&address) {
+                        let weak = item.downgrade();
+                        gio::Resolver::default().lookup_by_address_async(
+                            &addr,
+                            gio::Cancellable::NONE,
+                            move |res| {
+                                if let (Ok(name), Some(item)) = (res, weak.upgrade()) {
+                                    item.set(COL_HOST, name.as_str());
+                                }
+                            },
+                        );
                     }
                     item
                 }
@@ -108,10 +106,10 @@ impl PeersModel {
         if mode != p::TORRENT_GET_MODE_FIRST {
             let mut peers = self.peers.borrow_mut();
             for item in item::items(&self.store) {
-                if item.int64(COL_UPDATESERIAL) != serial {
-                    if let Some(ip) = item.string(COL_IP) {
-                        peers.remove(&ip);
-                    }
+                if item.int64(COL_UPDATESERIAL) != serial
+                    && let Some(ip) = item.string(COL_IP)
+                {
+                    peers.remove(&ip);
                 }
             }
             drop(peers);

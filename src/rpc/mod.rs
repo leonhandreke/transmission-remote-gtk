@@ -31,26 +31,6 @@ pub const JSONRPC_MIN_MAJOR: u64 = 6;
 /// one may have breaking changes.
 pub const SUPPORTED_MAJOR: u64 = 6;
 
-/// The error codes of Transmission's JSON-RPC errors (JsonRpc::Error::Code
-/// in libtransmission/rpcimpl.h)
-#[allow(dead_code)] // the protocol's, not all of which are used
-pub mod code {
-    pub const PARSE_ERROR: i64 = -32700;
-    pub const INVALID_REQUEST: i64 = -32600;
-    pub const METHOD_NOT_FOUND: i64 = -32601;
-    pub const INVALID_PARAMS: i64 = -32602;
-    pub const INTERNAL_ERROR: i64 = -32603;
-    pub const SET_ANNOUNCE_LIST: i64 = 1;
-    pub const INVALID_TRACKER_LIST: i64 = 2;
-    pub const PATH_NOT_ABSOLUTE: i64 = 3;
-    pub const UNRECOGNIZED_INFO: i64 = 4;
-    pub const SYSTEM_ERROR: i64 = 5;
-    pub const FILE_IDX_OOR: i64 = 6;
-    pub const PIECE_IDX_OOR: i64 = 7;
-    pub const HTTP_ERROR: i64 = 8;
-    pub const CORRUPT_TORRENT: i64 = 9;
-}
-
 /// A request: a method and its parameters, with the current (snake_case)
 /// names
 #[derive(Debug, Clone, PartialEq)]
@@ -300,6 +280,11 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    // Transmission's JSON-RPC error codes (JsonRpc::Error::Code in
+    // libtransmission/rpcimpl.h)
+    const PARSE_ERROR: i64 = -32700;
+    const HTTP_ERROR: i64 = 8;
+
     fn obj(v: Value) -> Obj {
         v.as_object().unwrap().clone()
     }
@@ -307,7 +292,8 @@ mod tests {
     #[test]
     fn encodes_requests_and_batches() {
         let r = Request::new("torrent_get").with("ids", [1]);
-        let single: Value = serde_json::from_slice(&encode_jsonrpc(&[r.clone()], Some(7))).unwrap();
+        let single: Value =
+            serde_json::from_slice(&encode_jsonrpc(std::slice::from_ref(&r), Some(7))).unwrap();
         assert_eq!(
             single,
             json!({"jsonrpc": "2.0", "method": "torrent_get", "params": {"ids": [1]}, "id": 7})
@@ -336,7 +322,7 @@ mod tests {
         assert_eq!(results[0].as_ref().unwrap()["port_is_open"], true);
         match &results[1] {
             Err(e @ Error::Rpc { code, result, .. }) => {
-                assert_eq!(*code, code::HTTP_ERROR);
+                assert_eq!(*code, HTTP_ERROR);
                 assert_eq!(result.as_ref().unwrap()["ip_protocol"], "ipv6");
                 assert_eq!(e.to_string(), "Couldn't test port: No Response (0)");
             }
@@ -348,9 +334,7 @@ mod tests {
     fn error_without_id_applies_to_all() {
         let body = json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "Parse error"}});
         let results = decode_jsonrpc(&serde_json::to_vec(&body).unwrap(), 1, 2).unwrap();
-        assert!(
-            results.iter().all(|r| matches!(r, Err(Error::Rpc { code: code::PARSE_ERROR, .. })))
-        );
+        assert!(results.iter().all(|r| matches!(r, Err(Error::Rpc { code: PARSE_ERROR, .. }))));
     }
 
     #[test]

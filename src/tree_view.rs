@@ -733,11 +733,11 @@ impl TreeView {
 
         cell.refresh();
 
-        if let Some(label) = cell.widget.downcast_ref::<gtk::EditableLabel>() {
-            if item.start_edit_column() == cell.desc.model_column {
-                item.set_start_edit_column(-1);
-                queue_start_editing(label);
-            }
+        if let Some(label) = cell.widget.downcast_ref::<gtk::EditableLabel>()
+            && item.start_edit_column() == cell.desc.model_column
+        {
+            item.set_start_edit_column(-1);
+            queue_start_editing(label);
         }
     }
 
@@ -761,10 +761,10 @@ impl TreeView {
 
     fn list_base(&self) -> Option<gtk::Widget> {
         let imp = self.imp();
-        if let Some(lv) = imp.list_view.borrow().as_ref() {
-            if lv.parent().is_some() {
-                return Some(lv.clone().upcast());
-            }
+        if let Some(lv) = imp.list_view.borrow().as_ref()
+            && lv.parent().is_some()
+        {
+            return Some(lv.clone().upcast());
         }
         // the rows of a column view are in a GtkListView
         let mut child = imp.column_view.first_child();
@@ -892,10 +892,10 @@ impl TreeView {
     /// The items changed, so they may be in a different order now
     pub fn resort(&self) {
         let imp = self.imp();
-        if imp.sort_column.get() >= 0 {
-            if let Some(s) = imp.sorter.borrow().as_ref() {
-                s.changed(gtk::SorterChange::Different);
-            }
+        if imp.sort_column.get() >= 0
+            && let Some(s) = imp.sorter.borrow().as_ref()
+        {
+            s.changed(gtk::SorterChange::Different);
         }
     }
 
@@ -1110,12 +1110,11 @@ impl TreeView {
 
         let columns = cv.columns();
         let mut position = columns.n_items();
-        if let Some(after_col) = after.and_then(|a| a.column.borrow().clone()) {
-            if let Some(i) = (0..columns.n_items())
+        if let Some(after_col) = after.and_then(|a| a.column.borrow().clone())
+            && let Some(i) = (0..columns.n_items())
                 .find(|&i| columns.item(i).as_ref() == Some(after_col.upcast_ref()))
-            {
-                position = i + 1;
-            }
+        {
+            position = i + 1;
         }
 
         cv.insert_column(position, &column);
@@ -1205,10 +1204,10 @@ impl TreeView {
             }
             Some((columns, widths)) => {
                 for (c, w) in columns.iter().zip(widths.iter()) {
-                    if let Some(desc) = c.as_str().and_then(|id| self.find_column(id)) {
-                        if !desc.showing() {
-                            self.add_column_after(&desc, prefs::value_as_i64(w), None);
-                        }
+                    if let Some(desc) = c.as_str().and_then(|id| self.find_column(id))
+                        && !desc.showing()
+                    {
+                        self.add_column_after(&desc, prefs::value_as_i64(w), None);
                     }
                 }
             }
@@ -1249,11 +1248,9 @@ impl TreeView {
     fn selected_positions(&self) -> Vec<u32> {
         let bitset = self.imp().selection.selection();
         let mut positions = Vec::new();
-        if let Some((mut iter, first)) = gtk::BitsetIter::init_first(&bitset) {
+        if let Some((iter, first)) = gtk::BitsetIter::init_first(&bitset) {
             positions.push(first);
-            while let Some(p) = iter.next() {
-                positions.push(p);
-            }
+            positions.extend(iter);
         }
         positions
     }

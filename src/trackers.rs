@@ -301,10 +301,8 @@ impl TrackersView {
             "/io/github/TransmissionRemoteGtk/ui/trg-trackers-tree-view.ui",
         );
         let menu = gio::Menu::new();
-        if with_delete {
-            if let Some(m) = builder.object::<gio::MenuModel>("delete_menu") {
-                menu.append_section(None, &m);
-            }
+        if with_delete && let Some(m) = builder.object::<gio::MenuModel>("delete_menu") {
+            menu.append_section(None, &m);
         }
         if let Some(m) = builder.object::<gio::MenuModel>("trackers_menu") {
             menu.append_section(None, &m);

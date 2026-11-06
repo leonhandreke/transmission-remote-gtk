@@ -596,14 +596,12 @@ impl StateSelector {
 
     fn context_menu(&self, mut x: f64, mut y: f64) -> bool {
         // From the keyboard, point at the row with the focus
-        if x < 0.0 || y < 0.0 {
-            if let Some(focus) = self.root().and_then(|r| r.focus()).filter(|f| f.is_ancestor(self))
-            {
-                if let Some(b) = focus.compute_bounds(self) {
-                    x = b.x() as f64 + 20.0;
-                    y = b.y() as f64 + b.height() as f64 / 2.0;
-                }
-            }
+        if (x < 0.0 || y < 0.0)
+            && let Some(focus) = self.root().and_then(|r| r.focus()).filter(|f| f.is_ancestor(self))
+            && let Some(b) = focus.compute_bounds(self)
+        {
+            x = b.x() as f64 + 20.0;
+            y = b.y() as f64 + b.height() as f64 / 2.0;
         }
 
         let actions = gio::SimpleActionGroup::new();
@@ -635,57 +633,59 @@ impl StateSelector {
         imp.dirs_first.set(prefs.get_bool(prefs::KEY_DIRECTORIES_FIRST, prefs::GLOBAL));
 
         let f = &p::TORRENT_FLAG_DOWNLOADING;
-        let mut s = States::default();
-        s.all = Some(self.add_state(None, Some("help-about"), Some(&tr("All")), 0));
-        s.down = Some(self.add_state(None, Some("go-down"), Some(&tr("Downloading")), *f));
-        s.down_wait = Some(self.add_state(
-            None,
-            Some("media-seek-backward"),
-            Some(&tr("Queue Down")),
-            p::TORRENT_FLAG_DOWNLOADING_WAIT,
-        ));
-        s.seeding = Some(self.add_state(
-            None,
-            Some("go-up"),
-            Some(&tr("Seeding")),
-            p::TORRENT_FLAG_SEEDING,
-        ));
-        s.seed_wait = Some(self.add_state(
-            None,
-            Some("media-seek-forward"),
-            Some(&tr("Queue Up")),
-            p::TORRENT_FLAG_SEEDING_WAIT,
-        ));
-        s.paused = Some(self.add_state(
-            None,
-            Some("media-playback-pause"),
-            Some(&tr("Paused")),
-            p::TORRENT_FLAG_PAUSED,
-        ));
-        s.complete = Some(self.add_state(
-            None,
-            Some("trg-gtk-apply"),
-            Some(&tr("Complete")),
-            p::TORRENT_FLAG_COMPLETE,
-        ));
-        s.incomplete = Some(self.add_state(
-            None,
-            Some("edit-select-all"),
-            Some(&tr("Incomplete")),
-            p::TORRENT_FLAG_INCOMPLETE,
-        ));
-        s.active = Some(self.add_state(
-            None,
-            Some("network-workgroup"),
-            Some(&tr("Active")),
-            p::TORRENT_FLAG_ACTIVE,
-        ));
-        s.checking = Some(self.add_state(
-            None,
-            Some("view-refresh"),
-            Some(&tr("Checking")),
-            p::TORRENT_FLAG_CHECKING_ANY,
-        ));
+        let s = States {
+            all: Some(self.add_state(None, Some("help-about"), Some(&tr("All")), 0)),
+            down: Some(self.add_state(None, Some("go-down"), Some(&tr("Downloading")), *f)),
+            down_wait: Some(self.add_state(
+                None,
+                Some("media-seek-backward"),
+                Some(&tr("Queue Down")),
+                p::TORRENT_FLAG_DOWNLOADING_WAIT,
+            )),
+            seeding: Some(self.add_state(
+                None,
+                Some("go-up"),
+                Some(&tr("Seeding")),
+                p::TORRENT_FLAG_SEEDING,
+            )),
+            seed_wait: Some(self.add_state(
+                None,
+                Some("media-seek-forward"),
+                Some(&tr("Queue Up")),
+                p::TORRENT_FLAG_SEEDING_WAIT,
+            )),
+            paused: Some(self.add_state(
+                None,
+                Some("media-playback-pause"),
+                Some(&tr("Paused")),
+                p::TORRENT_FLAG_PAUSED,
+            )),
+            complete: Some(self.add_state(
+                None,
+                Some("trg-gtk-apply"),
+                Some(&tr("Complete")),
+                p::TORRENT_FLAG_COMPLETE,
+            )),
+            incomplete: Some(self.add_state(
+                None,
+                Some("edit-select-all"),
+                Some(&tr("Incomplete")),
+                p::TORRENT_FLAG_INCOMPLETE,
+            )),
+            active: Some(self.add_state(
+                None,
+                Some("network-workgroup"),
+                Some(&tr("Active")),
+                p::TORRENT_FLAG_ACTIVE,
+            )),
+            checking: Some(self.add_state(
+                None,
+                Some("view-refresh"),
+                Some(&tr("Checking")),
+                p::TORRENT_FLAG_CHECKING_ANY,
+            )),
+            ..Default::default()
+        };
         self.add_state(None, None, None, 0);
         *imp.states.borrow_mut() = s;
 

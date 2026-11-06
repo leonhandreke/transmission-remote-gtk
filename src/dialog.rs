@@ -13,10 +13,6 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib};
 
-#[allow(dead_code)]
-pub const RESPONSE_NONE: i32 = -1;
-#[allow(dead_code)]
-pub const RESPONSE_REJECT: i32 = -2;
 pub const RESPONSE_ACCEPT: i32 = -3;
 pub const RESPONSE_DELETE_EVENT: i32 = -4;
 pub const RESPONSE_OK: i32 = -5;

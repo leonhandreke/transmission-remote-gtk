@@ -284,10 +284,10 @@ pub fn add_context_menu<W: IsA<gtk::Widget>>(
         if n_press != 1 {
             return;
         }
-        if let Some(widget) = gesture.widget() {
-            if f(&widget, x, y) {
-                gesture.set_state(gtk::EventSequenceState::Claimed);
-            }
+        if let Some(widget) = gesture.widget()
+            && f(&widget, x, y)
+        {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
         }
     });
     widget.add_controller(gesture);
@@ -325,13 +325,12 @@ pub fn popover_menu_popup(
 
     // A tree view presents its popovers. From the keyboard, point at the row
     // with the focus if there is one.
-    if x < 0.0 || y < 0.0 {
-        if let Some(tv) = parent.downcast_ref::<crate::tree_view::TreeView>() {
-            if let Some(bounds) = tv.focus_rect() {
-                x = bounds.x() as f64 + 20.0;
-                y = bounds.y() as f64 + bounds.height() as f64 / 2.0;
-            }
-        }
+    if (x < 0.0 || y < 0.0)
+        && let Some(tv) = parent.downcast_ref::<crate::tree_view::TreeView>()
+        && let Some(bounds) = tv.focus_rect()
+    {
+        x = bounds.x() as f64 + 20.0;
+        y = bounds.y() as f64 + bounds.height() as f64 / 2.0;
     }
 
     popover.set_parent(parent);

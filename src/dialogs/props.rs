@@ -444,19 +444,19 @@ impl TorrentPropsDialog {
             )
         };
 
-        if let Some((t, item)) = &data {
-            if !last.as_ref().is_some_and(|l| Rc::ptr_eq(l, t)) {
-                if let Some(m) = &files_model {
-                    m.update(t, p::TORRENT_GET_MODE_UPDATE);
-                }
-                if let (Some(m), Some(tv)) = (&peers_model, &peers_tv) {
-                    m.update(tv, serial, t, p::TORRENT_GET_MODE_UPDATE);
-                }
-                if let Some(m) = &trackers_model {
-                    m.update(serial, t, p::TORRENT_GET_MODE_UPDATE);
-                }
-                self.info_page_update(t, item);
+        if let Some((t, item)) = &data
+            && !last.as_ref().is_some_and(|l| Rc::ptr_eq(l, t))
+        {
+            if let Some(m) = &files_model {
+                m.update(t, p::TORRENT_GET_MODE_UPDATE);
             }
+            if let (Some(m), Some(tv)) = (&peers_model, &peers_tv) {
+                m.update(tv, serial, t, p::TORRENT_GET_MODE_UPDATE);
+            }
+            if let Some(m) = &trackers_model {
+                m.update(serial, t, p::TORRENT_GET_MODE_UPDATE);
+            }
+            self.info_page_update(t, item);
         }
 
         let mut d = imp.details.borrow_mut();
