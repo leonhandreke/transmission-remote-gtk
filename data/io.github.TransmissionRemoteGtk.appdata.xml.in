@@ -24,6 +24,20 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="2.0.0" date="2026-11-06">
+      <description>
+        <p>This release ports the application to GTK 4 and adds native macOS support.</p>
+        <ul>
+          <li>Port to GTK 4, with list views replacing the legacy tree views</li>
+          <li>Replace deprecated dialogs, file choosers and combo boxes</li>
+          <li>Improve macOS integration and add macOS application bundle build targets</li>
+          <li>Make the Connection tab scrollable</li>
+          <li>Fix the window size growing with client-side decorations</li>
+          <li>Fix INF/NaN ratio handling</li>
+          <li>Add Georgian and Faroese translations</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.7.1" date="2026-03-13">
       <description>
         <p>This release is a minor bug fix for an issue where the client can't receive data properly if Transmission does not send valid JSON.</p>
