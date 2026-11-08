@@ -1,0 +1,132 @@
+#!/bin/bash
+# Manages the Linux UI test container: a headless GNOME Shell session
+# (session.sh) with the repo mounted at /src. scripts/ui-test/uitest calls
+# this for "uitest linux ..." and, with TRG_UITEST_TARGET=linux, to run its
+# other commands inside the container.
+#
+# Environment:
+#   DOCKER                docker or podman (default: docker)
+#   TRG_UITEST_CONTAINER  the container's name (default: trg-uitest)
+#   TRG_UITEST_IMAGE      the image's name (default: trg-uitest)
+#   TRG_UITEST_MONITOR    the virtual monitor (default: 1280x800)
+
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo=$(cd "$here/../../.." && pwd)
+docker=${DOCKER:-docker}
+name=${TRG_UITEST_CONTAINER:-trg-uitest}
+image=${TRG_UITEST_IMAGE:-trg-uitest}
+session_env=/run/user/1000/trg-session.env
+
+die() { echo "uitest linux: $*" >&2; exit 1; }
+
+usage() {
+    cat <<EOF
+usage: uitest linux <command> [args]
+
+  up                start the container and its GNOME Shell session (builds
+                    the image first if there's none)
+  down              stop and remove the container
+  restart           down, then up: a fresh session
+  image             (re)build the image from the latest Fedora
+  status            whether it's running, and the session check
+  build [ARGS...]   cargo build [ARGS] inside the container
+  shell [CMD...]    a shell (or CMD) inside the container, in the session
+  logs              the session's and the shell's logs
+
+Run any other uitest command in the container with TRG_UITEST_TARGET=linux,
+for example: TRG_UITEST_TARGET=linux scripts/ui-test/uitest start
+EOF
+}
+
+running() { [[ $($docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null) == true ]]; }
+
+ready() { $docker exec "$name" test -f "$session_env.ready" 2>/dev/null; }
+
+need_running() { running || die "the container isn't running (uitest linux up)"; }
+
+# Paths inside the container (/src/...) as paths on this machine
+host_paths() {
+    if sed -l '' </dev/null 2>/dev/null; then sed -l "s|/src/|$repo/|g"; else sed -u "s|/src/|$repo/|g"; fi
+}
+
+build_image() {
+    $docker build --pull -t "$image" "$here"
+}
+
+up() {
+    if running; then
+        ready && { echo "the container $name is already running"; return; }
+    else
+        $docker image inspect "$image" >/dev/null 2>&1 || build_image
+        $docker rm -f "$name" >/dev/null 2>&1 || true
+        # The container's user (uid 1000) writes the scratch dir in the
+        # mounted repo. Docker Desktop maps that to the user on macOS; on a
+        # Linux host, the dir has to be writable for it.
+        if [[ $(uname) == Linux ]]; then
+            mkdir -p "$repo/target/ui-test"
+            chmod a+rwx "$repo/target/ui-test"
+        fi
+        $docker run -d --init --name "$name" \
+            -v "$repo:/src" \
+            -v trg-uitest-cargo:/home/tester/.cargo \
+            -v trg-uitest-target:/home/tester/target \
+            ${TRG_UITEST_MONITOR:+-e TRG_UITEST_MONITOR="$TRG_UITEST_MONITOR"} \
+            "$image" >/dev/null
+    fi
+    local i
+    for i in $(seq 120); do
+        ready && break
+        running || { $docker logs "$name" 2>&1 | tail -30 >&2; die "the container exited"; }
+        sleep 0.5
+    done
+    ready || { $docker logs "$name" 2>&1 | tail -30 >&2; die "the session isn't ready after 60 s"; }
+    $docker logs "$name" 2>&1 | grep -E 'is ready' || true
+}
+
+cmd=${1:-}
+[[ -n $cmd ]] || { usage; exit 2; }
+shift
+
+case $cmd in
+up) up ;;
+down) $docker rm -f "$name" >/dev/null 2>&1 || true; echo "removed $name" ;;
+restart) $docker rm -f "$name" >/dev/null 2>&1 || true; up ;;
+image) build_image ;;
+status)
+    if running; then
+        echo "container: $name is running"
+        $docker exec "$name" python3 /src/scripts/ui-test/linux/trgui.py check || true
+    else
+        echo "container: not running"
+    fi
+    ;;
+build)
+    need_running
+    $docker exec -w /src "$name" cargo build "$@" 2>&1 | host_paths
+    ;;
+shell)
+    need_running
+    tty=()
+    [[ -t 0 && -t 1 ]] && tty=(-it)
+    if [[ $# == 0 ]]; then set -- bash; fi
+    $docker exec ${tty[@]+"${tty[@]}"} -w /src "$name" bash -c \
+        "set -a; . $session_env; set +a; exec \"\$@\"" bash "$@"
+    ;;
+logs)
+    $docker logs "$name" 2>&1 | grep -vE '^(Setup|Process) ' || true
+    echo "--- gnome-shell"
+    $docker exec "$name" cat /run/user/1000/trg-shell.log 2>/dev/null || true
+    ;;
+uitest)
+    need_running
+    tty=()
+    [[ -t 0 && -t 1 ]] && tty=(-t)
+    $docker exec ${tty[@]+"${tty[@]}"} -w /src -e TRG_CLIENT_DEBUG -e TRG_UITEST_PORT \
+        -e GTK_DEBUG -e G_MESSAGES_DEBUG -e TRG_DEBUG_SNAPSHOT_INTERVAL \
+        "$name" /src/scripts/ui-test/uitest "$@" | host_paths
+    ;;
+-h | --help | help) usage ;;
+*) usage; exit 2 ;;
+esac

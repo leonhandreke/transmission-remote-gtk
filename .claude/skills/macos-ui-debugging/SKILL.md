@@ -17,6 +17,9 @@ with no arguments it lists its commands). It uses:
 - `scripts/ui-test/example-scenario.sh`: a complete example test that ends
   with `PASS`. Copy its patterns.
 
+For the same tool on Linux (a headless GNOME Shell in a container, with
+AT-SPI), see the linux-ui-debugging skill (`TRG_UITEST_TARGET=linux`).
+
 ## Start and stop
 
 ```sh

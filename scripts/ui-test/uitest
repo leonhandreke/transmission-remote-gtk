@@ -1,16 +1,23 @@
 #!/bin/bash
-# UI test environment for transmission-remote-gtk on macOS: an isolated
+# UI test environment for transmission-remote-gtk: an isolated
 # transmission-daemon with test torrents, a scratch app config, and real
 # input (clicks, keys) and screenshots for the app's windows.
+#
+# On macOS, it drives the app on the screen (trgui.swift). With
+# TRG_UITEST_TARGET=linux (or on a Linux host), every command runs inside
+# the Linux test container instead, a headless GNOME Shell session
+# (linux/container, linux/trgui.py); "uitest linux up" starts that.
 #
 # Nothing outside $TRG_UITEST_DIR is read or written: the app runs with
 # XDG_CONFIG_HOME (and the other XDG dirs) pointing there, so the real
 # ~/.config/transmission-remote-gtk is never used.
 #
 # Environment:
-#   TRG_UITEST_DIR   scratch dir (default: <repo>/target/ui-test/env)
+#   TRG_UITEST_TARGET macos (default on macOS) or linux
+#   TRG_UITEST_DIR   scratch dir (default: <repo>/target/ui-test/env, or
+#                    env-linux in the container)
 #   TRG_UITEST_PORT  RPC port of the test daemon (default: 19091)
-#   TRG_UITEST_BIN   the app binary (default: <repo>/target/debug/transmission-remote-gtk)
+#   TRG_UITEST_BIN   the app binary (default: <cargo target dir>/debug/transmission-remote-gtk)
 #   TRG_CLIENT_DEBUG RPC log in app.log (default 1; 0 turns it off)
 #   GTK_DEBUG, G_MESSAGES_DEBUG, ... are passed on to the app.
 #
@@ -20,11 +27,31 @@ set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 repo=$(cd "$here/../.." && pwd)
-dir=${TRG_UITEST_DIR:-$repo/target/ui-test/env}
+
+# Outside the container, the Linux target means: run this in the container
+if [[ ${TRG_IN_CONTAINER:-} != 1 ]]; then
+    [[ ${1:-} == linux ]] && { shift; exec "$here/linux/container" "$@"; }
+    if [[ ${TRG_UITEST_TARGET:-} == linux || $(uname) == Linux ]]; then
+        case ${1:-} in
+        "" | -h | --help | help) ;;
+        *) exec "$here/linux/container" uitest "$@" ;;
+        esac
+    fi
+fi
+
+if [[ ${TRG_IN_CONTAINER:-} == 1 ]]; then
+    platform=linux
+    dir=${TRG_UITEST_DIR:-$repo/target/ui-test/env-linux}
+    bin=${TRG_UITEST_BIN:-${CARGO_TARGET_DIR:-$repo/target}/debug/transmission-remote-gtk}
+    tools=/usr/bin
+else
+    platform=macos
+    dir=${TRG_UITEST_DIR:-$repo/target/ui-test/env}
+    bin=${TRG_UITEST_BIN:-$repo/target/debug/transmission-remote-gtk}
+    tools=/opt/homebrew/bin
+fi
 port=${TRG_UITEST_PORT:-19091}
-bin=${TRG_UITEST_BIN:-$repo/target/debug/transmission-remote-gtk}
 peerport=$((port + 1))
-tools=/opt/homebrew/bin
 helper=$repo/target/ui-test/bin/trgui
 
 die() { echo "uitest: $*" >&2; exit 1; }
@@ -65,10 +92,28 @@ add --px for pixels of a screenshot of that window)
   scroll DY [DX] [--at X Y]
   key COMBO...         e.g. return escape cmd+a shift+f10 ctrl+tab down
   type TEXT
-  ax [--depth N]       dump the app's accessibility tree (only the native
-                       title bar and menu bar; GTK doesn't expose its widgets)
+  ax [--depth N]       dump the app's accessibility tree (macOS: only the
+                       native title bar and menu bar; Linux: all of GTK's
+                       widgets, with their window coordinates)
   menu TITLE...        press a menu bar item, e.g. menu File Quit
-  check                check the macOS permissions
+  check                check the macOS permissions, or the Linux session
+
+Linux only (TRG_UITEST_TARGET=linux; AT-SPI, D-Bus)
+  find [--role R] [--name N] [--exact] [--inside TEXT] [--cell] [--all]
+                       find showing widgets: prints the center (window
+                       coordinates), the window id and the widget; --inside:
+                       in a widget whose label has TEXT (a table row);
+                       --cell: the center of the widget's table cell
+  press [--role R] [--name N] [--exact] [--inside TEXT] [--action A]
+                       do a widget's accessible action (click, toggle, ...)
+  action NAME [PARAM]  activate a GAction over D-Bus: app.quit, win.properties,
+                       "win.connect 0" (PARAM is a GVariant)
+  eval JS              evaluate JavaScript in the GNOME Shell (unsafe mode)
+
+the Linux container (works without TRG_UITEST_TARGET)
+  linux up|down|restart|status|image|logs
+  linux build [ARGS]   cargo build in the container
+  linux shell [CMD]    a shell (or CMD) in the container's session
 EOF
 }
 
@@ -81,7 +126,16 @@ build_helper() {
     fi
 }
 
-trgui() { build_helper; "$helper" "$@"; }
+trgui() {
+    if [[ $platform == linux ]]; then
+        python3 "$here/linux/trgui.py" "$@"
+    else
+        build_helper
+        "$helper" "$@"
+    fi
+}
+
+linux_only() { [[ $platform == linux ]] || die "$1 is only for the Linux target (TRG_UITEST_TARGET=linux)"; }
 
 alive() { [[ -f $1 ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
 
@@ -96,6 +150,10 @@ rpc() { "$tools/transmission-remote" "127.0.0.1:$port" "$@"; }
 main_win() {
     local pid
     pid=$(app_pid)
+    if [[ $platform == linux ]]; then
+        trgui win --pid "$pid"
+        return
+    fi
     trgui windows --pid "$pid" | awk -F'\t' '$3 == "layer=0" {
         split($4, a, " "); split(a[2], s, "x"); area = s[1] * s[2]
         if (area > best) { best = area; id = $1 } } END { if (id) print id }'
@@ -207,7 +265,13 @@ start_app() {
     # the app logs RPC when TRG_CLIENT_DEBUG is set at all; 0 turns it off here
     local debug=(TRG_CLIENT_DEBUG=1)
     [[ ${TRG_CLIENT_DEBUG-1} == 0 ]] && debug=(-u TRG_CLIENT_DEBUG)
-    env "${debug[@]}" XDG_CONFIG_HOME="$dir/xdg/config" XDG_DATA_HOME="$dir/xdg/data" \
+    # Linux: join the GNOME Shell session (its buses, WAYLAND_DISPLAY)
+    local session=()
+    if [[ $platform == linux ]]; then
+        [[ -f ${TRG_SESSION_ENV:-} ]] || die "no GNOME Shell session (uitest linux up)"
+        mapfile -t session <"$TRG_SESSION_ENV"
+    fi
+    env "${debug[@]}" "${session[@]}" XDG_CONFIG_HOME="$dir/xdg/config" XDG_DATA_HOME="$dir/xdg/data" \
         XDG_CACHE_HOME="$dir/xdg/cache" XDG_STATE_HOME="$dir/xdg/state" \
         TRG_DEBUG_SNAPSHOT="$dir/snapshots" \
         "$bin" >>"$dir/app.log" 2>&1 &
@@ -215,7 +279,12 @@ start_app() {
     local i
     for i in $(seq 100); do
         alive "$dir/app.pid" || { tail -20 "$dir/app.log" >&2; die "the app exited"; }
-        [[ -n $(main_win 2>/dev/null) ]] && { echo "app pid $(cat "$dir/app.pid"), window $(main_win)"; return; }
+        if [[ -n $(main_win 2>/dev/null) ]]; then
+            # Linux: leave the overview the shell may show at first
+            [[ $platform == linux ]] && trgui frontmost --pid "$(cat "$dir/app.pid")"
+            echo "app pid $(cat "$dir/app.pid"), window $(main_win)"
+            return
+        fi
         sleep 0.2
     done
     die "the app has no window after 20 s"
@@ -272,9 +341,11 @@ win) main_win ;;
 front) trgui frontmost --pid "$(app_pid)" ;;
 wait-window)
     title=${1:-} timeout=${2:-10}
+    # normal windows: layer 0 on macOS, normal and dialog Meta windows on Linux
+    normal='$3 == "layer=0" || $3 ~ /^type=(normal|dialog|modal-dialog)$/'
     for _ in $(seq $((timeout * 5))); do
         if trgui windows --pid "$(app_pid)" | awk -F'\t' -v t="\"$title\"" \
-            '$3 == "layer=0" && (t == "\"\"" || $7 == t) { found = 1 } END { exit !found }'; then
+            "($normal)"' && (t == "\"\"" || $7 == t) { found = 1 } END { exit !found }'; then
             exit 0
         fi
         sleep 0.2
@@ -286,6 +357,15 @@ shot)
     shift
     out=$dir/shots/$name.png
     mkdir -p "$dir/shots"
+    if [[ $platform == linux ]]; then
+        # the frame of window W, or the union of the app's windows
+        if [[ ${1:-} == --win ]]; then
+            trgui shot "$out" --win "${2:?a window id}"
+        else
+            trgui shot "$out" --pid "$(app_pid)"
+        fi
+        exit
+    fi
     if [[ ${1:-} == --win ]]; then
         screencapture -x -o -l "${2:?a window id}" "$out"
     else
@@ -328,6 +408,8 @@ snap)
     ;;
 ax) trgui ax --pid "$(app_pid)" "$@" ;;
 menu) trgui menu --pid "$(app_pid)" "$@" ;;
+find | press) linux_only "$cmd"; trgui "$cmd" --pid "$(app_pid)" "$@" ;;
+action | eval) linux_only "$cmd"; trgui "$cmd" "$@" ;;
 -h | --help | help) usage ;;
 *) usage; exit 2 ;;
 esac
