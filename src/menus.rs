@@ -411,7 +411,8 @@ pub fn set_accels(app: &gtk::Application) {
         ("win.delete", &["<Shift>Delete"]),
         ("win.resume-all", &["<Shift><Primary>r"]),
         ("win.pause-all", &["<Shift><Primary>p"]),
-        ("win.local-prefs", &["<Primary>s"]),
+        // Ctrl+comma is GNOME's Preferences shortcut; Ctrl+S would be Save
+        ("win.local-prefs", &["<Primary>comma"]),
         ("win.remote-prefs", &["<Alt>s"]),
         ("win.view-states", &["F2"]),
         ("win.filter-dirs", &["F3"]),
