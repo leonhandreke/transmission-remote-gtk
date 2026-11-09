@@ -71,7 +71,7 @@ mod gp_imp {
     impl ObjectSubclass for GeneralPanel {
         const NAME: &'static str = "TrgGeneralPanel";
         type Type = super::GeneralPanel;
-        type ParentType = gtk::Grid;
+        type ParentType = gtk::Box;
 
         fn class_init(klass: &mut Self::Class) {
             klass.bind_template();
@@ -82,14 +82,27 @@ mod gp_imp {
         }
     }
 
-    impl ObjectImpl for GeneralPanel {}
+    impl ObjectImpl for GeneralPanel {
+        fn constructed(&self) {
+            self.parent_constructed();
+            // The theme pads flow box children (room for their selection and
+            // focus), which would indent the groups from the keys around them
+            let css = gtk::CssProvider::new();
+            css.load_from_data("flowbox.general-groups > flowboxchild { padding: 0; }");
+            gtk::style_context_add_provider_for_display(
+                &self.obj().display(),
+                &css,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+    }
     impl WidgetImpl for GeneralPanel {}
-    impl GridImpl for GeneralPanel {}
+    impl BoxImpl for GeneralPanel {}
 }
 
 glib::wrapper! {
     pub struct GeneralPanel(ObjectSubclass<gp_imp::GeneralPanel>)
-        @extends gtk::Grid, gtk::Widget,
+        @extends gtk::Box, gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
 
