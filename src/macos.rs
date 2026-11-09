@@ -1,6 +1,6 @@
 //! macOS support (from main.c and trg-gtk-app.c): finding GTK's data and our
-//! translations in an application bundle or the prefix, and following the
-//! system's light/dark appearance.
+//! translations in an application bundle or the prefix, following the
+//! system's light/dark appearance, and a few AppKit conventions.
 
 use std::path::{Path, PathBuf};
 
@@ -151,3 +151,131 @@ pub use appearance::follow as follow_appearance;
 
 #[cfg(not(target_os = "macos"))]
 pub fn follow_appearance() {}
+
+/// A few AppKit calls, through the Objective-C runtime, for what GTK doesn't
+/// do itself
+#[cfg(target_os = "macos")]
+mod appkit {
+    use gtk::glib::translate::ToGlibPtr;
+    use gtk::prelude::*;
+    use gtk::{gdk, glib};
+    use std::ffi::{CStr, c_char, c_void};
+
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+
+    #[link(name = "objc")]
+    unsafe extern "C" {
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        // called through a pointer of the method's type
+        fn objc_msgSend();
+    }
+
+    unsafe extern "C" {
+        // GTK 4.8
+        fn gdk_macos_surface_get_native_window(surface: *mut gdk::ffi::GdkSurface) -> Id;
+    }
+
+    const NS_WINDOW_STYLE_MASK_MINIATURIZABLE: usize = 1 << 2;
+    const NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_PRIMARY: usize = 1 << 7;
+    const NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_NONE: usize = 1 << 9;
+
+    unsafe fn class(name: &CStr) -> Id {
+        unsafe { objc_getClass(name.as_ptr()) }
+    }
+
+    unsafe fn send<R>(receiver: Id, selector: &CStr) -> R {
+        unsafe {
+            let f: unsafe extern "C" fn(Id, Sel) -> R =
+                std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+            f(receiver, sel_registerName(selector.as_ptr()))
+        }
+    }
+
+    unsafe fn send1<A, R>(receiver: Id, selector: &CStr, arg: A) -> R {
+        unsafe {
+            let f: unsafe extern "C" fn(Id, Sel, A) -> R =
+                std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+            f(receiver, sel_registerName(selector.as_ptr()), arg)
+        }
+    }
+
+    /// macOS offers to merge windows into tabs, with Show Tab Bar and Show
+    /// All Tabs in the View menu, but none of our windows have tabs. This has
+    /// to happen before the windows are made.
+    pub fn disable_window_tabbing() {
+        unsafe {
+            let ns_window = class(c"NSWindow");
+            if !ns_window.is_null() {
+                send1::<bool, ()>(ns_window, c"setAllowsAutomaticWindowTabbing:", false);
+            }
+        }
+    }
+
+    /// Dims the minimize and zoom buttons of a realized window that GTK has
+    /// made non-resizable, as settings windows have them: it can't be
+    /// minimized, and it doesn't go full screen (which the zoom button would
+    /// still offer). GTK only ever changes the resizable flag of the style
+    /// mask after making the NSWindow, and not the collection behavior.
+    pub fn make_fixed(window: &impl IsA<gtk::Native>) {
+        let Some(surface) = window.surface() else { return };
+        if !glib::Type::from_name("GdkMacosSurface").is_some_and(|t| surface.type_().is_a(t)) {
+            return;
+        }
+        let surface: *mut gdk::ffi::GdkSurface = surface.to_glib_none().0;
+        unsafe {
+            let ns_window = gdk_macos_surface_get_native_window(surface);
+            if ns_window.is_null() {
+                return;
+            }
+            let mask: usize = send(ns_window, c"styleMask");
+            let behavior: usize = send(ns_window, c"collectionBehavior");
+            send1::<usize, ()>(
+                ns_window,
+                c"setStyleMask:",
+                mask & !NS_WINDOW_STYLE_MASK_MINIATURIZABLE,
+            );
+            send1::<usize, ()>(
+                ns_window,
+                c"setCollectionBehavior:",
+                (behavior & !NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_PRIMARY)
+                    | NS_WINDOW_COLLECTION_BEHAVIOR_FULL_SCREEN_NONE,
+            );
+        }
+    }
+
+    /// Makes the last menu of the menu bar the application's Help menu, with
+    /// the system's search field. GTK only marks the Window menu, and AppKit
+    /// finds a Help menu by itself only by its English title.
+    pub fn set_help_menu() {
+        unsafe {
+            let app: Id = send(class(c"NSApplication"), c"sharedApplication");
+            let main_menu: Id = send(app, c"mainMenu");
+            if main_menu.is_null() {
+                return;
+            }
+            let count: isize = send(main_menu, c"numberOfItems");
+            if count < 1 {
+                return;
+            }
+            let item: Id = send1(main_menu, c"itemAtIndex:", count - 1);
+            let menu: Id = send(item, c"submenu");
+            if !menu.is_null() {
+                send1::<Id, ()>(app, c"setHelpMenu:", menu);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub use appkit::{disable_window_tabbing, make_fixed, set_help_menu};
+
+#[cfg(not(target_os = "macos"))]
+pub fn disable_window_tabbing() {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn make_fixed(_window: &impl gtk::prelude::IsA<gtk::Native>) {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_help_menu() {}

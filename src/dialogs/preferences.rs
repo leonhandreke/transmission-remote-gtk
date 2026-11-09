@@ -16,10 +16,12 @@ use crate::client::Client;
 use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
+use crate::macos;
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs};
 use crate::protocol::{self as p, get_str};
 use crate::tree_view::{COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView};
+use crate::util;
 
 thread_local! {
     static INSTANCE: RefCell<glib::WeakRef<PreferencesDialog>> = RefCell::new(glib::WeakRef::new());
@@ -325,6 +327,8 @@ mod imp {
         #[template_child]
         pub notebook: TemplateChild<gtk::Notebook>,
         #[template_child]
+        pub connection_scroll: TemplateChild<gtk::ScrolledWindow>,
+        #[template_child]
         pub profile_del_button: TemplateChild<gtk::Button>,
         #[template_child]
         pub profile_combo: TemplateChild<gtk::DropDown>,
@@ -545,6 +549,9 @@ impl PreferencesDialog {
         imp.win.set(Some(win));
 
         d.set_transient_for(Some(win));
+        if util::is_macos() {
+            d.macos_settings_window(win);
+        }
         d.profile_combo_populate();
 
         let simple: Vec<(gtk::Widget, &'static str, u32)> = vec![
@@ -673,6 +680,21 @@ impl PreferencesDialog {
         let imp = self.imp();
         let check = &imp.full_update_check;
         imp.full_update_spin.set_sensitive(check.is_sensitive() && check.is_active());
+    }
+
+    /// This is the application's Settings window on macOS, which has a fixed
+    /// size and its minimize and zoom buttons dimmed. It's sized by its
+    /// content then, so the Connection tab (which is the tallest, and
+    /// scrolls) has to ask for its full height, as far as the screen allows.
+    fn macos_settings_window(&self, win: &MainWindow) {
+        let scroll = &self.imp().connection_scroll;
+        scroll.set_propagate_natural_height(true);
+        if let Some(monitor) = win.surface().and_then(|s| s.display().monitor_at_surface(&s)) {
+            // leaving room for the menu bar, the Dock and the rest of the window
+            scroll.set_max_content_height((monitor.geometry().height() - 300).max(300));
+        }
+        self.set_resizable(false);
+        self.connect_realize(macos::make_fixed);
     }
 
     fn profile_combo_populate(&self) {

@@ -275,3 +275,16 @@ menu macos_window_menu {
     }
   }
 }
+
+// macOS: the Help menu comes last, after the Window menu. About is in the
+// application menu there.
+menu macos_help_menu {
+  submenu {
+    label: _("_Help");
+
+    item {
+      label: _("Transmission Remote Help");
+      action: "app.help";
+    }
+  }
+}

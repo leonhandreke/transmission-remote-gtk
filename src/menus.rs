@@ -7,7 +7,7 @@
 //! macOS in the system menu bar with gtk_application_set_menubar(). There
 //! GTK provides the application menu, with About, Preferences and Quit
 //! (app.about, app.preferences and app.quit), so those aren't repeated in the
-//! other menus.
+//! other menus, and the Help menu links to the project page (app.help).
 
 use std::cell::{Cell, RefCell};
 
@@ -220,6 +220,7 @@ impl MenuBar {
             let edit: gio::MenuModel = builder.object("macos_edit_menu").unwrap();
             menu.insert_item(1, &gio::MenuItem::from_model(&edit, 0));
             append_items(&menu, &builder.object::<gio::MenuModel>("macos_window_menu").unwrap());
+            append_items(&menu, &builder.object::<gio::MenuModel>("macos_help_menu").unwrap());
         } else {
             append_items(&menu, &builder.object::<gio::MenuModel>("help_menu").unwrap());
         }
