@@ -14,13 +14,12 @@ use crate::item::{self, Item, Val};
 use crate::prefs::{self, Prefs};
 use crate::protocol::{self as p, get_str};
 use crate::torrent_model::{self as tm, Stats, TorrentItemExt, TorrentModel};
-use crate::tree_view;
 use crate::util::{self, HostRegex};
 
 pub const FILTER_FLAG_TRACKER: u32 = 1 << 14;
 pub const FILTER_FLAG_DIR: u32 = 1 << 15;
 
-/// The columns of the rows. A row without a name is the separator.
+/// The columns of the rows
 const COL_ICON: usize = 0;
 const COL_NAME: usize = 1;
 const COL_COUNT: usize = 2;
@@ -28,10 +27,10 @@ const COL_BIT: usize = 3;
 const COL_SERIAL: usize = 4;
 const COL_INDEX: usize = 5;
 
-fn new_state_item(icon: Option<&str>, name: Option<&str>, bit: u32, index: u32) -> Item {
+fn new_state_item(icon: &str, name: &str, bit: u32, index: u32) -> Item {
     Item::new(vec![
-        Val::Str(icon.map(str::to_string)),
-        Val::Str(name.map(str::to_string)),
+        Val::Str(Some(icon.to_string())),
+        Val::Str(Some(name.to_string())),
         Val::I64(0),
         Val::U32(bit),
         Val::I64(0),
@@ -62,6 +61,8 @@ mod imp {
         pub scrolled: RefCell<Option<gtk::ScrolledWindow>>,
         pub list_view: RefCell<Option<gtk::ListView>>,
         pub selection: gtk::SingleSelection,
+        /// The store, in sections (see build)
+        pub sections: gtk::SortListModel,
         pub store: gio::ListStore,
         pub search: RefCell<String>,
         pub search_time: Cell<i64>,
@@ -81,10 +82,12 @@ mod imp {
     impl Default for StateSelector {
         fn default() -> Self {
             let store = gio::ListStore::new::<Item>();
+            let sections = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
             Self {
                 scrolled: Default::default(),
                 list_view: Default::default(),
-                selection: gtk::SingleSelection::new(Some(store.clone())),
+                selection: gtk::SingleSelection::new(Some(sections.clone())),
+                sections,
                 store,
                 search: Default::default(),
                 search_time: Cell::new(0),
@@ -280,7 +283,7 @@ impl StateSelector {
     }
 
     fn filter_item_new(icon: &str, name: &str, bit: u32, serial: i64) -> Item {
-        let item = new_state_item(Some(icon), Some(name), bit, 0);
+        let item = new_state_item(icon, name, bit, 0);
         item.set(COL_SERIAL, serial);
         item.set(COL_COUNT, 1i64);
         item
@@ -380,21 +383,16 @@ impl StateSelector {
 
     pub fn set_directories_first(&self, first: bool) {
         let imp = self.imp();
-        imp.dirs_first.set(first);
+        // the sections' order changes only while they're empty
         self.remove_dynamic(true, None);
         self.remove_dynamic(false, None);
+        imp.dirs_first.set(first);
         self.update_filters(imp.show_trackers.get(), imp.show_dirs.get());
     }
 
     /// Adds a state row at pos (or at the end); its index (for restoring the
     /// selection) is the number of rows before it was added.
-    fn add_state(
-        &self,
-        pos: Option<u32>,
-        icon: Option<&str>,
-        name: Option<&str>,
-        flag: u32,
-    ) -> Item {
+    fn add_state(&self, pos: Option<u32>, icon: &str, name: &str, flag: u32) -> Item {
         let imp = self.imp();
         let item = new_state_item(icon, name, flag, imp.store.n_items());
         match pos {
@@ -423,13 +421,11 @@ impl StateSelector {
         let imp = self.imp();
         let has_error = imp.states.borrow().error.is_some();
         if stats.error > 0 && !has_error {
-            let pos = (imp.n_categories.get() - 1).max(0) as u32;
-            let item = self.add_state(
-                Some(pos),
-                Some("dialog-warning"),
-                Some(&tr("Error")),
-                p::TORRENT_FLAG_ERROR,
-            );
+            let pos = imp.n_categories.get() as u32;
+            let item =
+                self.add_state(Some(pos), "dialog-warning", &tr("Error"), p::TORRENT_FLAG_ERROR);
+            // not there at startup, so it isn't restored
+            item.set(COL_INDEX, u32::MAX);
             imp.states.borrow_mut().error = Some(item);
         } else if stats.error < 1 && has_error {
             let item = imp.states.borrow_mut().error.take();
@@ -479,14 +475,14 @@ impl StateSelector {
         if enabled {
             let down = self.add_state(
                 Some(2),
-                Some("media-seek-backward"),
-                Some(&tr("Queue Down")),
+                "media-seek-backward",
+                &tr("Queue Down"),
                 p::TORRENT_FLAG_DOWNLOADING_WAIT,
             );
             let up = self.add_state(
                 Some(4),
-                Some("media-seek-forward"),
-                Some(&tr("Queue Up")),
+                "media-seek-forward",
+                &tr("Queue Up"),
                 p::TORRENT_FLAG_SEEDING_WAIT,
             );
             // their indices when they were added at the start
@@ -538,84 +534,12 @@ impl StateSelector {
         imp.search.borrow_mut().push(c);
         let needle = glib::casefold(imp.search.borrow().as_str()).to_string();
 
-        let found = item::items(&imp.store).position(|item| {
+        let found = item::items(&imp.selection).position(|item| {
             item.string(COL_NAME).is_some_and(|n| glib::casefold(&n).starts_with(&needle))
         });
         if let Some(i) = found {
             self.select(i as u32);
         }
-        true
-    }
-
-    /// The list item of a row widget (a child of the list view)
-    fn row_list_item(row: &gtk::Widget) -> Option<gtk::ListItem> {
-        let mut child = row.first_child();
-        while let Some(c) = child {
-            if let Some(li) = unsafe { c.data::<glib::WeakRef<gtk::ListItem>>("trg-list-item") }
-                .and_then(|p| unsafe { p.as_ref() }.upgrade())
-            {
-                return Some(li);
-            }
-            child = c.next_sibling();
-        }
-        None
-    }
-
-    /// The position of the row with the focus
-    fn focus_position(&self) -> Option<u32> {
-        let lv = self.imp().list_view.borrow().clone()?;
-        let mut w = lv.root()?.focus()?;
-        if !w.is_ancestor(&lv) {
-            return None;
-        }
-        // up to the row widget, a child of the list view
-        while w.parent().as_ref() != Some(lv.upcast_ref()) {
-            w = w.parent()?;
-        }
-        Self::row_list_item(&w).map(|li| li.position())
-    }
-
-    /// The row widget that shows position
-    fn row_widget(&self, position: u32) -> Option<gtk::Widget> {
-        let lv = self.imp().list_view.borrow().clone()?;
-        let mut child = lv.first_child();
-        while let Some(c) = child {
-            if Self::row_list_item(&c).is_some_and(|li| li.position() == position) {
-                return Some(c);
-            }
-            child = c.next_sibling();
-        }
-        None
-    }
-
-    /// Moving the cursor up or down onto the separator moves it past it
-    fn skip_separator(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
-        let step: i64 = match keyval {
-            gdk::Key::Up | gdk::Key::KP_Up => -1,
-            gdk::Key::Down | gdk::Key::KP_Down => 1,
-            _ => return false,
-        };
-        // not Caps Lock, which isn't a modifier here
-        if state.intersects(gtk::accelerator_get_default_mod_mask()) {
-            return false;
-        }
-        let store = &self.imp().store;
-        let n = store.n_items() as i64;
-        let Some(pos) = self.focus_position().map(|p| p as i64) else { return false };
-        if (step < 0 && pos < 2) || pos + 2 * step >= n {
-            return false;
-        }
-        let item = store.item((pos + step) as u32).and_downcast::<Item>().unwrap();
-        if item.string(COL_NAME).is_some() {
-            return false;
-        }
-        let target = (pos + 2 * step) as u32;
-        // The focus moves along, or the next key press would start above the
-        // separator again and land on the same row
-        if let Some(row) = self.row_widget(target) {
-            row.grab_focus();
-        }
-        self.select(target);
         true
     }
 
@@ -649,6 +573,17 @@ impl StateSelector {
         true
     }
 
+    /// The section of a row (its order): the states, then the directories
+    /// and the trackers, in the order that's set
+    fn section(&self, item: &glib::Object) -> u32 {
+        let dirs_first = self.imp().dirs_first.get();
+        match item.downcast_ref::<Item>().map(|i| i.uint(COL_BIT)) {
+            Some(FILTER_FLAG_DIR) => 2 - dirs_first as u32,
+            Some(FILTER_FLAG_TRACKER) => 1 + dirs_first as u32,
+            _ => 0,
+        }
+    }
+
     fn build(&self) {
         let imp = self.imp();
         let prefs = self.prefs();
@@ -657,61 +592,64 @@ impl StateSelector {
         imp.show_trackers.set(prefs.get_bool(prefs::KEY_FILTER_TRACKERS, prefs::GLOBAL));
         imp.dirs_first.set(prefs.get_bool(prefs::KEY_DIRECTORIES_FIRST, prefs::GLOBAL));
 
+        // The states, directories and trackers are sections of the list. The
+        // store is in their order already, so the sort keeps it.
+        let weak = self.downgrade();
+        let sections = gtk::CustomSorter::new(move |a, b| {
+            let Some(s) = weak.upgrade() else { return gtk::Ordering::Equal };
+            s.section(a).cmp(&s.section(b)).into()
+        });
+        imp.sections.set_section_sorter(Some(&sections));
+
         let f = &p::TORRENT_FLAG_DOWNLOADING;
         let s = States {
-            all: Some(self.add_state(None, Some("help-about"), Some(&tr("All")), 0)),
-            down: Some(self.add_state(None, Some("go-down"), Some(&tr("Downloading")), *f)),
+            all: Some(self.add_state(None, "help-about", &tr("All"), 0)),
+            down: Some(self.add_state(None, "go-down", &tr("Downloading"), *f)),
             down_wait: Some(self.add_state(
                 None,
-                Some("media-seek-backward"),
-                Some(&tr("Queue Down")),
+                "media-seek-backward",
+                &tr("Queue Down"),
                 p::TORRENT_FLAG_DOWNLOADING_WAIT,
             )),
-            seeding: Some(self.add_state(
-                None,
-                Some("go-up"),
-                Some(&tr("Seeding")),
-                p::TORRENT_FLAG_SEEDING,
-            )),
+            seeding: Some(self.add_state(None, "go-up", &tr("Seeding"), p::TORRENT_FLAG_SEEDING)),
             seed_wait: Some(self.add_state(
                 None,
-                Some("media-seek-forward"),
-                Some(&tr("Queue Up")),
+                "media-seek-forward",
+                &tr("Queue Up"),
                 p::TORRENT_FLAG_SEEDING_WAIT,
             )),
             paused: Some(self.add_state(
                 None,
-                Some("media-playback-pause"),
-                Some(&tr("Paused")),
+                "media-playback-pause",
+                &tr("Paused"),
                 p::TORRENT_FLAG_PAUSED,
             )),
             complete: Some(self.add_state(
                 None,
-                Some("trg-gtk-apply"),
-                Some(&tr("Complete")),
+                "trg-gtk-apply",
+                &tr("Complete"),
                 p::TORRENT_FLAG_COMPLETE,
             )),
             incomplete: Some(self.add_state(
                 None,
-                Some("edit-select-all"),
-                Some(&tr("Incomplete")),
+                "edit-select-all",
+                &tr("Incomplete"),
                 p::TORRENT_FLAG_INCOMPLETE,
             )),
             active: Some(self.add_state(
                 None,
-                Some("network-workgroup"),
-                Some(&tr("Active")),
+                "network-workgroup",
+                &tr("Active"),
                 p::TORRENT_FLAG_ACTIVE,
             )),
             checking: Some(self.add_state(
                 None,
-                Some("view-refresh"),
-                Some(&tr("Checking")),
+                "view-refresh",
+                &tr("Checking"),
                 p::TORRENT_FLAG_CHECKING_ANY,
             )),
             ..Default::default()
         };
-        self.add_state(None, None, None, 0);
         *imp.states.borrow_mut() = s;
 
         // Always one filter selected, "All" by default
@@ -725,7 +663,7 @@ impl StateSelector {
         });
 
         let mut index = prefs.get_int(prefs::STATE_SELECTOR_LAST, prefs::GLOBAL);
-        if index < 0 || index >= (imp.n_categories.get() - 1) as i64 {
+        if index < 0 || index >= imp.n_categories.get() as i64 {
             index = 0;
         }
         imp.selection.set_selected(index as u32);
@@ -750,28 +688,12 @@ impl StateSelector {
             count.set_width_chars(2);
             count.set_xalign(1.0);
             bx.append(&count);
-            let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
-            sep.set_hexpand(true);
-            sep.set_valign(gtk::Align::Center);
-            bx.append(&sep);
-            tree_view::mark_row_widget(&bx, li);
             li.set_child(Some(&bx));
         });
         factory.connect_bind(|_, obj| {
             let Some(li) = obj.downcast_ref::<gtk::ListItem>() else { return };
             let Some(item) = li.item().and_downcast::<Item>() else { return };
-            let separator = item.string(COL_NAME).is_none();
-            // the separator row (between the states and the other filters)
-            // shows only its separator, and can't be selected
             let bx = li.child().unwrap();
-            let mut child = bx.first_child();
-            while let Some(c) = child {
-                c.set_visible(c.is::<gtk::Separator>() == separator);
-                child = c.next_sibling();
-            }
-            li.set_selectable(!separator);
-            li.set_activatable(!separator);
-            set_row_separator(&bx, separator);
 
             // The trackers' and directories' names can be long (paths). They
             // don't ask for any room, so only the states set the sidebar's
@@ -780,9 +702,6 @@ impl StateSelector {
             let bit = item.uint(COL_BIT);
             let dynamic = bit == FILTER_FLAG_DIR || bit == FILTER_FLAG_TRACKER;
             bx.set_tooltip_text(item.string(COL_NAME).as_deref().filter(|_| dynamic));
-            if separator {
-                return;
-            }
             let name = bx.first_child().and_then(|c| c.next_sibling()).and_downcast::<gtk::Label>();
             if let Some(name) = name {
                 name.set_ellipsize(match bit {
@@ -813,7 +732,28 @@ impl StateSelector {
             }
         });
 
+        // A line between the sections, none above the first one (the states)
+        let headers = gtk::SignalListItemFactory::new();
+        headers.connect_setup(|_, obj| {
+            let Some(header) = obj.downcast_ref::<gtk::ListHeader>() else { return };
+            let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+            // in line with the rows' content (the theme's margin and padding
+            // of .navigation-sidebar > row), 6px from the rows above (with
+            // their 2px margin) and below
+            sep.set_margin_start(13);
+            sep.set_margin_end(13);
+            sep.set_margin_top(4);
+            sep.set_margin_bottom(6);
+            header
+                .bind_property("start", &sep, "visible")
+                .transform_to(|_, start: u32| Some(start > 0))
+                .sync_create()
+                .build();
+            header.set_child(Some(&sep));
+        });
+
         let lv = gtk::ListView::new(Some(imp.selection.clone()), Some(factory));
+        lv.set_header_factory(Some(&headers));
         lv.add_css_class("navigation-sidebar");
 
         let keys = gtk::EventControllerKey::new();
@@ -823,28 +763,6 @@ impl StateSelector {
             _ => glib::Propagation::Proceed,
         });
         lv.add_controller(keys);
-
-        // before the list view's own cursor keys
-        let keys = gtk::EventControllerKey::new();
-        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let weak = self.downgrade();
-        keys.connect_key_pressed(move |_, keyval, _, state| match weak.upgrade() {
-            Some(s) if s.skip_separator(keyval, state) => glib::Propagation::Stop,
-            _ => glib::Propagation::Proceed,
-        });
-        lv.add_controller(keys);
-
-        // The separator row is a line with some room, without a row's height and hover
-        let css = gtk::CssProvider::new();
-        css.load_from_string(
-            ".navigation-sidebar > row.trg-separator { \
-                min-height: 0; padding-top: 4px; padding-bottom: 4px; background: none; }",
-        );
-        gtk::style_context_add_provider_for_display(
-            &self.display(),
-            &css,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
 
         let scrolled = util::scrolled_window(&lv);
         // the sidebar is as wide as the states (at least), see the bind above
@@ -860,29 +778,7 @@ impl StateSelector {
     }
 }
 
-/// Makes the row widget of a list item's child (its parent) the separator, or
-/// not: it can't take the focus (from a click or the keyboard; the list item's
-/// "focusable" needs GTK 4.12), and isn't styled like a row (see build).
-fn set_row_separator(child: &gtk::Widget, separator: bool) {
-    use glib::translate::{IntoGlib, ToGlibPtr};
-    // Only raw calls: while a new row is set up and bound it's still
-    // floating, and a wrapper of it would sink that reference and free it.
-    unsafe {
-        let row = gtk::ffi::gtk_widget_get_parent(child.to_glib_none().0);
-        if row.is_null() {
-            return;
-        }
-        gtk::ffi::gtk_widget_set_focusable(row, (!separator).into_glib());
-        let class = c"trg-separator".as_ptr();
-        if separator {
-            gtk::ffi::gtk_widget_add_css_class(row, class);
-        } else {
-            gtk::ffi::gtk_widget_remove_css_class(row, class);
-        }
-    }
-}
-
-/// The rows: an icon, the name and the count, or a separator
+/// The rows: an icon, the name and the count
 fn row_refresh(li: &gtk::ListItem) {
     let (Some(item), Some(bx)) = (li.item().and_downcast::<Item>(), li.child()) else {
         return;
