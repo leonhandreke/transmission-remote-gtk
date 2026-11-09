@@ -12,6 +12,9 @@ use crate::main_window::MainWindow;
 use crate::menus;
 use crate::util;
 
+/// The project page, which is the help on macOS
+const HOMEPAGE: &str = "https://github.com/transmission-remote-gtk/transmission-remote-gtk";
+
 mod imp {
     use super::*;
 
@@ -107,8 +110,8 @@ impl App {
     }
 
     /// macOS conventions: the menu in the system menu bar, with About and
-    /// Preferences in the application menu, window actions, and following
-    /// dark mode.
+    /// Preferences in the application menu, window actions, a Help menu, and
+    /// following dark mode.
     fn macos_startup(&self, window: &MainWindow) {
         self.add_simple_action("about", |app| {
             if let Some(w) = app.main_window() {
@@ -131,7 +134,8 @@ impl App {
             }
         });
         self.add_simple_action("zoom", |app| {
-            if let Some(w) = app.focused_window() {
+            // a window of a fixed size (Settings) would only be moved
+            if let Some(w) = app.focused_window().filter(|w| w.is_resizable()) {
                 if w.is_maximized() {
                     w.unmaximize();
                 } else {
@@ -140,7 +144,20 @@ impl App {
             }
         });
 
+        self.add_simple_action("help", |app| {
+            gtk::UriLauncher::new(HOMEPAGE).launch(
+                app.focused_window().as_ref(),
+                gio::Cancellable::NONE,
+                |result| {
+                    if let Err(e) = result {
+                        glib::g_warning!("trg", "Couldn't open {HOMEPAGE}: {e}");
+                    }
+                },
+            );
+        });
+
         self.set_menubar(Some(&window.menu_model()));
+        crate::macos::set_help_menu();
         crate::macos::follow_appearance();
     }
 
@@ -151,6 +168,10 @@ impl App {
             Some(w) => w.close(),
             None => app.quit(),
         });
+
+        if util::is_macos() {
+            crate::macos::disable_window_tabbing();
+        }
 
         let client = self.imp().client.borrow().clone().unwrap();
         let window = MainWindow::new(self.upcast_ref(), &client);
