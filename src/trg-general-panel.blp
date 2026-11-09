@@ -1,565 +1,638 @@
 using Gtk 4.0;
-
-template $TrgGeneralPanel: Grid {
-  row-spacing: 6;
-  column-spacing: 8;
+// The keys are bold labels, the values plain selectable labels. The name,
+// location, comment, hash and error span the panel's width (and wrap); the
+// other values are in three groups, in a flow box, which puts them side by
+// side when there's room and below each other when there isn't.
+template $TrgGeneralPanel: Box {
+  orientation: vertical;
+  spacing: 6;
+  margin-top: 12;
+  margin-bottom: 12;
+  margin-start: 12;
+  margin-end: 12;
   sensitive: false;
 
-  Label {
-    label: _("Name");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
+  Grid {
+    row-spacing: 6;
+    column-spacing: 12;
+
+    Label name_key {
+      label: _("Name");
+      xalign: 0;
+      valign: baseline;
+
+      styles [
+        "heading",
+      ]
+
+      layout {
+        column: 0;
+        row: 0;
+      }
+    }
+
+    Label gen_name_label {
+      xalign: 0;
+      valign: baseline;
+      hexpand: true;
+      wrap: true;
+      wrap-mode: word_char;
+      selectable: true;
+
+      layout {
+        column: 1;
+        row: 0;
+      }
+    }
+  }
+
+  FlowBox {
+    selection-mode: none;
+    min-children-per-line: 1;
+    max-children-per-line: 3;
+    column-spacing: 24;
+    row-spacing: 6;
+    halign: start;
 
     styles [
-      "heading",
+      "general-groups",
     ]
 
-    layout {
-      column: 0;
-      row: 0;
+    FlowBoxChild {
+      focusable: false;
+
+      Grid {
+        row-spacing: 6;
+        column-spacing: 12;
+
+        Label size_key {
+          label: _("Size");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 0;
+          }
+        }
+
+        Label gen_size_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 0;
+          }
+        }
+
+        Label eta_key {
+          label: _("ETA");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 1;
+          }
+        }
+
+        Label gen_eta_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 1;
+          }
+        }
+
+        Label seeders_key {
+          label: _("Seeders");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 2;
+          }
+        }
+
+        Label gen_seeders_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 2;
+          }
+        }
+
+        Label leechers_key {
+          label: _("Leechers");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 3;
+          }
+        }
+
+        Label gen_leechers_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 3;
+          }
+        }
+
+        Label status_key {
+          label: _("Status");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 4;
+          }
+        }
+
+        Label gen_status_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 4;
+          }
+        }
+      }
+    }
+
+    FlowBoxChild {
+      focusable: false;
+
+      Grid {
+        row-spacing: 6;
+        column-spacing: 12;
+
+        Label down_rate_key {
+          label: _("Rate Down");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 0;
+          }
+        }
+
+        Label gen_down_rate_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 0;
+          }
+        }
+
+        Label up_rate_key {
+          label: _("Rate Up");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 1;
+          }
+        }
+
+        Label gen_up_rate_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 1;
+          }
+        }
+
+        Label ratio_key {
+          label: _("Ratio");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 2;
+          }
+        }
+
+        Label gen_ratio_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 2;
+          }
+        }
+
+        Label limit_key {
+          label: _("Ratio limit");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 3;
+          }
+        }
+
+        Label gen_limit_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 3;
+          }
+        }
+
+        Label priority_key {
+          label: _("Priority");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 4;
+          }
+        }
+
+        Label gen_priority_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 4;
+          }
+        }
+      }
+    }
+
+    FlowBoxChild {
+      focusable: false;
+
+      Grid {
+        row-spacing: 6;
+        column-spacing: 12;
+
+        Label completed_key {
+          label: _("Completed");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 0;
+          }
+        }
+
+        Label gen_completed_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 0;
+          }
+        }
+
+        Label downloaded_key {
+          label: _("Downloaded");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 1;
+          }
+        }
+
+        Label gen_downloaded_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 1;
+          }
+        }
+
+        Label uploaded_key {
+          label: _("Uploaded");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 2;
+          }
+        }
+
+        Label gen_uploaded_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 2;
+          }
+        }
+
+        Label corrupted_key {
+          label: _("Corrupted");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 3;
+          }
+        }
+
+        Label gen_corrupted_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 3;
+          }
+        }
+
+        Label completedat_key {
+          label: _("Completed At");
+          xalign: 0;
+          valign: baseline;
+
+          styles [
+            "heading",
+          ]
+
+          layout {
+            column: 0;
+            row: 4;
+          }
+        }
+
+        Label gen_completedat_label {
+          xalign: 0;
+          valign: baseline;
+          width-chars: 10;
+          selectable: true;
+
+          layout {
+            column: 1;
+            row: 4;
+          }
+        }
+      }
     }
   }
 
-  Label gen_name_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
+  Grid {
+    row-spacing: 6;
+    column-spacing: 12;
 
-    layout {
-      column: 1;
-      row: 0;
-      column-span: 6;
+    Label downloaddir_key {
+      label: _("Location");
+      xalign: 0;
+      valign: baseline;
+
+      styles [
+        "heading",
+      ]
+
+      layout {
+        column: 0;
+        row: 0;
+      }
+    }
+
+    Label gen_downloaddir_label {
+      xalign: 0;
+      valign: baseline;
+      hexpand: true;
+      wrap: true;
+      wrap-mode: word_char;
+      selectable: true;
+
+      layout {
+        column: 1;
+        row: 0;
+      }
+    }
+
+    Label comment_key {
+      label: _("Comment");
+      xalign: 0;
+      valign: baseline;
+
+      styles [
+        "heading",
+      ]
+
+      layout {
+        column: 0;
+        row: 1;
+      }
+    }
+
+    Label gen_comment_label {
+      xalign: 0;
+      valign: baseline;
+      hexpand: true;
+      wrap: true;
+      wrap-mode: word_char;
+      selectable: true;
+
+      layout {
+        column: 1;
+        row: 1;
+      }
+    }
+
+    Label hash_key {
+      label: _("Hash");
+      xalign: 0;
+      valign: baseline;
+
+      styles [
+        "heading",
+      ]
+
+      layout {
+        column: 0;
+        row: 2;
+      }
+    }
+
+    Label gen_hash_label {
+      xalign: 0;
+      valign: baseline;
+      hexpand: true;
+      wrap: true;
+      wrap-mode: word_char;
+      selectable: true;
+
+      layout {
+        column: 1;
+        row: 2;
+      }
+    }
+
+    Label error_key_label {
+      xalign: 0;
+      valign: baseline;
+
+      layout {
+        column: 0;
+        row: 3;
+      }
+    }
+
+    Label gen_error_label {
+      xalign: 0;
+      valign: baseline;
+      hexpand: true;
+      wrap: true;
+      wrap-mode: word_char;
+      selectable: true;
+
+      layout {
+        column: 1;
+        row: 3;
+      }
     }
   }
-
-  Label {
-    label: _("Size");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 0;
-      row: 1;
-    }
-  }
-
-  Label gen_size_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 1;
-    }
-  }
-
-  Label {
-    label: _("Rate Down");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 2;
-      row: 1;
-    }
-  }
-
-  Label gen_down_rate_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 3;
-      row: 1;
-    }
-  }
-
-  Label {
-    label: _("Completed");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 4;
-      row: 1;
-    }
-  }
-
-  Label gen_completed_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 5;
-      row: 1;
-    }
-  }
-
-  Label {
-    label: _("ETA");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 0;
-      row: 2;
-    }
-  }
-
-  Label gen_eta_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 2;
-    }
-  }
-
-  Label {
-    label: _("Rate Up");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 2;
-      row: 2;
-    }
-  }
-
-  Label gen_up_rate_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 3;
-      row: 2;
-    }
-  }
-
-  Label {
-    label: _("Downloaded");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 4;
-      row: 2;
-    }
-  }
-
-  Label gen_downloaded_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 5;
-      row: 2;
-    }
-  }
-
-  Label {
-    label: _("Seeders");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 0;
-      row: 3;
-    }
-  }
-
-  Label gen_seeders_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 3;
-    }
-  }
-
-  Label {
-    label: _("Ratio");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 2;
-      row: 3;
-    }
-  }
-
-  Label gen_ratio_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 3;
-      row: 3;
-    }
-  }
-
-  Label {
-    label: _("Uploaded");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 4;
-      row: 3;
-    }
-  }
-
-  Label gen_uploaded_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 5;
-      row: 3;
-    }
-  }
-
-  Label {
-    label: _("Leechers");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 0;
-      row: 4;
-    }
-  }
-
-  Label gen_leechers_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 4;
-    }
-  }
-
-  Label {
-    label: _("Ratio limit");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 2;
-      row: 4;
-    }
-  }
-
-  Label gen_limit_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 3;
-      row: 4;
-    }
-  }
-
-  Label {
-    label: _("Corrupted");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 4;
-      row: 4;
-    }
-  }
-
-  Label gen_corrupted_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 5;
-      row: 4;
-    }
-  }
-
-  Label {
-    label: _("Status");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 0;
-      row: 5;
-    }
-  }
-
-  Label gen_status_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 5;
-    }
-  }
-
-  Label {
-    label: _("Priority");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 2;
-      row: 5;
-    }
-  }
-
-  Label gen_priority_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 3;
-      row: 5;
-    }
-  }
-
-  Label {
-    label: _("Completed At");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 4;
-      row: 5;
-    }
-  }
-
-  Label gen_completedat_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 5;
-      row: 5;
-    }
-  }
-
-  Label {
-    label: _("Location");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 0;
-      row: 6;
-    }
-  }
-
-  Label gen_downloaddir_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 6;
-      column-span: 6;
-    }
-  }
-
-  Label {
-    label: _("Comment");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 0;
-      row: 7;
-    }
-  }
-
-  Label gen_comment_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 7;
-    }
-  }
-
-  Label {
-    label: _("Hash");
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    styles [
-      "heading",
-    ]
-
-    layout {
-      column: 0;
-      row: 8;
-    }
-  }
-
-  Label gen_hash_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 8;
-    }
-  }
-
-  Label error_key_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-
-    layout {
-      column: 0;
-      row: 9;
-    }
-  }
-
-  Label gen_error_label {
-    xalign: 0;
-    yalign: 0;
-    width-chars: 10;
-    selectable: true;
-
-    layout {
-      column: 1;
-      row: 9;
-      column-span: 6;
-    }
-  }
+}
+
+// One width for all the keys, so the values line up in a column when the
+// groups are below each other
+SizeGroup {
+  mode: horizontal;
+
+  widgets [
+    name_key,
+    size_key,
+    eta_key,
+    seeders_key,
+    leechers_key,
+    status_key,
+    down_rate_key,
+    up_rate_key,
+    ratio_key,
+    limit_key,
+    priority_key,
+    completed_key,
+    downloaded_key,
+    uploaded_key,
+    corrupted_key,
+    completedat_key,
+    downloaddir_key,
+    comment_key,
+    hash_key,
+    error_key_label,
+  ]
 }
