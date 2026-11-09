@@ -88,7 +88,7 @@ mod gp_imp {
             // The theme pads flow box children (room for their selection and
             // focus), which would indent the groups from the keys around them
             let css = gtk::CssProvider::new();
-            css.load_from_data("flowbox.general-groups > flowboxchild { padding: 0; }");
+            css.load_from_string("flowbox.general-groups > flowboxchild { padding: 0; }");
             gtk::style_context_add_provider_for_display(
                 &self.obj().display(),
                 &css,

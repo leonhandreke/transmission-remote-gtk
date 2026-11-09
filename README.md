@@ -13,7 +13,7 @@ It is written in Rust, with [gtk4-rs](https://gtk-rs.org) and libsoup.
 The following packages are required dependencies for building and running
 transmission-remote-gtk:
 
- - gtk >= 4.10
+ - gtk >= 4.12
  - glib >= 2.70 (including gio)
  - libsoup >= 3.0
  - GNU gettext

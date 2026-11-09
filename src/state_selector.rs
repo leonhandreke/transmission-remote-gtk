@@ -836,7 +836,7 @@ impl StateSelector {
 
         // The separator row is a line with some room, without a row's height and hover
         let css = gtk::CssProvider::new();
-        css.load_from_data(
+        css.load_from_string(
             ".navigation-sidebar > row.trg-separator { \
                 min-height: 0; padding-top: 4px; padding-bottom: 4px; background: none; }",
         );

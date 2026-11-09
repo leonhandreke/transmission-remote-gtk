@@ -16,7 +16,7 @@ datadir = get_option('datadir')
 # The application is written in Rust and built with cargo (see Cargo.toml and
 # build.rs). The dependencies are checked here too, so that a missing one is
 # reported by meson.
-dependency('gtk4', version: '>= 4.10')
+dependency('gtk4', version: '>= 4.12')
 dependency('glib-2.0', version: '>= 2.70')
 dependency('gio-2.0', version: '>= 2.70')
 dependency('libsoup-3.0', version: '>= 3.0')
