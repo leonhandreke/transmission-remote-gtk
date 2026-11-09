@@ -254,13 +254,8 @@ impl Prefs {
             ] {
                 d.insert(key.into(), json!(true));
             }
-            st.file = glib::user_config_dir()
-                .join(
-                    glib::application_name()
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| env!("TRG_PACKAGE_NAME").to_string()),
-                )
-                .join(FILENAME);
+            // Not the application name, which is translated and for display
+            st.file = glib::user_config_dir().join(env!("TRG_PACKAGE_NAME")).join(FILENAME);
         }
         prefs
     }

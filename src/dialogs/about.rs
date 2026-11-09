@@ -1,5 +1,6 @@
 //! The about dialog (trg-about-window.c)
 
+use gtk::glib;
 use gtk::prelude::*;
 
 pub fn about_window_new(parent: Option<&gtk::Window>) -> gtk::AboutDialog {
@@ -9,7 +10,7 @@ pub fn about_window_new(parent: Option<&gtk::Window>) -> gtk::AboutDialog {
 
     dialog.set_transient_for(parent);
     dialog.set_logo_icon_name(Some(env!("TRG_PACKAGE_NAME")));
-    dialog.set_program_name(Some(env!("TRG_PACKAGE_NAME")));
+    dialog.set_program_name(glib::application_name().as_deref());
     dialog.set_version(Some(env!("CARGO_PKG_VERSION")));
 
     dialog

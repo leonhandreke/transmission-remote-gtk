@@ -86,21 +86,21 @@ On macOS, install the dependencies with [Homebrew](https://brew.sh):
 $ brew install meson rust blueprint-compiler gtk4 libsoup gettext librsvg adwaita-icon-theme glib-networking
 ```
 
-Building also creates an application bundle, `"$builddir/Transmission Remote GTK.app"`,
+Building also creates an application bundle, `"$builddir/Transmission Remote.app"`,
 which can be started from the Finder and opens `.torrent` files. It runs the
 executable from the build directory and uses the libraries and data installed
 by Homebrew (disable it with `-Dmacos_bundle=disabled`). To make it the default
 application, link it into `/Applications`:
 
 ```
-$ ln -s "$PWD/$builddir/Transmission Remote GTK.app" /Applications/
+$ ln -s "$PWD/$builddir/Transmission Remote.app" /Applications/
 ```
 
 A self-contained bundle, which includes all libraries and data and doesn't need
 Homebrew, and a disk image containing it can be made with:
 
 ```
-$ meson compile -C "$builddir" macos-bundle  # $builddir/macos-dist/Transmission Remote GTK.app
+$ meson compile -C "$builddir" macos-bundle  # $builddir/macos-dist/Transmission Remote.app
 $ meson compile -C "$builddir" macos-dmg     # also $builddir/macos-dist/transmission-remote-gtk-<version>-macos-<arch>.dmg
 ```
 

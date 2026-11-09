@@ -8,5 +8,8 @@
     <file alias="icons/24x24/actions/trg-gtk-disconnect.png">icons/trg-gtk-disconnect-24x24.png</file>
     <file alias="icons/16x16/status/alt-speed-on.png">icons/turtle-blue.png</file>
     <file alias="icons/16x16/status/alt-speed-off.png">icons/turtle-grey.png</file>
+    <!-- The application icon, for the about dialog also when it isn't
+         installed in the icon theme (eg. when run from the build directory) -->
+    <file alias="icons/scalable/apps/transmission-remote-gtk.svg">icons/transmission-remote-gtk.svg</file>
   </gresource>
 </gresources>

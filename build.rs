@@ -14,7 +14,7 @@ use std::process::Command;
 
 const PACKAGE_NAME: &str = "transmission-remote-gtk";
 const APPLICATION_ID: &str = "io.github.TransmissionRemoteGtk";
-const PRETTY_NAME: &str = "Transmission Remote GTK";
+const PRETTY_NAME: &str = "Transmission Remote";
 
 fn pkg_config(args: &[&str]) -> Option<String> {
     let out = Command::new(env::var("PKG_CONFIG").unwrap_or_else(|_| "pkg-config".into()))
