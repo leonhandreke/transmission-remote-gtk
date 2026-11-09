@@ -272,7 +272,10 @@ impl MainWindow {
 
         self.save_window_size();
         prefs.set_int(prefs::KEY_NOTEBOOK_PANED_POS, imp.vpaned.position() as i64, prefs::GLOBAL);
-        prefs.set_int(prefs::KEY_STATES_PANED_POS, imp.hpaned.position() as i64, prefs::GLOBAL);
+        // Only a sidebar width that was chosen (by dragging), otherwise it
+        // follows the width of its states
+        let states_pos = if imp.hpaned.is_position_set() { imp.hpaned.position() } else { 0 };
+        prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, prefs::GLOBAL);
 
         {
             let parts = imp.parts.borrow();
@@ -1358,8 +1361,12 @@ impl MainWindow {
         selector.set_visible(prefs.get_bool(prefs::KEY_SHOW_STATE_SELECTOR, prefs::GLOBAL));
         imp.notebook.set_visible(prefs.get_bool(prefs::KEY_SHOW_NOTEBOOK, prefs::GLOBAL));
 
+        // Without a position, the sidebar is as wide as its states (its minimum
+        // width). A saved one wider than a third of the window is ignored, like
+        // those saved when long directory names widened the sidebar.
         let pos = prefs.get_int(prefs::KEY_STATES_PANED_POS, prefs::GLOBAL);
-        if pos > 0 {
+        let window_width = if width > 0 { width } else { self.default_width() as i64 };
+        if pos > 0 && pos <= window_width / 3 {
             imp.hpaned.set_position(pos as i32);
         }
 
