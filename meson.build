@@ -9,7 +9,7 @@ project(
 project_name = meson.project_name()
 project_version = meson.project_version()
 app_id = 'io.github.TransmissionRemoteGtk'
-pretty_name = 'Transmission Remote GTK'
+pretty_name = 'Transmission Remote'
 prefix = get_option('prefix')
 datadir = get_option('datadir')
 

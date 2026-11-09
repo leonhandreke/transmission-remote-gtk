@@ -78,9 +78,11 @@ fn main() -> glib::ExitCode {
         libc::setlocale(libc::LC_ALL, c"".as_ptr());
     }
 
-    glib::set_application_name(env!("TRG_PACKAGE_NAME"));
     glib::set_prgname(Some(env!("TRG_APPLICATION_ID")));
     bindtext_wrapper();
+    // The name shown to the user (eg. by the about dialog), translated like
+    // the window title and the desktop file's Name
+    glib::set_application_name(&i18n::tr("Transmission Remote"));
 
     gio::resources_register_include!("trg-ui.gresource").expect("the user interface is built in");
     gio::resources_register_include!("trg-data.gresource").expect("the icons are built in");
