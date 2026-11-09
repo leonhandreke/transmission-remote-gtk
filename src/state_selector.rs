@@ -547,6 +547,20 @@ impl StateSelector {
         true
     }
 
+    /// The list item of a row widget (a child of the list view)
+    fn row_list_item(row: &gtk::Widget) -> Option<gtk::ListItem> {
+        let mut child = row.first_child();
+        while let Some(c) = child {
+            if let Some(li) = unsafe { c.data::<glib::WeakRef<gtk::ListItem>>("trg-list-item") }
+                .and_then(|p| unsafe { p.as_ref() }.upgrade())
+            {
+                return Some(li);
+            }
+            child = c.next_sibling();
+        }
+        None
+    }
+
     /// The position of the row with the focus
     fn focus_position(&self) -> Option<u32> {
         let lv = self.imp().list_view.borrow().clone()?;
@@ -554,16 +568,20 @@ impl StateSelector {
         if !w.is_ancestor(&lv) {
             return None;
         }
-        // up to the row widget, a child of the list view, then down to ours
+        // up to the row widget, a child of the list view
         while w.parent().as_ref() != Some(lv.upcast_ref()) {
             w = w.parent()?;
         }
-        let mut child = w.first_child();
+        Self::row_list_item(&w).map(|li| li.position())
+    }
+
+    /// The row widget that shows position
+    fn row_widget(&self, position: u32) -> Option<gtk::Widget> {
+        let lv = self.imp().list_view.borrow().clone()?;
+        let mut child = lv.first_child();
         while let Some(c) = child {
-            if let Some(li) = unsafe { c.data::<glib::WeakRef<gtk::ListItem>>("trg-list-item") }
-                .and_then(|p| unsafe { p.as_ref() }.upgrade())
-            {
-                return Some(li.position());
+            if Self::row_list_item(&c).is_some_and(|li| li.position() == position) {
+                return Some(c);
             }
             child = c.next_sibling();
         }
@@ -577,7 +595,8 @@ impl StateSelector {
             gdk::Key::Down | gdk::Key::KP_Down => 1,
             _ => return false,
         };
-        if state.intersects(gdk::ModifierType::all()) {
+        // not Caps Lock, which isn't a modifier here
+        if state.intersects(gtk::accelerator_get_default_mod_mask()) {
             return false;
         }
         let store = &self.imp().store;
@@ -590,7 +609,13 @@ impl StateSelector {
         if item.string(COL_NAME).is_some() {
             return false;
         }
-        self.select((pos + 2 * step) as u32);
+        let target = (pos + 2 * step) as u32;
+        // The focus moves along, or the next key press would start above the
+        // separator again and land on the same row
+        if let Some(row) = self.row_widget(target) {
+            row.grab_focus();
+        }
+        self.select(target);
         true
     }
 
@@ -721,6 +746,9 @@ impl StateSelector {
             let count = gtk::Label::new(None);
             count.add_css_class("dim-label");
             count.add_css_class("numeric");
+            // room for two digits, so the sidebar doesn't widen as they come
+            count.set_width_chars(2);
+            count.set_xalign(1.0);
             bx.append(&count);
             let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
             sep.set_hexpand(true);
@@ -743,8 +771,26 @@ impl StateSelector {
             }
             li.set_selectable(!separator);
             li.set_activatable(!separator);
+            set_row_separator(&bx, separator);
+
+            // The trackers' and directories' names can be long (paths). They
+            // don't ask for any room, so only the states set the sidebar's
+            // width, and are ellipsized: hosts at the end, paths at the start,
+            // which keeps their last directories. The tooltip has all of it.
+            let bit = item.uint(COL_BIT);
+            let dynamic = bit == FILTER_FLAG_DIR || bit == FILTER_FLAG_TRACKER;
+            bx.set_tooltip_text(item.string(COL_NAME).as_deref().filter(|_| dynamic));
             if separator {
                 return;
+            }
+            let name = bx.first_child().and_then(|c| c.next_sibling()).and_downcast::<gtk::Label>();
+            if let Some(name) = name {
+                name.set_ellipsize(match bit {
+                    FILTER_FLAG_DIR => gtk::pango::EllipsizeMode::Start,
+                    FILTER_FLAG_TRACKER => gtk::pango::EllipsizeMode::End,
+                    _ => gtk::pango::EllipsizeMode::None,
+                });
+                name.set_max_width_chars(if dynamic { 0 } else { -1 });
             }
             let weak = li.downgrade();
             let id = item.connect_local("column-changed", false, move |_| {
@@ -788,8 +834,20 @@ impl StateSelector {
         });
         lv.add_controller(keys);
 
+        // The separator row is a line with some room, without a row's height and hover
+        let css = gtk::CssProvider::new();
+        css.load_from_data(
+            ".navigation-sidebar > row.trg-separator { \
+                min-height: 0; padding-top: 4px; padding-bottom: 4px; background: none; }",
+        );
+        gtk::style_context_add_provider_for_display(
+            &self.display(),
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+
         let scrolled = util::scrolled_window(&lv);
-        // the sidebar is as wide as the names (at least)
+        // the sidebar is as wide as the states (at least), see the bind above
         scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
         scrolled.set_parent(self);
         *imp.scrolled.borrow_mut() = Some(scrolled);
@@ -799,6 +857,28 @@ impl StateSelector {
         util::add_context_menu(self, move |_, x, y| {
             weak.upgrade().is_some_and(|s| s.context_menu(x, y))
         });
+    }
+}
+
+/// Makes the row widget of a list item's child (its parent) the separator, or
+/// not: it can't take the focus (from a click or the keyboard; the list item's
+/// "focusable" needs GTK 4.12), and isn't styled like a row (see build).
+fn set_row_separator(child: &gtk::Widget, separator: bool) {
+    use glib::translate::{IntoGlib, ToGlibPtr};
+    // Only raw calls: while a new row is set up and bound it's still
+    // floating, and a wrapper of it would sink that reference and free it.
+    unsafe {
+        let row = gtk::ffi::gtk_widget_get_parent(child.to_glib_none().0);
+        if row.is_null() {
+            return;
+        }
+        gtk::ffi::gtk_widget_set_focusable(row, (!separator).into_glib());
+        let class = c"trg-separator".as_ptr();
+        if separator {
+            gtk::ffi::gtk_widget_add_css_class(row, class);
+        } else {
+            gtk::ffi::gtk_widget_remove_css_class(row, class);
+        }
     }
 }
 

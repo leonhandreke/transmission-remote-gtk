@@ -241,7 +241,6 @@ impl Prefs {
             d.insert(KEY_UPDATE_INTERVAL.into(), json!(INTERVAL_DEFAULT));
             d.insert(KEY_SESSION_UPDATE_INTERVAL.into(), json!(SESSION_INTERVAL_DEFAULT));
             d.insert(ACTIVEONLY_FULLSYNC_EVERY.into(), json!(2));
-            d.insert(KEY_STATES_PANED_POS.into(), json!(120));
             d.insert(KEY_TIMEOUT.into(), json!(40));
             d.insert(KEY_RETRIES.into(), json!(3));
             for key in [
