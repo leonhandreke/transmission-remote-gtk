@@ -414,7 +414,8 @@ pub fn set_accels(app: &gtk::Application) {
         // Ctrl+comma is GNOME's Preferences shortcut; Ctrl+S would be Save
         ("win.local-prefs", &["<Primary>comma"]),
         ("win.remote-prefs", &["<Alt>s"]),
-        ("win.view-states", &["F2"]),
+        // F9 is GNOME's sidebar shortcut (F2 would be Rename)
+        ("win.view-states", &["F9"]),
         ("win.filter-dirs", &["F3"]),
         ("win.filter-trackers", &["F4"]),
         ("win.view-notebook", &["F5"]),
@@ -432,6 +433,8 @@ pub fn set_accels(app: &gtk::Application) {
         ("win.local-prefs", &[]),
         ("app.close-window", &["<Primary>w"]),
         ("app.minimize", &["<Primary>m"]),
+        // Show/Hide Sidebar in Finder, Mail and Notes
+        ("win.view-states", &["<Control><Primary>s"]),
     ];
     let macos = util::is_macos();
 

@@ -255,7 +255,7 @@ mod sb_imp {
     impl ObjectSubclass for StatusBar {
         const NAME: &'static str = "TrgStatusBar";
         type Type = super::StatusBar;
-        type ParentType = gtk::Box;
+        type ParentType = gtk::Widget;
 
         fn class_init(klass: &mut Self::Class) {
             klass.bind_template();
@@ -267,15 +267,84 @@ mod sb_imp {
         }
     }
 
-    impl ObjectImpl for StatusBar {}
-    impl WidgetImpl for StatusBar {}
-    impl BoxImpl for StatusBar {}
+    impl ObjectImpl for StatusBar {
+        fn dispose(&self) {
+            self.dispose_template();
+        }
+    }
+
+    impl StatusBar {
+        /// From left to right
+        fn children(&self) -> [gtk::Widget; 4] {
+            [
+                self.info_lbl.get().upcast(),
+                self.free_lbl.get().upcast(),
+                self.speed_lbl.get().upcast(),
+                self.turtle_image.get().upcast(),
+            ]
+        }
+
+        /// The minimum and natural sizes of the children, 0 for hidden ones
+        fn measure_children(
+            &self,
+            orientation: gtk::Orientation,
+            for_size: i32,
+        ) -> [(i32, i32); 4] {
+            self.children().map(|c| {
+                if !c.is_visible() {
+                    return (0, 0);
+                }
+                let (min, nat, _, _) = c.measure(orientation, for_size);
+                (min, nat)
+            })
+        }
+    }
+
+    /* Like a horizontal box, but a GtkBox would shrink all the labels alike,
+     * so the speeds ellipsized while the connection status was still shown in
+     * full. The minimum width is that of the ellipses, so the status bar
+     * doesn't make the window wider. */
+    impl WidgetImpl for StatusBar {
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            let sizes = self.measure_children(orientation, -1);
+            let (min, nat) = if orientation == gtk::Orientation::Horizontal {
+                sizes.iter().fold((0, 0), |(min, nat), s| (min + s.0, nat + s.1))
+            } else {
+                sizes.iter().fold((0, 0), |(min, nat), s| (min.max(s.0), nat.max(s.1)))
+            };
+            (min, nat, -1, -1)
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
+            let sizes = self.measure_children(gtk::Orientation::Horizontal, height);
+            let mut widths = sizes.map(|s| s.0);
+            let mut left = width - widths.iter().sum::<i32>();
+            // The space beyond the minimums goes to the turtle, the speeds and
+            // the free space first, and the status label gets the rest
+            for i in [3, 2, 1] {
+                let extra = (sizes[i].1 - sizes[i].0).clamp(0, left.max(0));
+                widths[i] += extra;
+                left -= extra;
+            }
+            widths[0] += left.max(0);
+
+            let rtl = self.obj().direction() == gtk::TextDirection::Rtl;
+            let mut x = 0;
+            for (child, w) in self.children().iter().zip(widths) {
+                if child.is_visible() {
+                    let cx = if rtl { width - x - w } else { x };
+                    child.size_allocate(&gtk::Allocation::new(cx, 0, w, height), -1);
+                    x += w;
+                }
+            }
+        }
+    }
 }
 
 glib::wrapper! {
     pub struct StatusBar(ObjectSubclass<sb_imp::StatusBar>)
-        @extends gtk::Box, gtk::Widget,
-        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
 #[gtk::template_callbacks]
@@ -297,6 +366,22 @@ impl StatusBar {
         if let Some(win) = imp.win.upgrade() {
             win.dispatch_session_set(req);
         }
+    }
+
+    /// The full text of a label, where it's ellipsized
+    #[template_callback]
+    fn ellipsized_tooltip(
+        label: &gtk::Label,
+        _x: i32,
+        _y: i32,
+        _keyboard: bool,
+        tooltip: &gtk::Tooltip,
+    ) -> bool {
+        if !label.layout().is_ellipsized() {
+            return false;
+        }
+        tooltip.set_text(Some(&label.text()));
+        true
     }
 
     pub fn clear_indicators(&self) {

@@ -4,8 +4,10 @@ using Gtk 4.0;
 // state selector, the lists and the drop target.
 template $TrgMainWindow: ApplicationWindow {
   title: _("Transmission Remote");
+  // Fits a 1024x600 screen: GNOME's top bar leaves 568 px, and with
+  // client-side decorations this includes the title bar
   default-width: 1000;
-  default-height: 600;
+  default-height: 560;
   close-request => $close_request();
   destroy => $destroy_window();
   // Ctrl+K/Ctrl+F (Command-K/F on macOS), before the focus widget gets them
@@ -33,7 +35,9 @@ template $TrgMainWindow: ApplicationWindow {
       orientation: vertical;
       vexpand: true;
       resize-start-child: true;
-      shrink-start-child: true;
+      // Smaller than its minimum, the torrent list would be squeezed with
+      // GTK warnings when the details are hidden
+      shrink-start-child: false;
       resize-end-child: false;
       shrink-end-child: false;
 
