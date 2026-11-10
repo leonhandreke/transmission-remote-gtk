@@ -10,11 +10,6 @@ template $TrgMainWindow: ApplicationWindow {
   default-height: 560;
   close-request => $close_request();
   destroy => $destroy_window();
-  // Ctrl+K/Ctrl+F (Command-K/F on macOS), before the focus widget gets them
-  EventControllerKey {
-    propagation-phase: capture;
-    key-pressed => $window_key_press_handler();
-  }
 
   Box {
     orientation: vertical;
@@ -22,12 +17,16 @@ template $TrgMainWindow: ApplicationWindow {
     PopoverMenuBar menu_bar {}
 
     Box toolbar_box {
-      Entry filter_entry {
+      // Typing in the main window searches too, see construct()
+      SearchEntry filter_entry {
         valign: center;
-        secondary-icon-name: "edit-clear";
-        secondary-icon-sensitive: false;
-        changed => $entry_filter_changed_cb();
-        icon-release => $clear_filter_entry_cb();
+        placeholder-text: _("Filter torrents");
+        // It gets the toolbar's spare room, up to this. Its minimum width
+        // stays small: the toolbar already sets the window's minimum.
+        max-width-chars: 25;
+        search-changed => $entry_filter_changed_cb();
+        search-started => $filter_search_started_cb();
+        stop-search => $filter_stop_search_cb();
       }
     }
 
@@ -47,6 +46,48 @@ template $TrgMainWindow: ApplicationWindow {
         shrink-start-child: false;
         resize-end-child: true;
         shrink-end-child: true;
+
+        // The torrent list is its child
+        end-child: Overlay torrent_overlay {
+          // When nothing matches the filter text
+          [overlay]
+          Box no_results {
+            orientation: vertical;
+            halign: center;
+            valign: center;
+            margin-start: 12;
+            margin-end: 12;
+            spacing: 12;
+            visible: false;
+            can-target: false;
+
+            Image {
+              icon-name: "edit-find-symbolic";
+              pixel-size: 96;
+              margin-bottom: 12;
+
+              styles [
+                "dim-label",
+              ]
+            }
+
+            Label {
+              label: _("No Results");
+              wrap: true;
+              justify: center;
+
+              styles [
+                "title-2",
+              ]
+            }
+
+            Label {
+              label: _("Try a different search");
+              wrap: true;
+              justify: center;
+            }
+          }
+        };
       };
 
       end-child: Notebook notebook {
