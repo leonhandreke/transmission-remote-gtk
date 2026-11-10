@@ -1,7 +1,9 @@
 using Gtk 4.0;
 
-template $TrgStatusBar: Box {
-  orientation: horizontal;
+// TrgStatusBar lays these out itself: the labels ellipsize, and when there
+// isn't room for all of them, the speeds keep their space longest, then the
+// free space, and the connection status gets what's left.
+template $TrgStatusBar: Widget {
   margin-start: 2;
   margin-end: 2;
   margin-top: 2;
@@ -10,21 +12,25 @@ template $TrgStatusBar: Box {
   Label info_lbl {
     label: _("Disconnected");
     ellipsize: end;
+    xalign: 0;
+    has-tooltip: true;
+    query-tooltip => $ellipsized_tooltip();
   }
 
-  // GTK 4 boxes have no pack_end, so the free space label takes the remaining
-  // space and right-aligns, pushing the rest to the end.
   Label free_lbl {
-    hexpand: true;
-    halign: end;
+    ellipsize: end;
     margin-start: 5;
     margin-end: 5;
+    has-tooltip: true;
+    query-tooltip => $ellipsized_tooltip();
   }
 
   Label speed_lbl {
     ellipsize: start;
     margin-start: 5;
     margin-end: 5;
+    has-tooltip: true;
+    query-tooltip => $ellipsized_tooltip();
   }
 
   Image turtle_image {
