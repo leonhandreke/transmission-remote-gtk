@@ -65,7 +65,11 @@ mod imp {
         #[template_child]
         pub torrent_queue_menu: TemplateChild<gio::MenuModel>,
         #[template_child]
-        pub filter_entry: TemplateChild<gtk::Entry>,
+        pub filter_entry: TemplateChild<gtk::SearchEntry>,
+        #[template_child]
+        pub torrent_overlay: TemplateChild<gtk::Overlay>,
+        #[template_child]
+        pub no_results: TemplateChild<gtk::Box>,
         #[template_child]
         pub gen_details: TemplateChild<GeneralPanel>,
         #[template_child]
@@ -139,34 +143,29 @@ impl MainWindow {
     }
 
     #[template_callback]
-    fn window_key_press_handler(
-        controller: &gtk::EventControllerKey,
-        keyval: u32,
-        _keycode: u32,
-        state: gdk::ModifierType,
-    ) -> bool {
-        let Some(win) = controller.widget().and_then(|w| main_window_of(&w)) else {
-            return false;
-        };
-        let key: gdk::Key = unsafe { glib::translate::from_glib(keyval) };
-        if state.contains(util::primary_modifier()) && (key == gdk::Key::k || key == gdk::Key::f) {
-            win.imp().filter_entry.grab_focus();
-            return true;
-        }
-        false
-    }
-
-    #[template_callback]
-    fn entry_filter_changed_cb(entry: &gtk::Entry) {
+    fn entry_filter_changed_cb(entry: &gtk::SearchEntry) {
         if let Some(win) = main_window_of(entry.upcast_ref()) {
             win.refilter();
-            entry.set_icon_sensitive(gtk::EntryIconPosition::Secondary, entry.text_length() > 0);
         }
     }
 
+    /// Typing elsewhere in the window started a search: the next keys go to
+    /// the entry, without replacing what was typed.
     #[template_callback]
-    fn clear_filter_entry_cb(entry: &gtk::Entry, _pos: gtk::EntryIconPosition) {
-        entry.set_text("");
+    fn filter_search_started_cb(entry: &gtk::SearchEntry) {
+        if let Some(text) = entry.delegate().and_downcast::<gtk::Text>() {
+            text.grab_focus_without_selecting();
+        }
+    }
+
+    /// Escape clears the filter, and then goes back to the list.
+    #[template_callback]
+    fn filter_stop_search_cb(entry: &gtk::SearchEntry) {
+        if !entry.text().is_empty() {
+            entry.set_text("");
+        } else if let Some(win) = main_window_of(entry.upcast_ref()) {
+            win.torrent_tv().grab_focus();
+        }
     }
 }
 
@@ -184,6 +183,49 @@ impl MainWindow {
 
     fn torrent_tv(&self) -> TreeView {
         self.imp().parts.borrow().torrent_tv.clone().unwrap()
+    }
+
+    /// The window's own keys, before the focus widget and the app's
+    /// shortcuts get them.
+    fn key_pressed(
+        &self,
+        controller: &gtk::EventControllerKey,
+        keyval: gdk::Key,
+        state: gdk::ModifierType,
+    ) -> bool {
+        // Ctrl+K/Ctrl+F (Command-K/F on macOS)
+        if state.contains(util::primary_modifier())
+            && (keyval == gdk::Key::k || keyval == gdk::Key::f)
+        {
+            self.imp().filter_entry.grab_focus();
+            return true;
+        }
+
+        // In a text field, the keys that are also shortcuts of the app (such
+        // as Delete for Remove, or Ctrl+C) edit the text. Delete and
+        // BackSpace never remove torrents from there.
+        let Some(text) = RootExt::focus(self).and_downcast::<gtk::Text>() else {
+            return false;
+        };
+        let accel = gtk::accelerator_name(keyval, state & gtk::accelerator_get_default_mod_mask());
+        let is_shortcut =
+            self.application().is_some_and(|app| !app.actions_for_accel(&accel).is_empty());
+        if !is_shortcut {
+            return false;
+        }
+        controller.forward(&text)
+            || matches!(keyval, gdk::Key::Delete | gdk::Key::KP_Delete | gdk::Key::BackSpace)
+    }
+
+    /// "No Results" over the torrent list, when there's filter text and no
+    /// torrent matches it
+    fn update_no_results(&self) {
+        let imp = self.imp();
+        let Some(tv) = imp.parts.borrow().torrent_tv.clone() else { return };
+        let none = !imp.filter_entry.text().is_empty()
+            && tv.selection().n_items() == 0
+            && self.client().is_connected();
+        imp.no_results.set_visible(none);
     }
 
     fn torrent_model(&self) -> TorrentModel {
@@ -766,6 +808,7 @@ impl MainWindow {
         if let Some(f) = imp.parts.borrow().torrent_filter.as_ref() {
             f.changed(gtk::FilterChange::Different);
         }
+        self.update_no_results();
     }
 
     pub fn reload_dir_aliases(&self) {
@@ -838,6 +881,7 @@ impl MainWindow {
         }
 
         client.status_change(connected);
+        self.update_no_results();
     }
 
     fn add_actions(&self) {
@@ -1278,6 +1322,7 @@ impl MainWindow {
                 if id != win.selected_torrent_id() {
                     win.update_selected_torrent_notebook(p::TORRENT_GET_MODE_FIRST, id);
                 }
+                win.update_no_results();
             }
         });
         let weak = self.downgrade();
@@ -1315,7 +1360,26 @@ impl MainWindow {
         imp.parts.borrow_mut().toolbar = Some(toolbar);
 
         imp.hpaned.set_start_child(Some(&selector));
-        imp.hpaned.set_end_child(Some(&tv));
+        imp.torrent_overlay.set_child(Some(&tv));
+        // Not wider than the list, when it's narrow
+        imp.torrent_overlay.set_clip_overlay(&*imp.no_results, true);
+
+        // Typing anywhere in the window filters the torrents, unless the
+        // focus widget takes the keys: a text field, or a list with its own
+        // type ahead (the sidebar, the details' lists). So the torrent list
+        // has none.
+        imp.filter_entry.set_key_capture_widget(Some(self));
+        // The app's shortcuts are handled in the window's capture phase by a
+        // controller added with the application. This one is added after
+        // it, so it comes first.
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = self.downgrade();
+        keys.connect_key_pressed(move |c, keyval, _, state| match weak.upgrade() {
+            Some(win) if win.key_pressed(c, keyval, state) => glib::Propagation::Stop,
+            _ => glib::Propagation::Proceed,
+        });
+        self.add_controller(keys);
 
         let weak = self.downgrade();
         selector.connect_state_changed(move |_, _| {

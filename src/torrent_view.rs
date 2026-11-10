@@ -89,7 +89,7 @@ pub fn torrent_tree_view_new(client: &Client, model: &impl IsA<gio::ListModel>) 
     reg(ColType::Epoch, COL_DONE_DATE, &tr("Completed"), "done-date", COLUMN_EXTRA);
     reg(ColType::Epoch, COL_LASTACTIVE, &tr("Last Active"), "last-active", COLUMN_EXTRA);
 
-    tv.set_search_column(COL_NAME as i32);
+    // No type ahead: typing filters the list instead (see MainWindow)
 
     tv.set_model(model);
     tv.setup_columns();
