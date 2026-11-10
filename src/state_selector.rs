@@ -317,7 +317,7 @@ impl StateSelector {
                         continue;
                     }
                     let item = Self::filter_item_new(
-                        "network-workgroup",
+                        "network-server-symbolic",
                         &host,
                         FILTER_FLAG_TRACKER,
                         serial,
@@ -338,7 +338,7 @@ impl StateSelector {
                     Self::update_dynamic_filter(&item, serial);
                     continue;
                 }
-                let item = Self::filter_item_new("folder", &dir, FILTER_FLAG_DIR, serial);
+                let item = Self::filter_item_new("folder-symbolic", &dir, FILTER_FLAG_DIR, serial);
                 if imp.dirs_first.get() {
                     self.insert(n_cat, Some(imp.directories.borrow().len()), &item);
                 } else {
@@ -422,8 +422,12 @@ impl StateSelector {
         let has_error = imp.states.borrow().error.is_some();
         if stats.error > 0 && !has_error {
             let pos = imp.n_categories.get() as u32;
-            let item =
-                self.add_state(Some(pos), "dialog-warning", &tr("Error"), p::TORRENT_FLAG_ERROR);
+            let item = self.add_state(
+                Some(pos),
+                "dialog-warning-symbolic",
+                &tr("Error"),
+                p::TORRENT_FLAG_ERROR,
+            );
             // not there at startup, so it isn't restored
             item.set(COL_INDEX, u32::MAX);
             imp.states.borrow_mut().error = Some(item);
@@ -475,13 +479,13 @@ impl StateSelector {
         if enabled {
             let down = self.add_state(
                 Some(2),
-                "media-seek-backward",
+                "media-seek-backward-symbolic",
                 &tr("Queue Down"),
                 p::TORRENT_FLAG_DOWNLOADING_WAIT,
             );
             let up = self.add_state(
                 Some(4),
-                "media-seek-forward",
+                "media-seek-forward-symbolic",
                 &tr("Queue Up"),
                 p::TORRENT_FLAG_SEEDING_WAIT,
             );
@@ -601,50 +605,57 @@ impl StateSelector {
         });
         imp.sections.set_section_sorter(Some(&sections));
 
+        // Symbolic icons, as in the toolbar: lists in GNOME's HIG have them, and
+        // they follow the theme's colors (dark mode, the selected row)
         let f = &p::TORRENT_FLAG_DOWNLOADING;
         let s = States {
-            all: Some(self.add_state(None, "help-about", &tr("All"), 0)),
-            down: Some(self.add_state(None, "go-down", &tr("Downloading"), *f)),
+            all: Some(self.add_state(None, "view-list-bullet-symbolic", &tr("All"), 0)),
+            down: Some(self.add_state(None, "folder-download-symbolic", &tr("Downloading"), *f)),
             down_wait: Some(self.add_state(
                 None,
-                "media-seek-backward",
+                "media-seek-backward-symbolic",
                 &tr("Queue Down"),
                 p::TORRENT_FLAG_DOWNLOADING_WAIT,
             )),
-            seeding: Some(self.add_state(None, "go-up", &tr("Seeding"), p::TORRENT_FLAG_SEEDING)),
+            seeding: Some(self.add_state(
+                None,
+                "send-to-symbolic",
+                &tr("Seeding"),
+                p::TORRENT_FLAG_SEEDING,
+            )),
             seed_wait: Some(self.add_state(
                 None,
-                "media-seek-forward",
+                "media-seek-forward-symbolic",
                 &tr("Queue Up"),
                 p::TORRENT_FLAG_SEEDING_WAIT,
             )),
             paused: Some(self.add_state(
                 None,
-                "media-playback-pause",
+                "media-playback-pause-symbolic",
                 &tr("Paused"),
                 p::TORRENT_FLAG_PAUSED,
             )),
             complete: Some(self.add_state(
                 None,
-                "trg-gtk-apply",
+                "object-select-symbolic",
                 &tr("Complete"),
                 p::TORRENT_FLAG_COMPLETE,
             )),
             incomplete: Some(self.add_state(
                 None,
-                "edit-select-all",
+                "edit-select-all-symbolic",
                 &tr("Incomplete"),
                 p::TORRENT_FLAG_INCOMPLETE,
             )),
             active: Some(self.add_state(
                 None,
-                "network-workgroup",
+                "network-transmit-receive-symbolic",
                 &tr("Active"),
                 p::TORRENT_FLAG_ACTIVE,
             )),
             checking: Some(self.add_state(
                 None,
-                "view-refresh",
+                "view-refresh-symbolic",
                 &tr("Checking"),
                 p::TORRENT_FLAG_CHECKING_ANY,
             )),

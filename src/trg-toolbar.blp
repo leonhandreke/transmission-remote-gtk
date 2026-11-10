@@ -3,8 +3,9 @@ using Gtk 4.0;
 template $TrgToolbar: Box {
   orientation: horizontal;
   // The items are icon only, with the label as tooltip, like
-  // GTK_TOOLBAR_BOTH_HORIZ showed them in GTK 3. 24px is
-  // GTK_ICON_SIZE_LARGE_TOOLBAR.
+  // GTK_TOOLBAR_BOTH_HORIZ showed them in GTK 3. The icons are symbolic at
+  // the default 16px, as GNOME's HIG asks for in toolbars: monochrome, and
+  // recolored with the theme (dark mode, insensitive buttons).
   styles [
     "toolbar",
   ]
@@ -26,8 +27,7 @@ template $TrgToolbar: Box {
         spacing: 6;
 
         Image {
-          icon-name: "trg-gtk-connect";
-          pixel-size: 24;
+          icon-name: "trg-connect-symbolic";
         }
 
         Label {
@@ -51,8 +51,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "trg-gtk-disconnect";
-      pixel-size: 24;
+      icon-name: "trg-disconnect-symbolic";
     }
   }
 
@@ -66,8 +65,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "list-add";
-      pixel-size: 24;
+      icon-name: "list-add-symbolic";
     }
   }
 
@@ -87,8 +85,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "media-playback-start";
-      pixel-size: 24;
+      icon-name: "media-playback-start-symbolic";
     }
   }
 
@@ -102,8 +99,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "media-playback-pause";
-      pixel-size: 24;
+      icon-name: "media-playback-pause-symbolic";
     }
   }
 
@@ -117,8 +113,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "document-properties";
-      pixel-size: 24;
+      icon-name: "help-about-symbolic";
     }
   }
 
@@ -132,8 +127,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "list-remove";
-      pixel-size: 24;
+      icon-name: "list-remove-symbolic";
     }
   }
 
@@ -147,8 +141,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "edit-delete";
-      pixel-size: 24;
+      icon-name: "user-trash-symbolic";
     }
   }
 
@@ -168,8 +161,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "preferences-system";
-      pixel-size: 24;
+      icon-name: "emblem-system-symbolic";
     }
   }
 
@@ -183,8 +175,7 @@ template $TrgToolbar: Box {
     }
 
     Image {
-      icon-name: "network-workgroup";
-      pixel-size: 24;
+      icon-name: "network-server-symbolic";
     }
   }
 }
