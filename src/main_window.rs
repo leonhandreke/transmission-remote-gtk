@@ -232,6 +232,10 @@ impl MainWindow {
         self.imp().parts.borrow().torrent_model.clone().unwrap()
     }
 
+    fn toolbar(&self) -> Toolbar {
+        self.imp().parts.borrow().toolbar.clone().unwrap()
+    }
+
     fn menu_bar(&self) -> Rc<MenuBar> {
         self.imp().parts.borrow().menu_bar.clone().unwrap()
     }
@@ -464,6 +468,7 @@ impl MainWindow {
         }
 
         self.imp().status_bar.push_connection_msg(&tr("Connecting..."));
+        self.toolbar().set_connecting();
         client.inc_connid();
         let weak = self.downgrade();
         // the session and the torrents in one go
@@ -655,6 +660,7 @@ impl MainWindow {
         if !is_connected {
             if self.dialog_error_handler(&response) {
                 self.reset_connect_args();
+                self.toolbar().set_connected(false);
                 return;
             }
             if let Some(s) = &new_session {
@@ -856,6 +862,7 @@ impl MainWindow {
         let client = self.client();
 
         self.menu_bar().connected_change(connected);
+        self.toolbar().set_connected(connected);
 
         {
             let parts = imp.parts.borrow();

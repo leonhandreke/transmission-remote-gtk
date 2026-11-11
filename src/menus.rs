@@ -32,6 +32,10 @@ mod tb_imp {
     #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-toolbar.ui")]
     pub struct Toolbar {
         #[template_child]
+        pub connect_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub connect_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
         pub connect_menu_button: TemplateChild<gtk::MenuButton>,
     }
 
@@ -64,17 +68,38 @@ glib::wrapper! {
 impl Toolbar {
     pub fn new(prefs: &Prefs) -> Self {
         let tb: Self = glib::Object::new();
-        // The toolbar has a few buttons only, as in GNOME's and Apple's
-        // guidelines (Properties and the preferences are in the menus), so
-        // Disconnect goes in its own section of the profiles drop down. Like
-        // the menu item, it's insensitive along with its action.
-        let menu = gio::Menu::new();
-        menu.append_section(None, &file_connect_menu_new(prefs));
-        let disconnect = gio::Menu::new();
-        disconnect.append(Some(&tr("Disconnect")), Some("win.disconnect"));
-        menu.append_section(None, &disconnect);
-        tb.imp().connect_menu_button.set_menu_model(Some(&menu));
+        tb.imp().connect_menu_button.set_menu_model(Some(&file_connect_menu_new(prefs)));
         tb
+    }
+
+    /// The connect button disconnects while connected.
+    pub fn set_connected(&self, connected: bool) {
+        let imp = self.imp();
+        let (page, label, action, target) = if connected {
+            ("disconnect", tr("Disconnect"), "win.disconnect", None)
+        } else {
+            ("connect", tr("Connect"), "win.connect", Some((-1i32).to_variant()))
+        };
+        imp.connect_stack.set_visible_child_name(page);
+        let button = &imp.connect_button;
+        // unset the action while changing its target, as GTK warns about a
+        // target that doesn't fit the action
+        button.set_action_name(None);
+        button.set_action_target_value(target.as_ref());
+        button.set_action_name(Some(action));
+        button.set_tooltip_text(Some(&label));
+        button.update_property(&[gtk::accessible::Property::Label(&label)]);
+        // undo set_connecting(); the action only sets it when its enabled
+        // state changes
+        button.set_sensitive(true);
+    }
+
+    /// While connecting, the connect button is insensitive, so it can't be
+    /// clicked twice. The profiles in the drop down still work, to connect
+    /// to another one instead.
+    pub fn set_connecting(&self) {
+        self.set_connected(false);
+        self.imp().connect_button.set_sensitive(false);
     }
 }
 

@@ -11,28 +11,59 @@ template $TrgToolbar: Box {
   ]
 
   // GtkMenuToolButton: a button connecting to the current profile, with a
-  // drop down of all the profiles next to it. Disconnect is at the end of
-  // the drop down instead of having its own button, see Toolbar::new().
+  // drop down of all the profiles next to it. While connected, the button
+  // disconnects instead, see Toolbar::set_connected().
   Box {
     styles [
       "linked",
     ]
 
-    Button {
+    Button connect_button {
       has-frame: false;
       tooltip-text: _("Connect");
       action-name: "win.connect";
       action-target: "-1";
 
-      Box {
-        spacing: 6;
+      accessibility {
+        label: _("Connect");
+      }
 
-        Image {
-          icon-name: "trg-connect-symbolic";
+      // A stack is as wide as its widest page, so the button keeps its width
+      // (and the buttons after it their place) in both states, whichever
+      // label is longer in the translation.
+      Stack connect_stack {
+        StackPage {
+          name: "connect";
+
+          child: Box {
+            halign: center;
+            spacing: 6;
+
+            Image {
+              icon-name: "trg-connect-symbolic";
+            }
+
+            Label {
+              label: _("Connect");
+            }
+          };
         }
 
-        Label {
-          label: _("Connect");
+        StackPage {
+          name: "disconnect";
+
+          child: Box {
+            halign: center;
+            spacing: 6;
+
+            Image {
+              icon-name: "trg-disconnect-symbolic";
+            }
+
+            Label {
+              label: _("Disconnect");
+            }
+          };
         }
       }
     }
