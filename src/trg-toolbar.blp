@@ -11,7 +11,8 @@ template $TrgToolbar: Box {
   ]
 
   // GtkMenuToolButton: a button connecting to the current profile, with a
-  // drop down of all the profiles next to it.
+  // drop down of all the profiles next to it. Disconnect is at the end of
+  // the drop down instead of having its own button, see Toolbar::new().
   Box {
     styles [
       "linked",
@@ -38,20 +39,11 @@ template $TrgToolbar: Box {
 
     MenuButton connect_menu_button {
       has-frame: false;
-    }
-  }
+      tooltip-text: _("Connection");
 
-  Button {
-    has-frame: false;
-    tooltip-text: _("Disconnect");
-    action-name: "win.disconnect";
-
-    accessibility {
-      label: _("Disconnect");
-    }
-
-    Image {
-      icon-name: "trg-disconnect-symbolic";
+      accessibility {
+        label: _("Connection");
+      }
     }
   }
 
@@ -105,20 +97,6 @@ template $TrgToolbar: Box {
 
   Button {
     has-frame: false;
-    tooltip-text: _("Properties");
-    action-name: "win.properties";
-
-    accessibility {
-      label: _("Properties");
-    }
-
-    Image {
-      icon-name: "help-about-symbolic";
-    }
-  }
-
-  Button {
-    has-frame: false;
     tooltip-text: _("Remove");
     action-name: "win.remove";
 
@@ -142,40 +120,6 @@ template $TrgToolbar: Box {
 
     Image {
       icon-name: "user-trash-symbolic";
-    }
-  }
-
-  Separator {
-    orientation: vertical;
-    margin-start: 4;
-    margin-end: 4;
-  }
-
-  Button {
-    has-frame: false;
-    tooltip-text: _("Local Preferences");
-    action-name: "win.local-prefs";
-
-    accessibility {
-      label: _("Local Preferences");
-    }
-
-    Image {
-      icon-name: "emblem-system-symbolic";
-    }
-  }
-
-  Button {
-    has-frame: false;
-    tooltip-text: _("Remote Preferences");
-    action-name: "win.remote-prefs";
-
-    accessibility {
-      label: _("Remote Preferences");
-    }
-
-    Image {
-      icon-name: "network-server-symbolic";
     }
   }
 }

@@ -64,7 +64,16 @@ glib::wrapper! {
 impl Toolbar {
     pub fn new(prefs: &Prefs) -> Self {
         let tb: Self = glib::Object::new();
-        tb.imp().connect_menu_button.set_menu_model(Some(&file_connect_menu_new(prefs)));
+        // The toolbar has a few buttons only, as in GNOME's and Apple's
+        // guidelines (Properties and the preferences are in the menus), so
+        // Disconnect goes in its own section of the profiles drop down. Like
+        // the menu item, it's insensitive along with its action.
+        let menu = gio::Menu::new();
+        menu.append_section(None, &file_connect_menu_new(prefs));
+        let disconnect = gio::Menu::new();
+        disconnect.append(Some(&tr("Disconnect")), Some("win.disconnect"));
+        menu.append_section(None, &disconnect);
+        tb.imp().connect_menu_button.set_menu_model(Some(&menu));
         tb
     }
 }
