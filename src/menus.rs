@@ -88,7 +88,13 @@ pub enum ConnectionState {
 impl Toolbar {
     pub fn new(prefs: &Prefs) -> Self {
         let tb: Self = glib::Object::new();
-        tb.imp().server_menu.prepend_section(None, &file_connect_menu_new(prefs));
+        let imp = tb.imp();
+        imp.server_menu.prepend_section(None, &file_connect_menu_new(prefs));
+        // Under the button from its start, instead of centered, which would
+        // stick out of the window
+        if let Some(popover) = imp.server_button.popover() {
+            popover.set_halign(gtk::Align::Start);
+        }
         tb
     }
 
