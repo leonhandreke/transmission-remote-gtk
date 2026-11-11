@@ -49,6 +49,96 @@ template $TrgMainWindow: ApplicationWindow {
 
         // The torrent list is its child
         end-child: Overlay torrent_overlay {
+          // While not connected, instead of the empty list
+          [overlay]
+          Box not_connected {
+            orientation: vertical;
+            halign: center;
+            valign: center;
+            margin-start: 12;
+            margin-end: 12;
+            spacing: 12;
+
+            Image {
+              icon-name: "trg-disconnect-symbolic";
+              pixel-size: 96;
+              margin-bottom: 12;
+
+              styles [
+                "dim-label",
+              ]
+            }
+
+            Label {
+              label: _("Not Connected");
+              wrap: true;
+              justify: center;
+
+              styles [
+                "title-2",
+              ]
+            }
+
+            Label {
+              label: _("Connect to a Transmission server to see its torrents.");
+              wrap: true;
+              justify: center;
+            }
+
+            // Without a host to connect to, as on the first start, the
+            // button opens the profiles instead, and while connecting
+            // there's a spinner in its place, see update_connection()
+            Stack not_connected_stack {
+              hhomogeneous: false;
+              margin-top: 12;
+
+              StackPage {
+                name: "connect";
+
+                child: Button {
+                  halign: center;
+                  label: _("Connect");
+                  action-name: "win.connect";
+                  action-target: "-1";
+
+                  styles [
+                    "suggested-action",
+                  ]
+                };
+              }
+
+              StackPage {
+                name: "edit";
+
+                child: Button {
+                  halign: center;
+                  label: _("Edit Profiles…");
+                  action-name: "win.edit-profiles";
+
+                  styles [
+                    "suggested-action",
+                  ]
+                };
+              }
+
+              StackPage {
+                name: "connecting";
+
+                // see util::restart_spinner()
+                child: Box connecting_box {
+                  halign: center;
+                  spacing: 6;
+
+                  Spinner {}
+
+                  Label connecting_label {
+                    ellipsize: end;
+                  }
+                };
+              }
+            }
+          }
+
           // When nothing matches the filter text
           [overlay]
           Box no_results {

@@ -2,7 +2,8 @@ using Gtk 4.0;
 
 template $TrgToolbar: Box {
   orientation: horizontal;
-  // The items are icon only, with the label as tooltip, like
+  // The buttons after the server picker are icon only, with the label as
+  // tooltip, like
   // GTK_TOOLBAR_BOTH_HORIZ showed them in GTK 3. The icons are symbolic at
   // the default 16px, as GNOME's HIG asks for in toolbars: monochrome, and
   // recolored with the theme (dark mode, insensitive buttons).
@@ -10,49 +11,42 @@ template $TrgToolbar: Box {
     "toolbar",
   ]
 
-  // GtkMenuToolButton: a button connecting to the current profile, with a
-  // drop down of all the profiles next to it.
-  Box {
-    styles [
-      "linked",
-    ]
+  // The server picker: the connection's status and profile, with a menu of
+  // the profiles, see Toolbar::set_connection()
+  MenuButton server_button {
+    has-frame: false;
+    always-show-arrow: true;
+    menu-model: server_menu;
 
-    Button {
-      has-frame: false;
-      tooltip-text: _("Connect");
-      action-name: "win.connect";
-      action-target: "-1";
+    child: Box {
+      spacing: 6;
 
-      Box {
-        spacing: 6;
+      // The spinner is as wide as the dot, so the button keeps its width
+      Stack status_stack {
+        StackPage {
+          name: "icon";
 
-        Image {
-          icon-name: "trg-connect-symbolic";
+          child: Image status_icon {
+            icon-name: "trg-status-disconnected-symbolic";
+          };
         }
 
-        Label {
-          label: _("Connect");
+        StackPage {
+          name: "spinner";
+
+          // see util::restart_spinner()
+          child: Box spinner_box {
+            Spinner {}
+          };
         }
       }
-    }
 
-    MenuButton connect_menu_button {
-      has-frame: false;
-    }
-  }
-
-  Button {
-    has-frame: false;
-    tooltip-text: _("Disconnect");
-    action-name: "win.disconnect";
-
-    accessibility {
-      label: _("Disconnect");
-    }
-
-    Image {
-      icon-name: "trg-disconnect-symbolic";
-    }
+      // Long names are cut, see Toolbar::set_connection()
+      Label server_label {
+        ellipsize: end;
+        max-width-chars: 20;
+      }
+    };
   }
 
   Button {
@@ -105,20 +99,6 @@ template $TrgToolbar: Box {
 
   Button {
     has-frame: false;
-    tooltip-text: _("Properties");
-    action-name: "win.properties";
-
-    accessibility {
-      label: _("Properties");
-    }
-
-    Image {
-      icon-name: "help-about-symbolic";
-    }
-  }
-
-  Button {
-    has-frame: false;
     tooltip-text: _("Remove");
     action-name: "win.remove";
 
@@ -144,38 +124,27 @@ template $TrgToolbar: Box {
       icon-name: "user-trash-symbolic";
     }
   }
+}
 
-  Separator {
-    orientation: vertical;
-    margin-start: 4;
-    margin-end: 4;
-  }
-
-  Button {
-    has-frame: false;
-    tooltip-text: _("Local Preferences");
-    action-name: "win.local-prefs";
-
-    accessibility {
-      label: _("Local Preferences");
+// The profiles are its first section, see Toolbar::new(). Connect and
+// Disconnect are hidden along with their actions, so only one of them shows.
+menu server_menu {
+  section {
+    item {
+      label: _("Connect");
+      action: "win.connect-current";
+      hidden-when: "action-disabled";
     }
 
-    Image {
-      icon-name: "emblem-system-symbolic";
-    }
-  }
-
-  Button {
-    has-frame: false;
-    tooltip-text: _("Remote Preferences");
-    action-name: "win.remote-prefs";
-
-    accessibility {
-      label: _("Remote Preferences");
+    item {
+      label: _("Disconnect");
+      action: "win.disconnect";
+      hidden-when: "action-disabled";
     }
 
-    Image {
-      icon-name: "network-server-symbolic";
+    item {
+      label: _("Edit Profiles…");
+      action: "win.edit-profiles";
     }
   }
 }

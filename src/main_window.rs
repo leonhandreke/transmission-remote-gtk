@@ -14,7 +14,7 @@ use crate::dialogs;
 use crate::files::{FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
-use crate::menus::{MenuBar, Toolbar};
+use crate::menus::{ConnectionState, MenuBar, Toolbar};
 use crate::panels::{GeneralPanel, StatusBar};
 use crate::peers::{self, PeersModel};
 use crate::prefs;
@@ -71,6 +71,14 @@ mod imp {
         #[template_child]
         pub no_results: TemplateChild<gtk::Box>,
         #[template_child]
+        pub not_connected: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub not_connected_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
+        pub connecting_box: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub connecting_label: TemplateChild<gtk::Label>,
+        #[template_child]
         pub gen_details: TemplateChild<GeneralPanel>,
         #[template_child]
         pub status_bar: TemplateChild<StatusBar>,
@@ -86,6 +94,8 @@ mod imp {
         pub timer_id: RefCell<Option<glib::SourceId>>,
         pub session_timer_id: RefCell<Option<glib::SourceId>>,
         pub queues_enabled: Cell<bool>,
+        // from connect_profile() until the connection succeeds or fails
+        pub connecting: Cell<bool>,
         pub state_saved: Cell<bool>,
         // the sidebar's default width (0 until it's first shown), not saved
         pub states_default_pos: Cell<i32>,
@@ -230,8 +240,54 @@ impl MainWindow {
         imp.no_results.set_visible(none);
     }
 
+    /// Shows the connection in the menus, the server picker, and "Not
+    /// Connected" over the empty torrent list. Its button connects to the
+    /// current profile, or opens the profiles if it has no host yet.
+    fn update_connection(&self) {
+        let imp = self.imp();
+        let client = self.client();
+        let prefs = client.prefs();
+        let (state, profile) = if client.is_connected() {
+            (ConnectionState::Connected, prefs::CONNECTION)
+        } else if imp.connecting.get() {
+            (ConnectionState::Connecting, prefs::CONNECTION)
+        } else {
+            (ConnectionState::Disconnected, prefs::PROFILE)
+        };
+        let name = prefs.get_string(prefs::KEY_PROFILE_NAME, profile).unwrap_or_default();
+        self.menu_bar().connection_change(state);
+        self.toolbar().set_connection(state, &name);
+
+        let has_host =
+            prefs.get_string(prefs::KEY_HOSTNAME, prefs::PROFILE).is_some_and(|h| !h.is_empty());
+        let stack = &imp.not_connected_stack;
+        let page = match state {
+            ConnectionState::Connecting => "connecting",
+            _ if has_host => "connect",
+            _ => "edit",
+        };
+        if page == "connecting" && stack.visible_child_name().as_deref() != Some(page) {
+            util::restart_spinner(&imp.connecting_box);
+        }
+        stack.set_visible_child_name(page);
+        imp.connecting_label.set_label(&sprintf(&tr("Connecting to %s…"), &[&name]));
+        imp.not_connected.set_visible(state != ConnectionState::Connected);
+    }
+
+    /// Every path out of connecting ends it: success and disconnecting
+    /// (conn_changed()), failure (on_session_get()) and another profile
+    /// (connect_profile()).
+    fn set_connecting(&self, connecting: bool) {
+        self.imp().connecting.set(connecting);
+        self.update_connection();
+    }
+
     fn torrent_model(&self) -> TorrentModel {
         self.imp().parts.borrow().torrent_model.clone().unwrap()
+    }
+
+    fn toolbar(&self) -> Toolbar {
+        self.imp().parts.borrow().toolbar.clone().unwrap()
     }
 
     fn menu_bar(&self) -> Rc<MenuBar> {
@@ -453,6 +509,9 @@ impl MainWindow {
 
         if let Err(msg) = client.parse_settings() {
             self.reset_connect_args();
+            // drops the attempt to connect to another profile, if any
+            client.inc_connid();
+            self.set_connecting(false);
             // open the preferences once the (modal) error is dismissed
             let weak = self.downgrade();
             util::error_dialog_full(
@@ -468,7 +527,9 @@ impl MainWindow {
         }
 
         self.imp().status_bar.push_connection_msg(&tr("Connecting..."));
+        // a new connid drops the responses of an attempt in progress
         client.inc_connid();
+        self.set_connecting(true);
         let weak = self.downgrade();
         // the session and the torrents in one go
         client.dispatch_batch(
@@ -492,6 +553,13 @@ impl MainWindow {
 
     fn open_local_prefs(&self) {
         dialogs::preferences::instance(self, &self.client()).present();
+    }
+
+    /// The local preferences on the Connection tab, which has the profiles
+    fn edit_profiles(&self) {
+        let prefs = dialogs::preferences::instance(self, &self.client());
+        prefs.set_page(0);
+        prefs.present();
     }
 
     fn open_remote_prefs(&self) {
@@ -659,6 +727,7 @@ impl MainWindow {
         if !is_connected {
             if self.dialog_error_handler(&response) {
                 self.reset_connect_args();
+                self.set_connecting(false);
                 return;
             }
             if let Some(s) = &new_session {
@@ -859,7 +928,8 @@ impl MainWindow {
         let imp = self.imp();
         let client = self.client();
 
-        self.menu_bar().connected_change(connected);
+        // connecting succeeded, or was stopped
+        imp.connecting.set(false);
 
         {
             let parts = imp.parts.borrow();
@@ -886,6 +956,7 @@ impl MainWindow {
 
         client.status_change(connected);
         self.update_no_results();
+        self.update_connection();
     }
 
     fn add_actions(&self) {
@@ -1000,7 +1071,9 @@ impl MainWindow {
                 w.dispatch_interactive(p::torrent_pause(None));
             }
         });
+        action("connect-current", |w| w.connect_profile(-1));
         action("local-prefs", |w| w.open_local_prefs());
+        action("edit-profiles", |w| w.edit_profiles());
         action("remote-prefs", |w| w.open_remote_prefs());
         action("view-stats", |w| {
             if w.client().is_connected() {
@@ -1367,6 +1440,17 @@ impl MainWindow {
         imp.torrent_overlay.set_child(Some(&tv));
         // Not wider than the list, when it's narrow
         imp.torrent_overlay.set_clip_overlay(&*imp.no_results, true);
+        imp.torrent_overlay.set_clip_overlay(&*imp.not_connected, true);
+        // the current profile (None) and its name and host
+        let weak = self.downgrade();
+        prefs.connect_changed(move |_, key| {
+            if let (Some(win), None | Some(prefs::KEY_PROFILE_NAME | prefs::KEY_HOSTNAME)) =
+                (weak.upgrade(), key)
+            {
+                win.update_connection();
+            }
+        });
+        self.update_connection();
 
         // Typing anywhere in the window filters the torrents, unless the
         // focus widget takes the keys: a text field, or a list with its own

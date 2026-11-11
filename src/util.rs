@@ -367,6 +367,17 @@ pub fn popover_menu_popup(
 }
 
 /// A scrolled window with a frame around child
+/// Puts a new spinner, spinning, first in a box, in place of the one
+/// that's there. GTK 4.24's spinner pauses its animation when it's unmapped
+/// (in a hidden stack page, say) and doesn't play it again when it's mapped,
+/// so it would show a frozen frame, or nothing, the next time.
+pub fn restart_spinner(container: &gtk::Box) {
+    if let Some(old) = container.first_child().and_downcast::<gtk::Spinner>() {
+        container.remove(&old);
+    }
+    container.prepend(&gtk::Spinner::builder().spinning(true).build());
+}
+
 pub fn scrolled_window(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
     gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
