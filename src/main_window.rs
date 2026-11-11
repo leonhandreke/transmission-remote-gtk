@@ -87,6 +87,8 @@ mod imp {
         pub session_timer_id: RefCell<Option<glib::SourceId>>,
         pub queues_enabled: Cell<bool>,
         pub state_saved: Cell<bool>,
+        // the sidebar's default width (0 until it's first shown), not saved
+        pub states_default_pos: Cell<i32>,
         pub args: RefCell<Option<Vec<String>>>,
     }
 
@@ -315,8 +317,10 @@ impl MainWindow {
         self.save_window_size();
         prefs.set_int(prefs::KEY_NOTEBOOK_PANED_POS, imp.vpaned.position() as i64, prefs::GLOBAL);
         // Only a sidebar width that was chosen (by dragging), otherwise it
-        // follows the width of its states
-        let states_pos = if imp.hpaned.is_position_set() { imp.hpaned.position() } else { 0 };
+        // follows the width of its states. The default is a set position too.
+        let pos = imp.hpaned.position();
+        let dragged = imp.hpaned.is_position_set() && pos != imp.states_default_pos.get();
+        let states_pos = if dragged { pos } else { 0 };
         prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, prefs::GLOBAL);
 
         {
@@ -1425,14 +1429,28 @@ impl MainWindow {
         selector.set_visible(prefs.get_bool(prefs::KEY_SHOW_STATE_SELECTOR, prefs::GLOBAL));
         imp.notebook.set_visible(prefs.get_bool(prefs::KEY_SHOW_NOTEBOOK, prefs::GLOBAL));
 
-        // Without a position, the sidebar is as wide as its states (its minimum
-        // width). A saved one wider than a third of the window is ignored, like
+        // A saved position wider than a third of the window is ignored, like
         // those saved when long directory names widened the sidebar.
         let pos = prefs.get_int(prefs::KEY_STATES_PANED_POS, prefs::GLOBAL);
         let window_width = if width > 0 { width } else { self.default_width() as i64 };
         if pos > 0 && pos <= window_width / 3 {
             imp.hpaned.set_position(pos as i32);
         }
+        // Without one, the sidebar is a fifth wider than its states (its
+        // minimum width), for a bit of slack. That's measured once it's shown,
+        // rather than a fixed width, so it follows the fonts, the theme and
+        // the translations. It can still be dragged down to the minimum.
+        let weak = self.downgrade();
+        selector.connect_map(move |selector| {
+            let Some(win) = weak.upgrade() else { return };
+            let paned = &win.imp().hpaned;
+            if !paned.is_position_set() {
+                let (min, ..) = selector.measure(gtk::Orientation::Horizontal, -1);
+                let pos = (f64::from(min) * 1.2).round() as i32;
+                win.imp().states_default_pos.set(pos);
+                paned.set_position(pos);
+            }
+        });
 
         // Drag and Drop
         let drop = gtk::DropTarget::new(
