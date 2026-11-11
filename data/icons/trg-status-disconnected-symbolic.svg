@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- the server picker's status while not connected: the dot's outline, so
+       the states differ in shape too, not only in colour -->
+  <path fill="#2e3436" d="M8 4A4 4 0 1 1 8 12A4 4 0 1 1 8 4ZM8 5.5A2.5 2.5 0 1 0 8 10.5A2.5 2.5 0 1 0 8 5.5Z"/>
+</svg>

@@ -14,7 +14,7 @@ use crate::dialogs;
 use crate::files::{FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
-use crate::menus::{MenuBar, Toolbar};
+use crate::menus::{ConnectionState, MenuBar, Toolbar};
 use crate::panels::{GeneralPanel, StatusBar};
 use crate::peers::{self, PeersModel};
 use crate::prefs;
@@ -232,16 +232,25 @@ impl MainWindow {
         imp.no_results.set_visible(none);
     }
 
-    /// "Not Connected" over the empty torrent list. Its button connects to
-    /// the current profile, or opens the profiles if it has no host yet.
-    fn update_not_connected(&self) {
+    /// Shows the connection in the server picker, and "Not Connected" over
+    /// the empty torrent list. Its button connects to the current profile,
+    /// or opens the profiles if it has no host yet.
+    fn update_connection(&self) {
         let imp = self.imp();
         let client = self.client();
         let prefs = client.prefs();
+        let (state, profile) = if client.is_connected() {
+            (ConnectionState::Connected, prefs::CONNECTION)
+        } else {
+            (ConnectionState::Disconnected, prefs::PROFILE)
+        };
+        let name = prefs.get_string(prefs::KEY_PROFILE_NAME, profile).unwrap_or_default();
+        self.toolbar().set_connection(state, &name);
+
         let has_host =
             prefs.get_string(prefs::KEY_HOSTNAME, prefs::PROFILE).is_some_and(|h| !h.is_empty());
         imp.not_connected_stack.set_visible_child_name(if has_host { "connect" } else { "edit" });
-        imp.not_connected.set_visible(!client.is_connected());
+        imp.not_connected.set_visible(state == ConnectionState::Disconnected);
     }
 
     fn torrent_model(&self) -> TorrentModel {
@@ -484,7 +493,6 @@ impl MainWindow {
         }
 
         self.imp().status_bar.push_connection_msg(&tr("Connecting..."));
-        self.toolbar().set_connecting();
         client.inc_connid();
         let weak = self.downgrade();
         // the session and the torrents in one go
@@ -683,7 +691,6 @@ impl MainWindow {
         if !is_connected {
             if self.dialog_error_handler(&response) {
                 self.reset_connect_args();
-                self.toolbar().set_connected(false);
                 return;
             }
             if let Some(s) = &new_session {
@@ -885,7 +892,6 @@ impl MainWindow {
         let client = self.client();
 
         self.menu_bar().connected_change(connected);
-        self.toolbar().set_connected(connected);
 
         {
             let parts = imp.parts.borrow();
@@ -912,7 +918,7 @@ impl MainWindow {
 
         client.status_change(connected);
         self.update_no_results();
-        self.update_not_connected();
+        self.update_connection();
     }
 
     fn add_actions(&self) {
@@ -1027,6 +1033,7 @@ impl MainWindow {
                 w.dispatch_interactive(p::torrent_pause(None));
             }
         });
+        action("connect-current", |w| w.connect_profile(-1));
         action("local-prefs", |w| w.open_local_prefs());
         action("edit-profiles", |w| w.edit_profiles());
         action("remote-prefs", |w| w.open_remote_prefs());
@@ -1396,14 +1403,16 @@ impl MainWindow {
         // Not wider than the list, when it's narrow
         imp.torrent_overlay.set_clip_overlay(&*imp.no_results, true);
         imp.torrent_overlay.set_clip_overlay(&*imp.not_connected, true);
-        // its button follows the current profile's host
+        // the current profile (None) and its name and host
         let weak = self.downgrade();
         prefs.connect_changed(move |_, key| {
-            if let (Some(win), None | Some(prefs::KEY_HOSTNAME)) = (weak.upgrade(), key) {
-                win.update_not_connected();
+            if let (Some(win), None | Some(prefs::KEY_PROFILE_NAME | prefs::KEY_HOSTNAME)) =
+                (weak.upgrade(), key)
+            {
+                win.update_connection();
             }
         });
-        self.update_not_connected();
+        self.update_connection();
 
         // Typing anywhere in the window filters the torrents, unless the
         // focus widget takes the keys: a text field, or a list with its own

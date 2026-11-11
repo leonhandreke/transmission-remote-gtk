@@ -15,7 +15,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 
-use crate::i18n::tr;
+use crate::i18n::{sprintf, tr};
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs};
 use crate::tree_view::TreeView;
@@ -32,11 +32,13 @@ mod tb_imp {
     #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-toolbar.ui")]
     pub struct Toolbar {
         #[template_child]
-        pub connect_button: TemplateChild<gtk::Button>,
+        pub server_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
-        pub connect_stack: TemplateChild<gtk::Stack>,
+        pub status_icon: TemplateChild<gtk::Image>,
         #[template_child]
-        pub connect_menu_button: TemplateChild<gtk::MenuButton>,
+        pub server_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub server_menu: TemplateChild<gio::Menu>,
     }
 
     #[glib::object_subclass]
@@ -54,7 +56,19 @@ mod tb_imp {
         }
     }
 
-    impl ObjectImpl for Toolbar {}
+    impl ObjectImpl for Toolbar {
+        fn constructed(&self) {
+            self.parent_constructed();
+            // The theme's green, as GTK has no style class for it
+            let css = gtk::CssProvider::new();
+            css.load_from_string("image.server-connected { color: @success_color; }");
+            gtk::style_context_add_provider_for_display(
+                &self.obj().display(),
+                &css,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+    }
     impl WidgetImpl for Toolbar {}
     impl BoxImpl for Toolbar {}
 }
@@ -65,41 +79,50 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectionState {
+    Disconnected,
+    Connected,
+}
+
 impl Toolbar {
     pub fn new(prefs: &Prefs) -> Self {
         let tb: Self = glib::Object::new();
-        tb.imp().connect_menu_button.set_menu_model(Some(&file_connect_menu_new(prefs)));
+        tb.imp().server_menu.prepend_section(None, &file_connect_menu_new(prefs));
         tb
     }
 
-    /// The connect button disconnects while connected.
-    pub fn set_connected(&self, connected: bool) {
+    /// The server picker shows the profile connected to, or the one Connect
+    /// would use, and the state: a green dot while connected, its outline
+    /// otherwise. The state is also in the tooltip and the accessible
+    /// description, as the colour alone doesn't tell it to everyone.
+    pub fn set_connection(&self, state: ConnectionState, name: &str) {
         let imp = self.imp();
-        let (page, label, action, target) = if connected {
-            ("disconnect", tr("Disconnect"), "win.disconnect", None)
-        } else {
-            ("connect", tr("Connect"), "win.connect", Some((-1i32).to_variant()))
+        let (icon, class, description, tooltip) = match state {
+            ConnectionState::Connected => (
+                "trg-status-connected-symbolic",
+                "server-connected",
+                tr("Connected"),
+                sprintf(&tr("Connected to %s"), &[&name]),
+            ),
+            ConnectionState::Disconnected => (
+                "trg-status-disconnected-symbolic",
+                "dim-label",
+                tr("Not connected"),
+                tr("Not connected"),
+            ),
         };
-        imp.connect_stack.set_visible_child_name(page);
-        let button = &imp.connect_button;
-        // unset the action while changing its target, as GTK warns about a
-        // target that doesn't fit the action
-        button.set_action_name(None);
-        button.set_action_target_value(target.as_ref());
-        button.set_action_name(Some(action));
-        button.set_tooltip_text(Some(&label));
-        button.update_property(&[gtk::accessible::Property::Label(&label)]);
-        // undo set_connecting(); the action only sets it when its enabled
-        // state changes
-        button.set_sensitive(true);
-    }
-
-    /// While connecting, the connect button is insensitive, so it can't be
-    /// clicked twice. The profiles in the drop down still work, to connect
-    /// to another one instead.
-    pub fn set_connecting(&self) {
-        self.set_connected(false);
-        self.imp().connect_button.set_sensitive(false);
+        imp.status_icon.set_icon_name(Some(icon));
+        imp.status_icon.set_css_classes(&[class]);
+        imp.server_label.set_label(name);
+        // The name is cut at the window's minimum width, but not to nothing
+        imp.server_label.set_width_chars(name.chars().count().min(8) as i32);
+        let button = &imp.server_button;
+        button.set_tooltip_text(Some(&tooltip));
+        button.update_property(&[
+            gtk::accessible::Property::Label(name),
+            gtk::accessible::Property::Description(&description),
+        ]);
     }
 }
 
@@ -169,17 +192,29 @@ fn file_connect_menu_fill(menu: &gio::Menu, prefs: &Prefs) {
     }
 }
 
-/// A menu of the connection profiles, which keeps itself up to date
-pub fn file_connect_menu_new(prefs: &Prefs) -> gio::Menu {
-    let menu = gio::Menu::new();
-    file_connect_menu_fill(&menu, prefs);
+/// Fills a menu with the connection profiles, and again when they're added,
+/// removed or renamed
+fn file_connect_menu_keep_filled(menu: &gio::Menu, prefs: &Prefs) {
+    file_connect_menu_fill(menu, prefs);
     let weak = menu.downgrade();
-    prefs.connect_profile_changed(move |prefs| {
+    let refill = move |prefs: &Prefs| {
         if let Some(menu) = weak.upgrade() {
             menu.remove_all();
             file_connect_menu_fill(&menu, prefs);
         }
+    };
+    prefs.connect_profile_changed(refill.clone());
+    prefs.connect_changed(move |prefs, key| {
+        if key == Some(prefs::KEY_PROFILE_NAME) {
+            refill(prefs);
+        }
     });
+}
+
+/// A menu of the connection profiles, which keeps itself up to date
+pub fn file_connect_menu_new(prefs: &Prefs) -> gio::Menu {
+    let menu = gio::Menu::new();
+    file_connect_menu_keep_filled(&menu, prefs);
     menu
 }
 
@@ -211,15 +246,7 @@ impl MenuBar {
         let menu: gio::Menu = builder.object("main_menu").unwrap();
 
         // The connect submenu of the File menu
-        let connect_menu: gio::Menu = builder.object("connect_menu").unwrap();
-        file_connect_menu_fill(&connect_menu, prefs);
-        let weak = connect_menu.downgrade();
-        prefs.connect_profile_changed(move |prefs| {
-            if let Some(menu) = weak.upgrade() {
-                menu.remove_all();
-                file_connect_menu_fill(&menu, prefs);
-            }
-        });
+        file_connect_menu_keep_filled(&builder.object("connect_menu").unwrap(), prefs);
 
         // Quit, or on macOS (where it's in the application menu) Close Window
         let file_menu: gio::Menu = builder.object("file_menu").unwrap();
@@ -297,6 +324,8 @@ impl MenuBar {
     pub fn connected_change(&self, connected: bool) {
         if let Some(win) = self.win.upgrade() {
             set_enabled(&win, CONNECTED_ACTIONS, connected);
+            // the server picker's Connect, in place of Disconnect
+            set_enabled(&win, &["connect-current"], !connected);
         }
     }
 
