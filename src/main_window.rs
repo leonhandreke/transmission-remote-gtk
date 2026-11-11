@@ -71,6 +71,10 @@ mod imp {
         #[template_child]
         pub no_results: TemplateChild<gtk::Box>,
         #[template_child]
+        pub not_connected: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub not_connected_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
         pub gen_details: TemplateChild<GeneralPanel>,
         #[template_child]
         pub status_bar: TemplateChild<StatusBar>,
@@ -226,6 +230,18 @@ impl MainWindow {
             && tv.selection().n_items() == 0
             && self.client().is_connected();
         imp.no_results.set_visible(none);
+    }
+
+    /// "Not Connected" over the empty torrent list. Its button connects to
+    /// the current profile, or opens the profiles if it has no host yet.
+    fn update_not_connected(&self) {
+        let imp = self.imp();
+        let client = self.client();
+        let prefs = client.prefs();
+        let has_host =
+            prefs.get_string(prefs::KEY_HOSTNAME, prefs::PROFILE).is_some_and(|h| !h.is_empty());
+        imp.not_connected_stack.set_visible_child_name(if has_host { "connect" } else { "edit" });
+        imp.not_connected.set_visible(!client.is_connected());
     }
 
     fn torrent_model(&self) -> TorrentModel {
@@ -493,6 +509,13 @@ impl MainWindow {
 
     fn open_local_prefs(&self) {
         dialogs::preferences::instance(self, &self.client()).present();
+    }
+
+    /// The local preferences on the Connection tab, which has the profiles
+    fn edit_profiles(&self) {
+        let prefs = dialogs::preferences::instance(self, &self.client());
+        prefs.set_page(0);
+        prefs.present();
     }
 
     fn open_remote_prefs(&self) {
@@ -889,6 +912,7 @@ impl MainWindow {
 
         client.status_change(connected);
         self.update_no_results();
+        self.update_not_connected();
     }
 
     fn add_actions(&self) {
@@ -1004,6 +1028,7 @@ impl MainWindow {
             }
         });
         action("local-prefs", |w| w.open_local_prefs());
+        action("edit-profiles", |w| w.edit_profiles());
         action("remote-prefs", |w| w.open_remote_prefs());
         action("view-stats", |w| {
             if w.client().is_connected() {
@@ -1370,6 +1395,15 @@ impl MainWindow {
         imp.torrent_overlay.set_child(Some(&tv));
         // Not wider than the list, when it's narrow
         imp.torrent_overlay.set_clip_overlay(&*imp.no_results, true);
+        imp.torrent_overlay.set_clip_overlay(&*imp.not_connected, true);
+        // its button follows the current profile's host
+        let weak = self.downgrade();
+        prefs.connect_changed(move |_, key| {
+            if let (Some(win), None | Some(prefs::KEY_HOSTNAME)) = (weak.upgrade(), key) {
+                win.update_not_connected();
+            }
+        });
+        self.update_not_connected();
 
         // Typing anywhere in the window filters the torrents, unless the
         // focus widget takes the keys: a text field, or a list with its own
