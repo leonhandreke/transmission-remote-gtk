@@ -21,8 +21,24 @@ template $TrgToolbar: Box {
     child: Box {
       spacing: 6;
 
-      Image status_icon {
-        icon-name: "trg-status-disconnected-symbolic";
+      // The spinner is as wide as the dot, so the button keeps its width
+      Stack status_stack {
+        StackPage {
+          name: "icon";
+
+          child: Image status_icon {
+            icon-name: "trg-status-disconnected-symbolic";
+          };
+        }
+
+        StackPage {
+          name: "spinner";
+
+          // see util::restart_spinner()
+          child: Box spinner_box {
+            Spinner {}
+          };
+        }
       }
 
       // Long names are cut, see Toolbar::set_connection()

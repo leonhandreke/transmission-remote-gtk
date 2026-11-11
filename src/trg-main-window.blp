@@ -86,7 +86,8 @@ template $TrgMainWindow: ApplicationWindow {
             }
 
             // Without a host to connect to, as on the first start, the
-            // button opens the profiles instead, see update_connection()
+            // button opens the profiles instead, and while connecting
+            // there's a spinner in its place, see update_connection()
             Stack not_connected_stack {
               hhomogeneous: false;
               margin-top: 12;
@@ -117,6 +118,22 @@ template $TrgMainWindow: ApplicationWindow {
                   styles [
                     "suggested-action",
                   ]
+                };
+              }
+
+              StackPage {
+                name: "connecting";
+
+                // see util::restart_spinner()
+                child: Box connecting_box {
+                  halign: center;
+                  spacing: 6;
+
+                  Spinner {}
+
+                  Label connecting_label {
+                    ellipsize: end;
+                  }
                 };
               }
             }

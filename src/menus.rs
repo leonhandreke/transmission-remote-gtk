@@ -34,7 +34,11 @@ mod tb_imp {
         #[template_child]
         pub server_button: TemplateChild<gtk::MenuButton>,
         #[template_child]
+        pub status_stack: TemplateChild<gtk::Stack>,
+        #[template_child]
         pub status_icon: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub spinner_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub server_label: TemplateChild<gtk::Label>,
         #[template_child]
@@ -82,6 +86,7 @@ glib::wrapper! {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConnectionState {
     Disconnected,
+    Connecting,
     Connected,
 }
 
@@ -98,10 +103,11 @@ impl Toolbar {
         tb
     }
 
-    /// The server picker shows the profile connected to, or the one Connect
-    /// would use, and the state: a green dot while connected, its outline
-    /// otherwise. The state is also in the tooltip and the accessible
-    /// description, as the colour alone doesn't tell it to everyone.
+    /// The server picker shows the profile connected (or connecting) to, or
+    /// the one Connect would use, and the state: a green dot while
+    /// connected, a spinner while connecting, the dot's outline otherwise.
+    /// The state is also in the tooltip and the accessible description, as
+    /// the colour alone doesn't tell it to everyone.
     pub fn set_connection(&self, state: ConnectionState, name: &str) {
         let imp = self.imp();
         let (icon, class, description, tooltip) = match state {
@@ -110,6 +116,12 @@ impl Toolbar {
                 "server-connected",
                 tr("Connected"),
                 sprintf(&tr("Connected to %s"), &[&name]),
+            ),
+            ConnectionState::Connecting => (
+                "trg-status-disconnected-symbolic",
+                "dim-label",
+                tr("Connecting"),
+                sprintf(&tr("Connecting to %s…"), &[&name]),
             ),
             ConnectionState::Disconnected => (
                 "trg-status-disconnected-symbolic",
@@ -120,6 +132,14 @@ impl Toolbar {
         };
         imp.status_icon.set_icon_name(Some(icon));
         imp.status_icon.set_css_classes(&[class]);
+        // in the dot's place, which is as wide
+        let stack = &imp.status_stack;
+        if state != ConnectionState::Connecting {
+            stack.set_visible_child_name("icon");
+        } else if stack.visible_child_name().as_deref() != Some("spinner") {
+            util::restart_spinner(&imp.spinner_box);
+            stack.set_visible_child_name("spinner");
+        }
         imp.server_label.set_label(name);
         // The name is cut at the window's minimum width, but not to nothing
         imp.server_label.set_width_chars(name.chars().count().min(8) as i32);
@@ -135,7 +155,7 @@ impl Toolbar {
 /* The main menu */
 
 const CONNECTED_ACTIONS: &[&str] =
-    &["add", "add-url", "disconnect", "remote-prefs", "view-stats", "resume-all", "pause-all"];
+    &["add", "add-url", "remote-prefs", "view-stats", "resume-all", "pause-all"];
 
 const TORRENT_ACTIONS: &[&str] = &[
     "properties",
@@ -292,7 +312,7 @@ impl MenuBar {
             append_items(&menu, &builder.object::<gio::MenuModel>("help_menu").unwrap());
         }
 
-        mb.connected_change(false);
+        mb.connection_change(ConnectionState::Disconnected);
         mb.torrent_actions_sensitive(false);
 
         let w = win.downgrade();
@@ -327,11 +347,13 @@ impl MenuBar {
         self.queues_shown.set(supports);
     }
 
-    pub fn connected_change(&self, connected: bool) {
+    pub fn connection_change(&self, state: ConnectionState) {
         if let Some(win) = self.win.upgrade() {
-            set_enabled(&win, CONNECTED_ACTIONS, connected);
-            // the server picker's Connect, in place of Disconnect
-            set_enabled(&win, &["connect-current"], !connected);
+            set_enabled(&win, CONNECTED_ACTIONS, state == ConnectionState::Connected);
+            // Disconnect also stops connecting. Otherwise the server picker
+            // has Connect in its place.
+            set_enabled(&win, &["disconnect"], state != ConnectionState::Disconnected);
+            set_enabled(&win, &["connect-current"], state == ConnectionState::Disconnected);
         }
     }
 
