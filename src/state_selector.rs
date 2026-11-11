@@ -695,7 +695,8 @@ impl StateSelector {
             let count = gtk::Label::new(None);
             count.add_css_class("dim-label");
             count.add_css_class("numeric");
-            // room for two digits, so the sidebar doesn't widen as they come
+            // room for two digits, also when there are none (disconnected),
+            // so the sidebar doesn't widen as they come
             count.set_width_chars(2);
             count.set_xalign(1.0);
             bx.append(&count);
@@ -801,8 +802,7 @@ fn row_refresh(li: &gtk::ListItem) {
 
     image.set_icon_name(item.string(COL_ICON).as_deref());
     name.set_text(&item.string(COL_NAME).unwrap_or_default());
-    if count > 0 {
-        count_label.set_text(&count.to_string());
-    }
-    count_label.set_visible(count > 0);
+    // Empty rather than hidden, so it keeps its room (see the factory's
+    // setup) and the sidebar's width doesn't change on connecting
+    count_label.set_text(&if count > 0 { count.to_string() } else { String::new() });
 }
