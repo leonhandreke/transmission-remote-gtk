@@ -2,7 +2,6 @@
 //! (trg-main-window.c).
 
 use std::cell::{Cell, OnceCell, RefCell};
-use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -11,16 +10,15 @@ use gtk::{CompositeTemplate, gdk, gio, glib};
 use crate::add_torrents::{self, AddOptions};
 use crate::client::ConnectionState;
 use crate::client::{Client, Response};
+use crate::details::DetailLists;
 use crate::dialogs::{
     self, preferences::PreferencesDialog, remote_prefs::RemotePrefsDialog, stats::StatsDialog,
 };
-use crate::files::{FilesModel, FilesView};
 use crate::general_panel::GeneralPanel;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
 use crate::json::{get_bool, get_str};
 use crate::menu_bar::MenuBar;
-use crate::peers::{self, PeersModel};
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
 use crate::state_selector::{FILTER_FLAG_DIR, FILTER_FLAG_TRACKER, StateSelector};
@@ -29,7 +27,6 @@ use crate::toolbar::Toolbar;
 use crate::torrent_menu;
 use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel, UpdateMode};
 use crate::torrent_view;
-use crate::trackers::{TrackersModel, TrackersView};
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
 use crate::util;
 
@@ -41,23 +38,7 @@ pub struct Parts {
     toolbar: Toolbar,
     menu_bar: MenuBar,
     state_selector: StateSelector,
-    details: Details,
-}
-
-/// The lists of the torrent details, the pages of the notebook after General
-struct Details {
-    trackers_model: Rc<TrackersModel>,
-    trackers_view: Rc<TrackersView>,
-    files_model: Rc<FilesModel>,
-    files_view: Rc<FilesView>,
-    peers_model: Rc<PeersModel>,
-    peers_tv: TreeView,
-}
-
-impl Details {
-    fn views(&self) -> [&TreeView; 3] {
-        [&self.trackers_view.tv, &self.files_view.tv, &self.peers_tv]
-    }
+    details: DetailLists,
 }
 
 mod imp {
@@ -342,12 +323,9 @@ impl MainWindow {
 
         match data {
             Some((t, item)) => {
-                let details = &self.parts().details;
                 self.menu_bar().torrent_actions_sensitive(true);
                 self.imp().gen_details.update(&t, &item);
-                details.trackers_model.update(serial, &t, mode);
-                details.files_model.update(&t, mode);
-                details.peers_model.update(&details.peers_tv, serial, &t, mode);
+                self.parts().details.update(&t, serial, mode);
             }
             None => self.torrent_scrub(),
         }
@@ -396,9 +374,8 @@ impl MainWindow {
         prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, Scope::Global);
 
         let parts = self.parts();
-        for tv in parts.details.views().into_iter().chain([&parts.torrent_tv]) {
-            tv.persist(PERSIST_SORT | PERSIST_LAYOUT);
-        }
+        parts.details.persist();
+        parts.torrent_tv.persist(PERSIST_SORT | PERSIST_LAYOUT);
         prefs.save();
 
         imp.state_saved.set(true);
@@ -649,29 +626,6 @@ impl MainWindow {
         });
     }
 
-    /// The lists of the torrent details, in the notebook
-    fn details_new(&self) -> Details {
-        let client = self.client();
-        let notebook = &self.imp().notebook;
-        let page = |child: &TreeView, title: &str| {
-            notebook.append_page(child, Some(&gtk::Label::new(Some(title))));
-        };
-
-        let trackers_model = TrackersModel::new();
-        let trackers_view = TrackersView::new(&trackers_model, &client, self, None);
-        page(&trackers_view.tv, &tr("Trackers"));
-
-        let files_model = FilesModel::new();
-        let files_view = FilesView::new(&files_model, self, &client, None);
-        page(&files_view.tv, &tr("Files"));
-
-        let peers_model = PeersModel::new();
-        let peers_tv = peers::peers_tree_view_new(client.prefs(), &peers_model, None);
-        page(&peers_tv, &tr("Peers"));
-
-        Details { trackers_model, trackers_view, files_model, files_view, peers_model, peers_tv }
-    }
-
     fn start_session_timer(&self) {
         let prefs = self.client().prefs().clone();
         let interval =
@@ -918,11 +872,7 @@ impl MainWindow {
 
     fn torrent_scrub(&self) {
         let imp = self.imp();
-        let details = &self.parts().details;
-        details.files_model.clear();
-        details.trackers_model.clear();
-        details.peers_model.clear();
-        details.trackers_model.set_no_selection();
+        self.parts().details.clear();
         imp.gen_details.clear();
         self.menu_bar().torrent_actions_sensitive(false);
     }
@@ -935,9 +885,8 @@ impl MainWindow {
         imp.connecting.set(false);
 
         let parts = self.parts();
-        for tv in parts.details.views().into_iter().chain([&parts.torrent_tv]) {
-            tv.set_sensitive(connected);
-        }
+        parts.torrent_tv.set_sensitive(connected);
+        parts.details.set_sensitive(connected);
         imp.gen_details.set_sensitive(connected);
 
         if connected {
@@ -1173,7 +1122,10 @@ impl MainWindow {
 
         let tv = torrent_view::torrent_tree_view_new(&client, &filtered);
         let selector = StateSelector::new(&client, &model);
-        let details = self.details_new();
+        let details = DetailLists::new(self, &client, "");
+        for (tv, title) in details.pages() {
+            imp.notebook.append_page(tv, Some(&gtk::Label::new(Some(&title))));
+        }
 
         // Everything the menus and toolbar can do is a "win." action. The menu
         // bar adds the stateful view actions (check and radio items).
@@ -1282,9 +1234,8 @@ impl MainWindow {
         self.refilter();
 
         // the lists are enabled once connected (conn_changed)
-        for tv in self.parts().details.views().into_iter().chain([&tv]) {
-            tv.set_sensitive(false);
-        }
+        tv.set_sensitive(false);
+        self.parts().details.set_sensitive(false);
 
         imp.status_bar.set_client(self, &client);
         let weak = self.downgrade();

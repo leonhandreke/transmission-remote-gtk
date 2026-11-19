@@ -8,7 +8,7 @@
 //! In the Transmission styles, a single torrent also has pages of
 //! information, files, peers and trackers, which keep themselves up to date.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -16,35 +16,21 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
 use crate::client::Client;
+use crate::details::DetailLists;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
-use crate::files::{FilesModel, FilesView};
 use crate::format;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
 use crate::json::{Obj, get_bool, get_i64, get_str};
 use crate::main_window::MainWindow;
-use crate::peers::{self, PeersModel};
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
 use crate::torrent_model as tm;
 use crate::torrent_model::UpdateMode;
 use crate::torrent_view;
-use crate::trackers::{TrackersModel, TrackersView};
-use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
+use crate::tree_view::TreeView;
 use crate::util;
-
-#[derive(Default)]
-pub struct Details {
-    files_model: Option<Rc<FilesModel>>,
-    files_view: Option<Rc<FilesView>>,
-    peers_model: Option<Rc<PeersModel>>,
-    peers_tv: Option<TreeView>,
-    trackers_model: Option<Rc<TrackersModel>>,
-    trackers_view: Option<Rc<TrackersView>>,
-    last_json: Option<Rc<Obj>>,
-    update_handler: Option<glib::SignalHandlerId>,
-}
 
 mod imp {
     use super::*;
@@ -118,7 +104,11 @@ mod imp {
         pub target_ids: RefCell<Vec<i64>>,
         pub widgets: RefCell<JsonWidgets>,
         pub show_details: Cell<bool>,
-        pub details: RefCell<Details>,
+        /// With show_details: the lists, the torrent shown and the handler
+        /// updating them
+        pub lists: OnceCell<DetailLists>,
+        pub last_json: RefCell<Option<Rc<Obj>>>,
+        pub update_handler: RefCell<Option<glib::SignalHandlerId>>,
     }
 
     #[glib::object_subclass]
@@ -139,7 +129,7 @@ mod imp {
 
     impl ObjectImpl for TorrentPropsDialog {
         fn dispose(&self) {
-            let handler = self.details.borrow_mut().update_handler.take();
+            let handler = self.update_handler.take();
             if let (Some(h), Some(model)) =
                 (handler, self.client.borrow().as_ref().and_then(|c| c.torrent_model()))
             {
@@ -215,52 +205,24 @@ impl TorrentPropsDialog {
                 d.info_page_update(&json, item);
             }
 
-            let mut details = imp.details.borrow_mut();
-
-            // Files
-            let files_model = FilesModel::new();
-            let files_view =
-                FilesView::new(&files_model, win, client, Some("TrgFilesTreeView-dialog"));
-            files_model.update(&json, UpdateMode::First);
-            notebook.insert_page(
-                &files_view.tv,
-                Some(&gtk::Label::new(Some(&tr("Files")))),
-                Some(1),
-            );
-
-            // Peers
-            let peers_model = PeersModel::new();
-            let peers_tv =
-                peers::peers_tree_view_new(&prefs, &peers_model, Some("TrgPeersTreeView-dialog"));
-            peers_model.update(&peers_tv, serial, &json, UpdateMode::First);
-            notebook.insert_page(&peers_tv, Some(&gtk::Label::new(Some(&tr("Peers")))), Some(2));
-
-            // Trackers
-            let trackers_model = TrackersModel::new();
-            let trackers_view =
-                TrackersView::new(&trackers_model, client, win, Some("TrgTrackersTreeView-dialog"));
-            trackers_model.update(serial, &json, UpdateMode::First);
-            notebook.insert_page(
-                &trackers_view.tv,
-                Some(&gtk::Label::new(Some(&tr("Trackers")))),
-                Some(3),
-            );
-
-            details.files_model = Some(files_model);
-            details.files_view = Some(files_view);
-            details.peers_model = Some(peers_model);
-            details.peers_tv = Some(peers_tv);
-            details.trackers_model = Some(trackers_model);
-            details.trackers_view = Some(trackers_view);
-            details.last_json = Some(json.clone());
+            // after the information page
+            let lists = DetailLists::new(win, client, "-dialog");
+            lists.update(&json, serial, UpdateMode::First);
+            let [trackers, files, peers] = lists.pages();
+            for (position, (tv, title)) in [files, peers, trackers].into_iter().enumerate() {
+                let label = gtk::Label::new(Some(&title));
+                notebook.insert_page(tv, Some(&label), Some(position as u32 + 1));
+            }
+            imp.lists.set(lists).ok();
+            imp.last_json.replace(Some(json.clone()));
 
             if let Some(model) = client.torrent_model() {
                 let weak = d.downgrade();
-                details.update_handler = Some(model.connect_update(move || {
+                imp.update_handler.replace(Some(model.connect_update(move || {
                     if let Some(d) = weak.upgrade() {
                         d.models_updated();
                     }
-                }));
+                })));
             }
         } else if let Some(n) = notebook.page_num(&imp.info_page.get()) {
             notebook.remove_page(Some(n));
@@ -292,16 +254,8 @@ impl TorrentPropsDialog {
             let (w, h) = self.default_size();
             prefs.set_int(prefs::KEY_PROPS_DIALOG_WIDTH, w as i64, Scope::Global);
             prefs.set_int(prefs::KEY_PROPS_DIALOG_HEIGHT, h as i64, Scope::Global);
-            let details = imp.details.borrow();
-            let flags = PERSIST_SORT | PERSIST_LAYOUT;
-            if let Some(tv) = &details.peers_tv {
-                tv.persist(flags);
-            }
-            if let Some(v) = &details.files_view {
-                v.tv.persist(flags);
-            }
-            if let Some(v) = &details.trackers_view {
-                v.tv.persist(flags);
+            if let Some(lists) = imp.lists.get() {
+                lists.persist();
             }
         }
 
@@ -436,42 +390,15 @@ impl TorrentPropsDialog {
         let data = client.torrent_data(id);
         let exists = data.is_some();
 
-        let (files_model, peers_model, peers_tv, trackers_model, last) = {
-            let d = imp.details.borrow();
-            (
-                d.files_model.clone(),
-                d.peers_model.clone(),
-                d.peers_tv.clone(),
-                d.trackers_model.clone(),
-                d.last_json.clone(),
-            )
-        };
+        let Some(lists) = imp.lists.get() else { return };
 
+        let last = imp.last_json.replace(data.as_ref().map(|(t, _)| t.clone()));
         if let Some((t, item)) = &data
-            && !last.as_ref().is_some_and(|l| Rc::ptr_eq(l, t))
+            && !last.is_some_and(|l| Rc::ptr_eq(&l, t))
         {
-            if let Some(m) = &files_model {
-                m.update(t, UpdateMode::Update);
-            }
-            if let (Some(m), Some(tv)) = (&peers_model, &peers_tv) {
-                m.update(tv, serial, t, UpdateMode::Update);
-            }
-            if let Some(m) = &trackers_model {
-                m.update(serial, t, UpdateMode::Update);
-            }
+            lists.update(t, serial, UpdateMode::Update);
             self.info_page_update(t, item);
         }
-
-        let mut d = imp.details.borrow_mut();
-        if let Some(v) = &d.files_view {
-            v.tv.set_sensitive(exists);
-        }
-        if let Some(v) = &d.trackers_view {
-            v.tv.set_sensitive(exists);
-        }
-        if let Some(tv) = &d.peers_tv {
-            tv.set_sensitive(exists);
-        }
-        d.last_json = data.map(|(t, _)| t);
+        lists.set_sensitive(exists);
     }
 }
