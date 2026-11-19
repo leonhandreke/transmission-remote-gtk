@@ -11,7 +11,7 @@ use gtk::{CompositeTemplate, gio, glib};
 use crate::add_torrents::{self, AddOptions};
 use crate::bencode;
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::destination_combo::DestinationCombo;
 use crate::files::{self, FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
@@ -167,7 +167,7 @@ const APPLY_ALL_CHOICES: &[(&str, usize, i64)] = &[
 impl TorrentAddDialog {
     #[template_callback]
     fn source_click_cb(button: &gtk::Button) {
-        let Some(d) = dialog::ancestor::<TorrentAddDialog>(button) else { return };
+        let Some(d) = util::ancestor::<TorrentAddDialog>(button) else { return };
         let dialog = generic_dialog(d.client().prefs());
         let weak = d.downgrade();
         dialog.open_multiple(Some(&d), gio::Cancellable::NONE, move |result| {

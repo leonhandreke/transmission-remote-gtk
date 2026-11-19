@@ -16,7 +16,7 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::files::{FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
@@ -164,7 +164,7 @@ impl TorrentPropsDialog {
     /// The ratio limit is for "Stop seeding at ratio"
     #[template_callback]
     fn seed_ratio_mode_changed_cb(dd: &gtk::DropDown, _pspec: &glib::ParamSpec) {
-        if let Some(d) = dialog::ancestor::<TorrentPropsDialog>(dd) {
+        if let Some(d) = util::ancestor::<TorrentPropsDialog>(dd) {
             d.imp().seed_ratio_limit_spin.set_sensitive(dd.selected() == 1);
         }
     }
@@ -172,7 +172,7 @@ impl TorrentPropsDialog {
     /// The first piece is for sequential downloads
     #[template_callback]
     fn sequential_download_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(d) = dialog::ancestor::<TorrentPropsDialog>(check) {
+        if let Some(d) = util::ancestor::<TorrentPropsDialog>(check) {
             d.imp().sequential_from_piece_spin.set_sensitive(check.is_active());
         }
     }

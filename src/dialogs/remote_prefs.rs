@@ -10,7 +10,7 @@ use gtk::{CompositeTemplate, glib};
 use serde_json::json;
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::i18n::{sprintf, tr};
 use crate::json::{Obj, get_bool, get_i64, get_str};
@@ -173,7 +173,7 @@ pub fn instance(win: &MainWindow, client: &Client) -> RemotePrefsDialog {
 }
 
 fn dlg(w: &impl IsA<gtk::Widget>) -> Option<RemotePrefsDialog> {
-    dialog::ancestor::<RemotePrefsDialog>(w)
+    util::ancestor::<RemotePrefsDialog>(w)
 }
 
 /// The abbreviated names of the days of the week of the locale (Sunday

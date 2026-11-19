@@ -10,7 +10,6 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 
 use crate::client::Client;
-use crate::dialog;
 use crate::json::{get_str, objects};
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
@@ -77,7 +76,7 @@ glib::wrapper! {
 impl DestinationCombo {
     #[template_callback]
     fn trg_destination_combo_entry_changed_cb(entry: &gtk::Entry) {
-        if let Some(combo) = dialog::ancestor::<DestinationCombo>(entry) {
+        if let Some(combo) = util::ancestor::<DestinationCombo>(entry) {
             combo.emit_by_name::<()>("changed", &[]);
         }
     }

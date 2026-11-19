@@ -197,13 +197,3 @@ pub trait TrgDialogExt: IsA<Dialog> + 'static {
 }
 
 impl<T: IsA<Dialog>> TrgDialogExt for T {}
-
-/// The widget of type T that widget is in (the template object of a
-/// callback of a template, as the callbacks get the emitter)
-pub fn ancestor<T: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Option<T> {
-    let widget = widget.as_ref();
-    if let Some(t) = widget.downcast_ref::<T>() {
-        return Some(t.clone());
-    }
-    widget.ancestor(T::static_type()).and_downcast::<T>()
-}

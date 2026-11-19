@@ -13,7 +13,7 @@ use gtk::{CompositeTemplate, gio, glib};
 use serde_json::{Value, json};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
 use crate::json::{get_str, objects};
@@ -437,7 +437,7 @@ pub fn instance(win: &MainWindow, client: &Client) -> PreferencesDialog {
 }
 
 fn dlg(w: &impl IsA<gtk::Widget>) -> Option<PreferencesDialog> {
-    dialog::ancestor::<PreferencesDialog>(w)
+    util::ancestor::<PreferencesDialog>(w)
 }
 
 #[gtk::template_callbacks]

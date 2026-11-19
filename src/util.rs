@@ -220,6 +220,16 @@ pub fn add_links_to_text(original: &str) -> String {
 
 /* GTK */
 
+/// The widget of type T that widget is in (the template object of a
+/// callback of a template, as the callbacks get the emitter)
+pub fn ancestor<T: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Option<T> {
+    let widget = widget.as_ref();
+    if let Some(t) = widget.downcast_ref::<T>() {
+        return Some(t.clone());
+    }
+    widget.ancestor(T::static_type()).and_downcast::<T>()
+}
+
 /// Whether we're running on GTK's macOS backend, so should follow macOS
 /// conventions (native menu bar, Command key shortcuts, ...).
 pub fn is_macos() -> bool {

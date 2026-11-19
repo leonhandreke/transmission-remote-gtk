@@ -7,7 +7,7 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
 use crate::json::get_bool;
 use crate::main_window::MainWindow;
@@ -61,7 +61,7 @@ glib::wrapper! {
 impl TorrentAddUrlDialog {
     #[template_callback]
     fn url_entry_changed(entry: &gtk::Entry) {
-        if let Some(d) = dialog::ancestor::<TorrentAddUrlDialog>(entry) {
+        if let Some(d) = util::ancestor::<TorrentAddUrlDialog>(entry) {
             d.action_set_enabled("dialog.accept", entry.text_length() > 0);
         }
     }

@@ -9,7 +9,6 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
 use crate::client::Client;
-use crate::dialog;
 use crate::i18n::{sprintf, tr};
 use crate::json::{Obj, get_bool, get_i64, get_str, value_as_i64};
 use crate::main_window::MainWindow;
@@ -136,7 +135,7 @@ glib::wrapper! {
 impl StatusBar {
     #[template_callback]
     fn turtle_toggle(gesture: &gtk::GestureClick, _n_press: i32, _x: f64, _y: f64) {
-        let Some(sb) = gesture.widget().and_then(|w| dialog::ancestor::<StatusBar>(&w)) else {
+        let Some(sb) = gesture.widget().and_then(|w| util::ancestor::<StatusBar>(&w)) else {
             return;
         };
         let imp = sb.imp();

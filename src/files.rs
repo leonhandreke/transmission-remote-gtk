@@ -17,7 +17,7 @@ use gtk::{CompositeTemplate, gio, glib};
 use serde_json::Value;
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::{sprintf, tr};
 use crate::item::{self, Item, Val};
 use crate::json::{Obj, get_i64, get_str, value_as_i64};
@@ -730,7 +730,7 @@ glib::wrapper! {
 impl FileRenameDialog {
     #[template_callback]
     fn name_changed(entry: &gtk::Entry) {
-        if let Some(d) = dialog::ancestor::<FileRenameDialog>(entry) {
+        if let Some(d) = util::ancestor::<FileRenameDialog>(entry) {
             d.action_set_enabled("dialog.accept", entry.text_length() > 0);
         }
     }

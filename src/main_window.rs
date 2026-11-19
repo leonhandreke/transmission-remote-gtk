@@ -11,7 +11,6 @@ use gtk::{CompositeTemplate, gdk, gio, glib};
 use crate::add_torrents::{self, AddOptions};
 use crate::client::ConnectionState;
 use crate::client::{Client, Response};
-use crate::dialog;
 use crate::dialogs;
 use crate::files::{FilesModel, FilesView};
 use crate::general_panel::GeneralPanel;
@@ -138,7 +137,7 @@ glib::wrapper! {
 }
 
 fn main_window_of(w: &gtk::Widget) -> Option<MainWindow> {
-    dialog::ancestor::<MainWindow>(w)
+    util::ancestor::<MainWindow>(w)
 }
 
 #[gtk::template_callbacks]
