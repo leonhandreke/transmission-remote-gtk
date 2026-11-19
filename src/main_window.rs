@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gdk, gio, glib};
 
+use crate::add_torrents::{self, AddOptions};
 use crate::client::{Client, Response};
 use crate::dialog;
 use crate::dialogs;
@@ -25,7 +26,6 @@ use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel, UpdateMode}
 use crate::torrent_view;
 use crate::trackers::{TrackersModel, TrackersView};
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
-use crate::upload::{self, AddOptions};
 use crate::util;
 
 #[derive(Default)]
@@ -480,7 +480,7 @@ impl MainWindow {
         if prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, Scope::Global) {
             dialogs::add::TorrentAddDialog::new_from_filenames(self, &client, uris).present();
         } else {
-            upload::add_torrents(self, &client, &uris, &AddOptions::from_prefs(prefs));
+            add_torrents::add_torrents(self, &client, &uris, &AddOptions::from_prefs(prefs));
         }
     }
 

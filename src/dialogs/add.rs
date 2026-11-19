@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 
+use crate::add_torrents::{self, AddOptions};
 use crate::bencode;
 use crate::client::Client;
 use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
@@ -18,7 +19,6 @@ use crate::item;
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_NORMAL};
-use crate::upload::{self, AddOptions};
 use crate::util;
 
 const MAGNET_MAX_LINK_WIDTH: usize = 75;
@@ -149,7 +149,7 @@ pub fn add_dialog(win: &MainWindow, client: &Client) {
         if show_options {
             TorrentAddDialog::new_from_filenames(&win, &client, list).present();
         } else {
-            upload::add_torrents(&win, &client, &list, &AddOptions::from_prefs(prefs));
+            add_torrents::add_torrents(&win, &client, &list, &AddOptions::from_prefs(prefs));
         }
     });
 }
@@ -356,7 +356,7 @@ impl TorrentAddDialog {
                 files_wanted: Some(wanted.collect()),
                 file_priorities: Some(priorities.collect()),
             };
-            upload::add_torrents(&win, &self.client(), &imp.filenames.take(), &options);
+            add_torrents::add_torrents(&win, &self.client(), &imp.filenames.take(), &options);
             dest.save_selection();
         }
 

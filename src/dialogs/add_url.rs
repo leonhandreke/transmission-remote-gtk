@@ -106,7 +106,7 @@ impl TorrentAddUrlDialog {
 
                 let req = p::torrent_add_url(&text, imp.start_check.is_active());
                 if let Some(win) = imp.win.upgrade() {
-                    crate::upload::dispatch_adds(&win, &client, vec![req]);
+                    crate::add_torrents::dispatch_adds(&win, &client, vec![req]);
                 }
             }
             d.destroy();
