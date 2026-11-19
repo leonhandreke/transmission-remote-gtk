@@ -8,7 +8,7 @@ use gtk::subclass::prelude::*;
 use gtk::{gio, glib, pango};
 
 use crate::client::Client;
-use crate::i18n::{ctr, ntr, sprintf, tr};
+use crate::i18n::{ntr, sprintf, tr};
 use crate::item::Item;
 use crate::prefs;
 use crate::protocol::{
@@ -323,13 +323,13 @@ impl RowValues {
         } else if flags & TORRENT_FLAG_CHECKING != 0 {
             sprintf(&tr("Verifying data (%1$s tested)"), &[&util::format_percent(self.done)])
         } else if flags & (TORRENT_FLAG_DOWNLOADING | TORRENT_FLAG_SEEDING) != 0 {
-            let mut s = String::new();
-            if flags & !TORRENT_FLAG_DOWNLOADING != 0 {
-                s.push_str(&sprintf(&tr("Ratio %s"), &[&util::format_ratio(self.ratio)]));
-                s.push_str(", ");
-            }
-            s.push_str(&self.short_transfer_string());
-            s
+            // (the C version meant to show the ratio only while seeding, but
+            // its test, flags & ~DOWNLOADING, is always true)
+            format!(
+                "{}, {}",
+                sprintf(&tr("Ratio %s"), &[&util::format_ratio(self.ratio)]),
+                self.short_transfer_string()
+            )
         } else {
             String::new()
         }
@@ -388,18 +388,12 @@ impl RowValues {
             String::new()
         };
 
-        // (these are always true in the C version, which tests flags & ~flag)
-        if flags & !TORRENT_FLAG_WAITING_CHECK != 0
-            && flags & !TORRENT_FLAG_CHECKING != 0
-            && flags & !TORRENT_FLAG_DOWNLOADING_WAIT != 0
-            && flags & !TORRENT_FLAG_SEEDING_WAIT != 0
-            && flags & !TORRENT_FLAG_PAUSED != 0
-        {
-            let t = self.short_transfer_string();
-            if !t.is_empty() {
-                s.push_str(" - ");
-                s.push_str(&t);
-            }
+        // (always, as in the C version, which meant to skip this for paused
+        // and waiting torrents but tests flags & ~flag)
+        let t = self.short_transfer_string();
+        if !t.is_empty() {
+            s.push_str(" - ");
+            s.push_str(&t);
         }
         s
     }
@@ -568,14 +562,9 @@ impl TorrentRow {
         let Some(client) = imp.client.borrow().clone() else { return };
         let v = RowValues::from_item(&item);
 
-        let active = v.flags & !TORRENT_FLAG_PAUSED != 0
-            && v.flags & !TORRENT_FLAG_DOWNLOADING_WAIT != 0
-            && v.flags & !TORRENT_FLAG_SEEDING_WAIT != 0;
-        let sensitive = active || v.error != 0;
         let percent_done = v.percent_done(&client);
 
         imp.icon.set_from_gicon(&v.icon());
-        imp.icon.set_sensitive(sensitive);
 
         if let Some(name) = imp.name.borrow().as_ref() {
             name.set_text(&item.string(COL_NAME).unwrap_or_default());
@@ -583,13 +572,9 @@ impl TorrentRow {
         }
 
         imp.bar.set_fraction(percent_done.clamp(0.0, 100.0) / 100.0);
-        imp.bar.set_sensitive(sensitive);
 
         let status_text = if imp.compact.get() {
-            imp.bar.set_text(Some(&sprintf(
-                &ctr("progress bar label", "%d %%"),
-                &[&(percent_done as i64)],
-            )));
+            imp.bar.set_text(Some(&util::progress_text(percent_done)));
             v.short_status_string()
         } else {
             if let Some(progress) = imp.progress.borrow().as_ref() {
