@@ -30,6 +30,14 @@ pub use crate::rpc::Error;
 /// The result of a request
 pub type Response = rpc::Result;
 
+/// The state of the connection to the server, as the window shows it
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectionState {
+    Disconnected,
+    Connecting,
+    Connected,
+}
+
 mod imp {
     use super::*;
     use std::sync::OnceLock;

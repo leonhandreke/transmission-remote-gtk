@@ -9,7 +9,7 @@ use gtk::{gio, glib};
 
 use crate::client::Client;
 use crate::main_window::MainWindow;
-use crate::menus;
+use crate::menu_bar;
 use crate::util;
 
 /// The project page, which is the help on macOS
@@ -185,7 +185,7 @@ impl App {
 
         let client = self.imp().client.borrow().clone().unwrap();
         let window = MainWindow::new(self.upcast_ref(), &client);
-        menus::set_accels(self.upcast_ref());
+        menu_bar::set_accels(self.upcast_ref());
         if util::is_macos() {
             self.macos_startup(&window);
         }
