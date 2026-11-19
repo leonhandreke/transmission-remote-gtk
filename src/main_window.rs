@@ -1045,8 +1045,7 @@ impl MainWindow {
     }
 
     fn torrent_tv_context_menu(&self, tv: &TreeView, x: f64, y: f64) -> bool {
-        // from the keyboard, or on a row; the column headers have their own menu
-        if x >= 0.0 && (tv.point_in_header(x, y) || !tv.select_at(x, y)) {
+        if !tv.context_menu_for_rows(x, y) {
             return false;
         }
         let imp = self.imp();

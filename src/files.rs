@@ -664,16 +664,10 @@ impl FilesView {
     }
 
     fn context_menu(self: &Rc<Self>, x: f64, y: f64) -> bool {
-        // from the keyboard
-        if x < 0.0 {
+        let for_rows = self.tv.context_menu_for_rows(x, y);
+        if for_rows {
             self.popup_menu(x, y);
-            return true;
         }
-        // the column headers have their own menu
-        if self.tv.point_in_header(x, y) || !self.tv.select_at(x, y) {
-            return false;
-        }
-        self.popup_menu(x, y);
-        true
+        for_rows
     }
 }

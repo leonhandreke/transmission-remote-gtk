@@ -1343,6 +1343,13 @@ impl TreeView {
         Some((item::row_item(&row)?, li.position()))
     }
 
+    /// Whether a context menu asked for at x, y (-1 from the keyboard) is
+    /// for the selected rows: it's from the keyboard, or on a row, which is
+    /// selected then. The column headers have their own menu.
+    pub fn context_menu_for_rows(&self, x: f64, y: f64) -> bool {
+        x < 0.0 || (!self.point_in_header(x, y) && self.select_at(x, y))
+    }
+
     /// For a context menu: select the row at x, y unless it's already
     /// selected. Returns whether there was a row.
     pub fn select_at(&self, x: f64, y: f64) -> bool {
