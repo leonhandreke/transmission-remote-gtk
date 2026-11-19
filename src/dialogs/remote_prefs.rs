@@ -18,10 +18,6 @@ use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::util;
 
-thread_local! {
-    static INSTANCE: RefCell<glib::WeakRef<RemotePrefsDialog>> = RefCell::new(glib::WeakRef::new());
-}
-
 mod imp {
     use super::*;
 
@@ -163,15 +159,6 @@ glib::wrapper! {
             gtk::ShortcutManager;
 }
 
-pub fn instance(win: &MainWindow, client: &Client) -> RemotePrefsDialog {
-    if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade()) {
-        return d;
-    }
-    let d = RemotePrefsDialog::new(win, client);
-    INSTANCE.with(|i| i.borrow().set(Some(&d)));
-    d
-}
-
 fn dlg(w: &impl IsA<gtk::Widget>) -> Option<RemotePrefsDialog> {
     util::ancestor::<RemotePrefsDialog>(w)
 }
@@ -295,7 +282,7 @@ impl RemotePrefsDialog {
         });
     }
 
-    fn new(win: &MainWindow, client: &Client) -> Self {
+    pub fn new(win: &MainWindow, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         *imp.client.borrow_mut() = Some(client.clone());

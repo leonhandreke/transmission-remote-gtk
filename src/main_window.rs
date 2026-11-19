@@ -11,7 +11,9 @@ use gtk::{CompositeTemplate, gdk, gio, glib};
 use crate::add_torrents::{self, AddOptions};
 use crate::client::ConnectionState;
 use crate::client::{Client, Response};
-use crate::dialogs;
+use crate::dialogs::{
+    self, preferences::PreferencesDialog, remote_prefs::RemotePrefsDialog, stats::StatsDialog,
+};
 use crate::files::{FilesModel, FilesView};
 use crate::format;
 use crate::general_panel::GeneralPanel;
@@ -561,20 +563,24 @@ impl MainWindow {
         );
     }
 
+    fn preferences_dialog(&self) -> PreferencesDialog {
+        dialogs::single(|| PreferencesDialog::new(self, &self.client()))
+    }
+
     fn open_local_prefs(&self) {
-        dialogs::preferences::instance(self, &self.client()).present();
+        self.preferences_dialog().present();
     }
 
     /// The local preferences on the Connection tab, which has the profiles
     fn edit_profiles(&self) {
-        let prefs = dialogs::preferences::instance(self, &self.client());
+        let prefs = self.preferences_dialog();
         prefs.set_page(0);
         prefs.present();
     }
 
     fn open_remote_prefs(&self) {
         if self.client().is_connected() {
-            dialogs::remote_prefs::instance(self, &self.client()).present();
+            dialogs::single(|| RemotePrefsDialog::new(self, &self.client())).present();
         }
     }
 
@@ -1019,7 +1025,7 @@ impl MainWindow {
         action("remote-prefs", |w| w.open_remote_prefs());
         action("view-stats", |w| {
             if w.client().is_connected() {
-                dialogs::stats::instance(w, &w.client()).present();
+                dialogs::single(|| StatsDialog::new(w, &w.client())).present();
             }
         });
         action("about", |w| {

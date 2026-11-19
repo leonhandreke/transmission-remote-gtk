@@ -23,10 +23,6 @@ use crate::prefs::{self, Prefs, Scope};
 use crate::tree_view::{COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView};
 use crate::util;
 
-thread_local! {
-    static INSTANCE: RefCell<glib::WeakRef<PreferencesDialog>> = RefCell::new(glib::WeakRef::new());
-}
-
 /* The items of the profile drop down: a GObject with a "name" property,
  * which the template binds */
 
@@ -427,15 +423,6 @@ glib::wrapper! {
             gtk::ShortcutManager;
 }
 
-pub fn instance(win: &MainWindow, client: &Client) -> PreferencesDialog {
-    if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade()) {
-        return d;
-    }
-    let d = PreferencesDialog::new(win, client);
-    INSTANCE.with(|i| i.borrow().set(Some(&d)));
-    d
-}
-
 fn dlg(w: &impl IsA<gtk::Widget>) -> Option<PreferencesDialog> {
     util::ancestor::<PreferencesDialog>(w)
 }
@@ -538,7 +525,7 @@ impl PreferencesDialog {
         }
     }
 
-    fn new(win: &MainWindow, client: &Client) -> Self {
+    pub fn new(win: &MainWindow, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         *imp.client.borrow_mut() = Some(client.clone());

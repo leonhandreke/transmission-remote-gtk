@@ -20,13 +20,6 @@ const STATS_UPDATE_INTERVAL: u32 = 5;
 /// reply is dropped when the client disconnects in between).
 const STATS_STALE_TICKS: u32 = 6;
 
-thread_local! {
-    static INSTANCE: RefCell<glib::WeakRef<StatsDialog>> = RefCell::new(glib::WeakRef::new());
-    /// Identifies the dialog a reply is for, so a reply that arrives after
-    /// the dialog was closed (or for an earlier one) is ignored.
-    static GENERATION: Cell<u32> = const { Cell::new(0) };
-}
-
 mod imp {
     use super::*;
 
@@ -64,7 +57,6 @@ mod imp {
 
         pub client: RefCell<Option<Client>>,
         pub timer: RefCell<Option<glib::SourceId>>,
-        pub generation: Cell<u32>,
         /// 0: no request pending
         pub in_flight_ticks: Cell<u32>,
         pub error_shown: Cell<bool>,
@@ -106,21 +98,12 @@ glib::wrapper! {
             gtk::ShortcutManager;
 }
 
-pub fn instance(win: &MainWindow, client: &Client) -> StatsDialog {
-    if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade()) {
-        return d;
-    }
-    let d = StatsDialog::new(win, client);
-    INSTANCE.with(|i| i.borrow().set(Some(&d)));
-    d
-}
-
 fn stats<'a>(args: &'a Obj, key: &str) -> Option<&'a Obj> {
     get_obj(args, key)
 }
 
 impl StatsDialog {
-    fn new(win: &MainWindow, client: &Client) -> Self {
+    pub fn new(win: &MainWindow, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         *imp.client.borrow_mut() = Some(client.clone());
@@ -128,11 +111,6 @@ impl StatsDialog {
         d.set_transient_for(Some(win));
         d.on_response(|d, _| d.destroy());
 
-        let generation = GENERATION.with(|g| {
-            g.set(g.get() + 1);
-            g.get()
-        });
-        imp.generation.set(generation);
         d.request();
 
         let weak = d.downgrade();
@@ -153,11 +131,9 @@ impl StatsDialog {
     fn request(&self) {
         let imp = self.imp();
         imp.in_flight_ticks.set(1);
-        let generation = imp.generation.get();
+        let weak = self.downgrade();
         self.client().dispatch(p::session_stats(), move |response| {
-            if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade())
-                && d.imp().generation.get() == generation
-            {
+            if let Some(d) = weak.upgrade() {
                 d.on_stats_reply(response);
             }
         });
