@@ -10,6 +10,7 @@ use gtk::{gio, glib, pango};
 use crate::client::Client;
 use crate::i18n::{ntr, sprintf, tr};
 use crate::item::Item;
+use crate::json::get_str;
 use crate::prefs::{self, Scope};
 use crate::protocol::{
     self as p, TORRENT_FLAG_CHECKING, TORRENT_FLAG_COMPLETE, TORRENT_FLAG_DOWNLOADING,
@@ -203,7 +204,7 @@ impl RowValues {
             seed_ratio_limit: item.double(COL_SEED_RATIO_LIMIT),
             error_string: item
                 .torrent_json()
-                .and_then(|j| p::get_str(&j, p::FIELD_ERROR_STRING).map(str::to_string))
+                .and_then(|j| get_str(&j, p::FIELD_ERROR_STRING).map(str::to_string))
                 .unwrap_or_default(),
         }
     }

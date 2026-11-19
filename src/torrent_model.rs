@@ -26,8 +26,9 @@ use serde_json::Value;
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
+use crate::json::{Obj, get_f64, get_i64, get_obj, get_str, objects, value_as_i64};
 use crate::prefs::{self, Scope};
-use crate::protocol::{self as p, Obj, get_i64, get_str};
+use crate::protocol as p;
 use crate::util::{self, HostRegex};
 
 pub const COL_ICON: usize = 0;
@@ -219,7 +220,7 @@ impl Default for TorrentModel {
 pub fn shorten_download_dir(client: &Client, download_dir: &str) -> String {
     let prefs = client.prefs();
     if let Some(labels) = prefs.get_array(prefs::KEY_DESTINATIONS, Scope::Connection) {
-        for label in p::objects(&labels) {
+        for label in objects(&labels) {
             if get_str(label, prefs::KEY_DESTINATIONS_SUBKEY_DIR) == Some(download_dir)
                 && let Some(l) = get_str(label, prefs::SUBKEY_LABEL)
             {
@@ -382,13 +383,13 @@ impl TorrentModel {
         let status_string = p::torrent_get_status_string(status, new_flags);
         let status_icon = p::torrent_get_status_icon(new_flags);
         let empty = Obj::new();
-        let pf = p::get_obj(&t, p::FIELD_PEERSFROM).unwrap_or(&empty);
+        let pf = get_obj(&t, p::FIELD_PEERSFROM).unwrap_or(&empty);
         let tracker_stats = p::torrent_get_tracker_stats(&t);
 
         let last_flags = item.uint(COL_FLAGS);
         let last_download_dir = item.string(COL_DOWNLOADDIR);
 
-        let first_tracker_host = p::objects(tracker_stats)
+        let first_tracker_host = objects(tracker_stats)
             .next()
             .and_then(|tr| get_str(tr, p::FIELD_HOST))
             .and_then(|h| self.imp().host_regex.first(h));
@@ -413,7 +414,7 @@ impl TorrentModel {
 
         // seeders/leechers: the maximum of the trackers, downloads: the sum
         let (mut seeders, mut leechers, mut downloads) = (0, 0, 0);
-        for tracker in p::objects(tracker_stats) {
+        for tracker in objects(tracker_stats) {
             seeders = seeders.max(get_i64(tracker, p::FIELD_SEEDERCOUNT));
             leechers = leechers.max(get_i64(tracker, p::FIELD_LEECHERCOUNT));
             downloads += get_i64(tracker, p::FIELD_DOWNLOADCOUNT);
@@ -450,7 +451,7 @@ impl TorrentModel {
         item.set(COL_PEERS_FROM_US, get_i64(&t, p::FIELD_PEERS_GETTING_FROM_US));
         item.set(COL_WEB_SEEDS_TO_US, get_i64(&t, p::FIELD_WEB_SEEDS_SENDING_TO_US));
         item.set(COL_QUEUE_POSITION, p::torrent_get_queue_position(&t));
-        item.set(COL_SEED_RATIO_LIMIT, p::get_f64(&t, p::FIELD_SEED_RATIO_LIMIT));
+        item.set(COL_SEED_RATIO_LIMIT, get_f64(&t, p::FIELD_SEED_RATIO_LIMIT));
         item.set(COL_SEED_RATIO_MODE, get_i64(&t, p::FIELD_SEED_RATIO_MODE));
         item.set(COL_LASTACTIVE, get_i64(&t, p::FIELD_ACTIVITY_DATE));
         item.set(
@@ -547,7 +548,7 @@ impl TorrentModel {
         } else if mode != UpdateMode::First
             && let Some(removed) = p::get_torrents_removed(args).filter(|r| !r.is_empty())
         {
-            for id in removed.iter().map(prefs::value_as_i64) {
+            for id in removed.iter().map(value_as_i64) {
                 // mark it, the stale ones are removed below
                 if let Some(item) = self.find(id) {
                     item.set(COL_UPDATESERIAL, -1i64);

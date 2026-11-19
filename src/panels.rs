@@ -11,9 +11,10 @@ use crate::client::Client;
 use crate::dialog;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
+use crate::json::{Obj, get_bool, get_f64, get_i64, get_str, value_as_i64};
 use crate::main_window::MainWindow;
-use crate::prefs::{self, Scope, value_as_i64};
-use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
+use crate::prefs::{self, Scope};
+use crate::protocol as p;
 use crate::torrent_model::{self as tm, Stats};
 use crate::util;
 
@@ -181,7 +182,7 @@ impl GeneralPanel {
             i.gen_ratio_label.set_text(&tr("N/A"));
         }
 
-        i.gen_limit_label.set_text(&util::format_ratio(p::get_f64(t, p::FIELD_SEED_RATIO_LIMIT)));
+        i.gen_limit_label.set_text(&util::format_ratio(get_f64(t, p::FIELD_SEED_RATIO_LIMIT)));
 
         let completed_at = get_i64(t, p::FIELD_DONE_DATE);
         i.gen_completedat_label.set_text(&if completed_at > 0 {

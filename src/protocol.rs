@@ -7,9 +7,9 @@
 use serde_json::{Value, json};
 
 use crate::i18n::tr;
-use crate::prefs::{value_as_bool, value_as_f64, value_as_i64};
+use crate::json::{Obj, get_array, get_i64, get_obj, get_str, objects, value_as_f64, value_as_i64};
 
-pub use crate::rpc::{Obj, Request};
+pub use crate::rpc::Request;
 
 pub const FIELD_ID: &str = "id";
 
@@ -298,36 +298,6 @@ const SESSION_GET_FIELDS: &[&str] = &[
     SGET_SEQUENTIAL_DOWNLOAD,
     SGET_PREFERRED_TRANSPORTS,
 ];
-
-/* JSON getters, like json-glib's (0, false or None when missing) */
-
-pub fn get_i64(o: &Obj, key: &str) -> i64 {
-    o.get(key).map(value_as_i64).unwrap_or(0)
-}
-
-pub fn get_f64(o: &Obj, key: &str) -> f64 {
-    o.get(key).map(value_as_f64).unwrap_or(0.0)
-}
-
-pub fn get_bool(o: &Obj, key: &str) -> bool {
-    o.get(key).map(value_as_bool).unwrap_or(false)
-}
-
-pub fn get_str<'a>(o: &'a Obj, key: &str) -> Option<&'a str> {
-    o.get(key).and_then(Value::as_str)
-}
-
-pub fn get_array<'a>(o: &'a Obj, key: &str) -> &'a [Value] {
-    o.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
-}
-
-pub fn get_obj<'a>(o: &'a Obj, key: &str) -> Option<&'a Obj> {
-    o.get(key).and_then(Value::as_object)
-}
-
-pub fn objects(array: &[Value]) -> impl Iterator<Item = &Obj> {
-    array.iter().filter_map(Value::as_object)
-}
 
 /* Requests */
 

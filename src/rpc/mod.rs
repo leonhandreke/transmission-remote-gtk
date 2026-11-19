@@ -14,11 +14,11 @@
 mod transport;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 pub use transport::{Config, Transport};
 
-pub type Obj = Map<String, Value>;
+pub use crate::json::Obj;
 pub type Result<T = Obj> = std::result::Result<T, Error>;
 
 pub const JSONRPC_VERSION: &str = "2.0";

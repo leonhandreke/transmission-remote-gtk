@@ -21,6 +21,7 @@ mod dialogs;
 mod files;
 mod i18n;
 mod item;
+mod json;
 mod macos;
 mod main_window;
 mod menus;

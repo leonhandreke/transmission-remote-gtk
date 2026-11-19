@@ -24,6 +24,7 @@ use serde_json::{Value, json};
 
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
+use crate::json::value_as_i64;
 use crate::prefs::{self, Prefs};
 use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL};
 use crate::util;
@@ -1173,7 +1174,7 @@ impl TreeView {
     pub fn restore_sort(&self) {
         let saved = self.with_props(|props| {
             match (props.get(prefs::KEY_TV_SORT_COL), props.get(prefs::KEY_TV_SORT_TYPE)) {
-                (Some(c), Some(t)) => Some((prefs::value_as_i64(c), prefs::value_as_i64(t))),
+                (Some(c), Some(t)) => Some((value_as_i64(c), value_as_i64(t))),
                 _ => None,
             }
         });
@@ -1207,7 +1208,7 @@ impl TreeView {
                     if let Some(desc) = c.as_str().and_then(|id| self.find_column(id))
                         && !desc.showing()
                     {
-                        self.add_column_after(&desc, prefs::value_as_i64(w), None);
+                        self.add_column_after(&desc, value_as_i64(w), None);
                     }
                 }
             }

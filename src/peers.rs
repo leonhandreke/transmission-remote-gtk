@@ -11,8 +11,9 @@ use gtk::prelude::*;
 
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
+use crate::json::{Obj, get_i64, get_str, objects};
 use crate::prefs::Prefs;
-use crate::protocol::{self as p, Obj, get_i64, get_str};
+use crate::protocol as p;
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{ColType, TreeView};
 
@@ -64,7 +65,7 @@ impl PeersModel {
             self.clear();
         }
 
-        for peer in p::objects(p::torrent_get_peers(t)) {
+        for peer in objects(p::torrent_get_peers(t)) {
             let address = get_str(peer, p::TPEER_ADDRESS).unwrap_or("").to_string();
             let existing = self.peers.borrow().get(&address).cloned();
             let item = match existing {

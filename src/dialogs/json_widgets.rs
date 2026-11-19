@@ -3,10 +3,9 @@
 //! a check button is a boolean, a spin button an integer (or a double if it
 //! has digits) and other editables a string.
 
+use crate::json::{Obj, get_bool, get_f64, get_i64, get_str};
 use gtk::prelude::*;
 use serde_json::json;
-
-use crate::protocol::{Obj, get_bool, get_f64, get_i64, get_str};
 
 pub struct JsonWidget {
     pub widget: gtk::Widget,

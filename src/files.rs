@@ -20,11 +20,10 @@ use crate::client::Client;
 use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::{sprintf, tr};
 use crate::item::{self, Item, Val};
+use crate::json::{Obj, get_i64, get_str, value_as_i64};
 use crate::main_window::MainWindow;
-use crate::prefs::{self, Prefs};
-use crate::protocol::{
-    self as p, Obj, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL, get_i64, get_str,
-};
+use crate::prefs::Prefs;
+use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL};
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{ColType, TreeView};
 use crate::util;
@@ -130,8 +129,8 @@ impl FileNode {
                 get_i64(file, p::TFILE_LENGTH),
                 get_i64(file, p::TFILE_BYTES_COMPLETED),
                 i as i64,
-                wanted.get(i).map(prefs::value_as_i64).unwrap_or(0),
-                priorities.get(i).map(prefs::value_as_i64).unwrap_or(0),
+                wanted.get(i).map(value_as_i64).unwrap_or(0),
+                priorities.get(i).map(value_as_i64).unwrap_or(0),
             );
         }
         top
@@ -362,8 +361,8 @@ impl FilesModel {
         item.set(COL_BYTESCOMPLETED, completed);
 
         if self.accept.get() {
-            item.set(COL_WANTED, wanted.get(id).map(prefs::value_as_i64).unwrap_or(0));
-            item.set(COL_PRIORITY, priorities.get(id).map(prefs::value_as_i64).unwrap_or(0));
+            item.set(COL_WANTED, wanted.get(id).map(value_as_i64).unwrap_or(0));
+            item.set(COL_PRIORITY, priorities.get(id).map(value_as_i64).unwrap_or(0));
 
             // the names (of the file and its directories) change on a rename
             let name = get_str(file, p::TFILE_NAME).unwrap_or("");

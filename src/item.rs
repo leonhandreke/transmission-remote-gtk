@@ -12,7 +12,7 @@ use gtk::glib;
 use gtk::glib::subclass::prelude::*;
 use gtk::prelude::*;
 
-use crate::protocol::Obj;
+use crate::json::Obj;
 
 /// A value of a column
 #[derive(Clone, Debug, Default)]

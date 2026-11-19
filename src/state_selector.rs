@@ -11,8 +11,9 @@ use gtk::{gdk, gio, glib};
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
+use crate::json::{get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
-use crate::protocol::{self as p, get_str};
+use crate::protocol as p;
 use crate::torrent_model::{self as tm, Stats, TorrentItemExt, TorrentModel};
 use crate::util::{self, HostRegex};
 
@@ -305,7 +306,7 @@ impl StateSelector {
             let Some(t) = torrent.torrent_json() else { continue };
 
             if update_trackers {
-                for tracker in p::objects(p::torrent_get_tracker_stats(&t)) {
+                for tracker in objects(p::torrent_get_tracker_stats(&t)) {
                     let Some(host) =
                         get_str(tracker, p::FIELD_ANNOUNCE).and_then(|a| imp.host_regex.first(a))
                     else {

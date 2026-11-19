@@ -15,6 +15,7 @@ use gtk::glib::subclass::prelude::*;
 use serde_json::{Map, Value, json};
 
 use crate::i18n::tr;
+use crate::json::{value_as_bool, value_as_f64, value_as_i64};
 
 pub const FILENAME: &str = "config.json";
 pub const PORT_DEFAULT: i64 = 9091;
@@ -95,32 +96,6 @@ pub const STYLE_TR_COMPACT: i64 = 2;
 enum Location {
     Root,
     Profile(usize),
-}
-
-/// Integer value of a JSON node, like json_node_get_int()
-pub fn value_as_i64(v: &Value) -> i64 {
-    match v {
-        Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)).unwrap_or(0),
-        Value::Bool(b) => *b as i64,
-        _ => 0,
-    }
-}
-
-/// Floating point value of a JSON node, like json_node_get_double()
-pub fn value_as_f64(v: &Value) -> f64 {
-    match v {
-        Value::Number(n) => n.as_f64().unwrap_or(0.0),
-        Value::Bool(b) => *b as i64 as f64,
-        _ => 0.0,
-    }
-}
-
-pub fn value_as_bool(v: &Value) -> bool {
-    match v {
-        Value::Bool(b) => *b,
-        Value::Number(n) => n.as_f64().is_some_and(|f| f != 0.0),
-        _ => false,
-    }
 }
 
 #[derive(Default)]

@@ -11,8 +11,9 @@ use gtk::{CompositeTemplate, gio, glib};
 
 use crate::client::Client;
 use crate::dialog;
+use crate::json::{get_str, objects};
 use crate::prefs::{self, Scope};
-use crate::protocol::{self as p, get_str};
+use crate::protocol as p;
 use crate::util;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -161,7 +162,7 @@ impl DestinationCombo {
 
         // the saved dirs
         if let Some(saved) = prefs.get_array(prefs::KEY_DESTINATIONS, Scope::Connection) {
-            for obj in p::objects(&saved) {
+            for obj in objects(&saved) {
                 self.insert(
                     get_str(obj, prefs::SUBKEY_LABEL),
                     get_str(obj, prefs::KEY_DESTINATIONS_SUBKEY_DIR).unwrap_or(""),

@@ -9,8 +9,9 @@ use gtk::{CompositeTemplate, gio, glib};
 use crate::client::Client;
 use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
+use crate::json::get_bool;
 use crate::main_window::MainWindow;
-use crate::protocol::{self as p, get_bool};
+use crate::protocol as p;
 use crate::util;
 
 mod imp {

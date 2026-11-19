@@ -9,8 +9,9 @@ use gtk::{CompositeTemplate, glib};
 
 use crate::client::{Client, Response};
 use crate::dialog::{Dialog, DialogImpl, TrgDialogExt};
+use crate::json::{Obj, get_f64, get_i64, get_obj};
 use crate::main_window::MainWindow;
-use crate::protocol::{self as p, Obj, get_f64, get_i64};
+use crate::protocol as p;
 use crate::util;
 
 const STATS_UPDATE_INTERVAL: u32 = 5;
@@ -114,7 +115,7 @@ pub fn instance(win: &MainWindow, client: &Client) -> StatsDialog {
 }
 
 fn stats<'a>(args: &'a Obj, key: &str) -> Option<&'a Obj> {
-    p::get_obj(args, key)
+    get_obj(args, key)
 }
 
 impl StatsDialog {

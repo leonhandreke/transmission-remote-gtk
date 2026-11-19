@@ -19,8 +19,9 @@ use gtk::glib::prelude::*;
 use gtk::glib::subclass::prelude::*;
 use serde_json::json;
 
+use crate::json::{Obj, get_bool, get_f64, get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
-use crate::protocol::{self, Obj, Request};
+use crate::protocol::{self, Request};
 use crate::rpc::{self, Config, Transport};
 use crate::torrent_model::{TorrentItem, TorrentItemExt, TorrentModel};
 
@@ -120,8 +121,7 @@ impl Client {
     }
 
     fn download_dir(&self) -> Option<String> {
-        self.session()
-            .and_then(|s| protocol::get_str(&s, protocol::SGET_DOWNLOAD_DIR).map(str::to_string))
+        self.session().and_then(|s| get_str(&s, protocol::SGET_DOWNLOAD_DIR).map(str::to_string))
     }
 
     pub fn set_session(&self, mut session: Obj) {
@@ -131,7 +131,7 @@ impl Client {
         }
 
         // the free space of the last update, if it isn't in this one
-        let dir = protocol::get_str(&session, protocol::SGET_DOWNLOAD_DIR).map(str::to_string);
+        let dir = get_str(&session, protocol::SGET_DOWNLOAD_DIR).map(str::to_string);
         if !session.contains_key(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE)
             && dir.is_some()
             && self.download_dir() == dir
@@ -144,8 +144,8 @@ impl Client {
         }
         let needs_free_space = !session.contains_key(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE);
 
-        imp.seed_ratio_limit.set(protocol::get_f64(&session, protocol::SGET_SEED_RATIO_LIMIT));
-        imp.seed_ratio_limited.set(protocol::get_bool(&session, protocol::SGET_SEED_RATIO_LIMITED));
+        imp.seed_ratio_limit.set(get_f64(&session, protocol::SGET_SEED_RATIO_LIMIT));
+        imp.seed_ratio_limited.set(get_bool(&session, protocol::SGET_SEED_RATIO_LIMITED));
         *imp.session.borrow_mut() = Some(session);
         self.emit_by_name::<()>("session-updated", &[]);
 
@@ -158,7 +158,7 @@ impl Client {
                 {
                     let mut session = client.imp().session.borrow_mut();
                     let Some(s) = session.as_mut() else { return };
-                    if protocol::get_str(s, protocol::SGET_DOWNLOAD_DIR) != Some(dir.as_str()) {
+                    if get_str(s, protocol::SGET_DOWNLOAD_DIR) != Some(dir.as_str()) {
                         return;
                     }
                     s.insert(
@@ -176,16 +176,13 @@ impl Client {
     }
 
     pub fn version_string(&self) -> Option<String> {
-        self.session()
-            .and_then(|s| protocol::get_str(&s, protocol::SGET_VERSION).map(str::to_string))
+        self.session().and_then(|s| get_str(&s, protocol::SGET_VERSION).map(str::to_string))
     }
 
     /// The server's rpc_version_semver
     pub fn rpc_version(&self) -> Option<String> {
         self.session()
-            .and_then(|s| {
-                protocol::get_str(&s, protocol::SGET_RPC_VERSION_SEMVER).map(str::to_string)
-            })
+            .and_then(|s| get_str(&s, protocol::SGET_RPC_VERSION_SEMVER).map(str::to_string))
             .or_else(|| self.imp().transport.rpc_version())
     }
 
@@ -285,10 +282,10 @@ impl Client {
 
         let mut headers = Vec::new();
         if let Some(custom) = prefs.get_array(prefs::KEY_CUSTOM_HEADERS, Scope::Connection) {
-            for h in protocol::objects(&custom) {
+            for h in objects(&custom) {
                 if let (Some(k), Some(v)) = (
-                    protocol::get_str(h, prefs::KEY_CUSTOM_HEADER_NAME),
-                    protocol::get_str(h, prefs::KEY_CUSTOM_HEADER_VALUE),
+                    get_str(h, prefs::KEY_CUSTOM_HEADER_NAME),
+                    get_str(h, prefs::KEY_CUSTOM_HEADER_VALUE),
                 ) {
                     headers.push((k.to_string(), v.to_string()));
                 }
@@ -359,7 +356,7 @@ impl Client {
             let mut session = results.pop().unwrap_or_else(|| Err(Error::Decode(String::new())));
             if let (Ok(s), Some(Ok(free))) = (&mut session, free_space) {
                 // only if the directory didn't change in the meantime
-                if protocol::get_str(s, protocol::SGET_DOWNLOAD_DIR) == dir.as_deref() {
+                if get_str(s, protocol::SGET_DOWNLOAD_DIR) == dir.as_deref() {
                     s.insert(
                         protocol::SGET_DOWNLOAD_DIR_FREE_SPACE.into(),
                         json!(protocol::free_space_bytes(&free)),

@@ -12,8 +12,9 @@ use gtk::{gio, glib};
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
+use crate::json::{Obj, get_i64, get_str, objects};
 use crate::main_window::MainWindow;
-use crate::protocol::{self as p, Obj, get_i64, get_str};
+use crate::protocol as p;
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{
     COLUMN_EDITABLE, COLUMN_EXTRA, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView,
@@ -106,7 +107,7 @@ impl TrackersModel {
             return;
         }
 
-        for tracker in p::objects(p::torrent_get_tracker_stats(t)) {
+        for tracker in objects(p::torrent_get_tracker_stats(t)) {
             let id = get_i64(tracker, p::FIELD_ID);
             let existing = if mode != UpdateMode::First {
                 item::find_item(&self.store, COL_ID, id).map(|(i, _)| i)

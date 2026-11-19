@@ -13,8 +13,9 @@ use crate::client::Client;
 use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::i18n::{sprintf, tr};
+use crate::json::{Obj, get_bool, get_i64, get_str};
 use crate::main_window::MainWindow;
-use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
+use crate::protocol as p;
 use crate::util;
 
 thread_local! {

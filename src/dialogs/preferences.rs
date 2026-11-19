@@ -16,10 +16,10 @@ use crate::client::Client;
 use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
+use crate::json::{get_str, objects};
 use crate::macos;
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs, Scope};
-use crate::protocol::{self as p, get_str};
 use crate::tree_view::{COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView};
 use crate::util;
 
@@ -251,7 +251,7 @@ impl PersistentTreeView {
     fn refresh(&self, prefs: &Prefs) {
         let entries = prefs.get_array(&self.key, self.scope).unwrap_or_default();
         let columns = self.columns.borrow();
-        let items: Vec<Item> = p::objects(&entries)
+        let items: Vec<Item> = objects(&entries)
             .map(|obj| {
                 let item = new_persistent_item();
                 for c in columns.iter() {
