@@ -383,9 +383,11 @@ impl TorrentModel {
         let last_flags = item.uint(COL_FLAGS);
         let last_download_dir = item.string(COL_DOWNLOADDIR);
 
+        // like the sidebar's tracker filters (the "host" field is host:port,
+        // without a scheme)
         let first_tracker_host = objects(tracker_stats)
             .next()
-            .and_then(|tr| get_str(tr, p::FIELD_HOST))
+            .and_then(|tr| get_str(tr, p::FIELD_ANNOUNCE))
             .and_then(util::tracker_host);
 
         let pex = get_i64(pf, p::TPEERFROM_FROMPEX);
