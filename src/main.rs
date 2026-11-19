@@ -34,6 +34,7 @@ mod rpc;
 mod state_selector;
 mod status_bar;
 mod toolbar;
+mod torrent_menu;
 mod torrent_model;
 mod torrent_view;
 mod trackers;

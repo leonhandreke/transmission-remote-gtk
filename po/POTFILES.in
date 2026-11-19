@@ -20,6 +20,7 @@ src/rpc/mod.rs
 src/state_selector.rs
 src/status_bar.rs
 src/toolbar.rs
+src/torrent_menu.rs
 src/torrent_model.rs
 src/torrent_view.rs
 src/trackers.rs

@@ -15,11 +15,10 @@ use crate::dialogs::{
     self, preferences::PreferencesDialog, remote_prefs::RemotePrefsDialog, stats::StatsDialog,
 };
 use crate::files::{FilesModel, FilesView};
-use crate::format;
 use crate::general_panel::GeneralPanel;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
-use crate::json::{Obj, get_bool, get_i64, get_str};
+use crate::json::{get_bool, get_str};
 use crate::menu_bar::MenuBar;
 use crate::peers::{self, PeersModel};
 use crate::prefs::{self, Scope};
@@ -27,6 +26,7 @@ use crate::protocol as p;
 use crate::state_selector::{FILTER_FLAG_DIR, FILTER_FLAG_TRACKER, StateSelector};
 use crate::status_bar::StatusBar;
 use crate::toolbar::Toolbar;
+use crate::torrent_menu;
 use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel, UpdateMode};
 use crate::torrent_view;
 use crate::trackers::{TrackersModel, TrackersView};
@@ -1095,187 +1095,18 @@ impl MainWindow {
         self.action_notify("view-states", |w, _, active| w.state_selector().set_visible(active));
     }
 
-    fn set_limit(
-        &self,
-        action: &gio::SimpleAction,
-        value: i32,
-        speed_key: &str,
-        enabled_key: &str,
-        ids: Option<&[i64]>,
-    ) {
-        action.set_state(&value.to_variant());
-        let mut req = match ids {
-            Some(ids) => p::torrent_set(ids),
-            None => p::session_set(),
-        };
-        if value >= 0 {
-            req.set(speed_key, value);
-        }
-        req.set(enabled_key, value >= 0);
-
-        if ids.is_some() {
-            self.dispatch_interactive(req);
-        } else {
-            self.dispatch_session_set(req);
-        }
-    }
-
-    fn priority_menu_new(&self, actions: &gio::SimpleActionGroup, ids: &[i64]) -> gio::MenuItem {
-        let selected = self
-            .client()
-            .torrent_data(self.selected_torrent_id())
-            .map(|(t, _)| get_i64(&t, p::FIELD_BANDWIDTH_PRIORITY))
-            .unwrap_or(p::TR_PRI_UNSET);
-
-        let action = gio::SimpleAction::new_stateful(
-            "priority",
-            Some(glib::VariantTy::INT32),
-            &(selected as i32).to_variant(),
-        );
-        let weak = self.downgrade();
-        let ids = ids.to_vec();
-        action.connect_change_state(move |action, value| {
-            let (Some(win), Some(v)) = (weak.upgrade(), value.and_then(|v| v.get::<i32>())) else {
-                return;
-            };
-            action.set_state(&v.to_variant());
-            let mut req = p::torrent_set(&ids);
-            req.set(p::FIELD_BANDWIDTH_PRIORITY, v);
-            win.dispatch_interactive(req);
-        });
-        actions.add_action(&action);
-
-        let menu = gio::Menu::new();
-        for (label, value) in
-            [("High", p::TR_PRI_HIGH), ("Normal", p::TR_PRI_NORMAL), ("Low", p::TR_PRI_LOW)]
-        {
-            let item = gio::MenuItem::new(Some(&tr(label)), None);
-            item.set_action_and_target_value(
-                Some("torrent.priority"),
-                Some(&(value as i32).to_variant()),
-            );
-            menu.append_item(&item);
-        }
-
-        let top = gio::MenuItem::new_submenu(Some(&tr("Priority")), &menu);
-        top.set_icon(&gio::ThemedIcon::new("network-workgroup"));
-        top
-    }
-
-    fn limit_menu_new(
-        &self,
-        actions: &gio::SimpleActionGroup,
-        name: &str,
-        title: &str,
-        enabled_key: &'static str,
-        speed_key: &'static str,
-        ids: Option<&[i64]>,
-    ) -> gio::MenuItem {
-        let client = self.client();
-        let current: Option<Obj> = match ids {
-            Some(_) => client.torrent_data(self.selected_torrent_id()).map(|(t, _)| (*t).clone()),
-            None => client.session_clone(),
-        };
-        let limit = current
-            .as_ref()
-            .map(|c| if get_bool(c, enabled_key) { get_i64(c, speed_key) } else { -1 })
-            .unwrap_or(-1);
-
-        let action = gio::SimpleAction::new_stateful(
-            name,
-            Some(glib::VariantTy::INT32),
-            &(limit as i32).to_variant(),
-        );
-        let weak = self.downgrade();
-        let ids_owned = ids.map(<[i64]>::to_vec);
-        action.connect_change_state(move |action, value| {
-            if let (Some(win), Some(v)) = (weak.upgrade(), value.and_then(|v| v.get::<i32>())) {
-                win.set_limit(action, v, speed_key, enabled_key, ids_owned.as_deref());
-            }
-        });
-        actions.add_action(&action);
-
-        let detailed = format!("torrent.{name}");
-        let menu = gio::Menu::new();
-        let section = gio::Menu::new();
-        let item = gio::MenuItem::new(Some(&tr("No Limit")), None);
-        item.set_action_and_target_value(Some(&detailed), Some(&(-1i32).to_variant()));
-        section.append_item(&item);
-
-        // bandwidth items: n = 5*2^(n-1)
-        let presets: Vec<i64> = (0..16).map(|i| 5i64 << i).collect();
-        if limit >= 0 && !presets.contains(&limit) {
-            // GTK 3 showed this checked but insensitive. A disabled action
-            // doesn't show its state in a GTK 4 menu, so this is a normal
-            // (checked) radio item, choosing it sets the same limit again.
-            let item = gio::MenuItem::new(Some(&format::speed_kbps(limit as f64)), None);
-            item.set_action_and_target_value(Some(&detailed), Some(&(limit as i32).to_variant()));
-            section.append_item(&item);
-        }
-        menu.append_section(None, &section);
-
-        let section = gio::Menu::new();
-        for v in presets {
-            let item = gio::MenuItem::new(Some(&format::speed_kbps(v as f64)), None);
-            item.set_action_and_target_value(Some(&detailed), Some(&(v as i32).to_variant()));
-            section.append_item(&item);
-        }
-        menu.append_section(None, &section);
-
-        let top = gio::MenuItem::new_submenu(Some(title), &menu);
-        top.set_icon(&gio::ThemedIcon::new("network-workgroup"));
-        top
-    }
-
-    fn torrent_tv_view_menu(&self, tv: &TreeView, x: f64, y: f64) {
-        let imp = self.imp();
-        let actions = gio::SimpleActionGroup::new();
-        let menu = gio::Menu::new();
-        let ids = torrent_view::selected_ids(tv);
-
-        menu.append_section(None, &imp.torrent_actions_menu.get());
-        if imp.queues_enabled.get() {
-            menu.append_section(None, &imp.torrent_queue_menu.get());
-        }
-
-        let section = gio::Menu::new();
-        section.append_item(&self.limit_menu_new(
-            &actions,
-            "down-limit",
-            &tr("Down Limit"),
-            p::FIELD_DOWNLOAD_LIMITED,
-            p::FIELD_DOWNLOAD_LIMIT,
-            Some(&ids),
-        ));
-        section.append_item(&self.limit_menu_new(
-            &actions,
-            "up-limit",
-            &tr("Up Limit"),
-            p::FIELD_UPLOAD_LIMITED,
-            p::FIELD_UPLOAD_LIMIT,
-            Some(&ids),
-        ));
-        section.append_item(&self.priority_menu_new(&actions, &ids));
-        menu.append_section(None, &section);
-
-        util::popover_menu_popup(tv, &menu, x, y, "torrent", Some(&actions));
-    }
-
     fn torrent_tv_context_menu(&self, tv: &TreeView, x: f64, y: f64) -> bool {
-        // from the keyboard
-        if x < 0.0 {
-            self.torrent_tv_view_menu(tv, x, y);
-            return true;
-        }
-        // the column headers have their own menu
-        if tv.point_in_header(x, y) {
+        // from the keyboard, or on a row; the column headers have their own menu
+        if x >= 0.0 && (tv.point_in_header(x, y) || !tv.select_at(x, y)) {
             return false;
         }
-        if tv.select_at(x, y) {
-            self.torrent_tv_view_menu(tv, x, y);
-            return true;
+        let imp = self.imp();
+        let mut sections = vec![imp.torrent_actions_menu.get()];
+        if imp.queues_enabled.get() {
+            sections.push(imp.torrent_queue_menu.get());
         }
-        false
+        torrent_menu::popup(self, tv, x, y, &sections);
+        true
     }
 
     fn session_updated(&self) {
