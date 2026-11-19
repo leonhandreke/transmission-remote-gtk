@@ -13,6 +13,7 @@ use crate::i18n::tr;
 use crate::item::{self, Item, Val};
 use crate::prefs::Prefs;
 use crate::protocol::{self as p, Obj, get_i64, get_str};
+use crate::torrent_model::UpdateMode;
 use crate::tree_view::{ColType, TreeView};
 
 pub const COL_ICON: usize = 0;
@@ -55,11 +56,11 @@ impl PeersModel {
         self.store.remove_all();
     }
 
-    pub fn update(&self, tv: &TreeView, serial: i64, t: &Obj, mode: i32) {
+    pub fn update(&self, tv: &TreeView, serial: i64, t: &Obj, mode: UpdateMode) {
         let do_host_lookup = tv.is_column_showing(COL_HOST as i32);
         let mut added = Vec::new();
 
-        if mode == p::TORRENT_GET_MODE_FIRST {
+        if mode == UpdateMode::First {
             self.clear();
         }
 
@@ -103,7 +104,7 @@ impl PeersModel {
             self.store.splice(self.store.n_items(), 0, &added);
         }
 
-        if mode != p::TORRENT_GET_MODE_FIRST {
+        if mode != UpdateMode::First {
             let mut peers = self.peers.borrow_mut();
             for item in item::items(&self.store) {
                 if item.int64(COL_UPDATESERIAL) != serial

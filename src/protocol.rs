@@ -196,11 +196,6 @@ pub const TORRENT_FLAG_DOWNLOADING_METADATA: u32 = 1 << 13;
 pub const TORRENT_ADD_FLAG_PAUSED: u32 = 1 << 0;
 pub const TORRENT_ADD_FLAG_DELETE: u32 = 1 << 1;
 
-pub const TORRENT_GET_MODE_FIRST: i32 = 0;
-pub const TORRENT_GET_MODE_ACTIVE: i32 = 1;
-pub const TORRENT_GET_MODE_INTERACTION: i32 = 2;
-pub const TORRENT_GET_MODE_UPDATE: i32 = 3;
-
 /* session_get */
 /// Not asked for (it's deprecated), but filled in by the client with the
 /// result of free_space for download_dir

@@ -25,6 +25,7 @@ use crate::prefs::{self, Prefs};
 use crate::protocol::{
     self as p, Obj, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL, get_i64, get_str,
 };
+use crate::torrent_model::UpdateMode;
 use crate::tree_view::{ColType, TreeView};
 use crate::util;
 
@@ -378,19 +379,19 @@ impl FilesModel {
         }
     }
 
-    pub fn update(self: &Rc<Self>, t: &Obj, mode: i32) {
+    pub fn update(self: &Rc<Self>, t: &Obj, mode: UpdateMode) {
         let files = p::torrent_get_files(t);
         let n_files = files.len();
         let priorities = p::torrent_get_priorities(t);
         let wanted = p::torrent_get_wanted(t);
         let torrent_id = p::torrent_get_id(t);
 
-        if mode == p::TORRENT_GET_MODE_FIRST
+        if mode == UpdateMode::First
             || torrent_id != self.torrent_id.get()
             || self.n_files() != n_files
         {
             // the tree of this torrent is on its way
-            if mode != p::TORRENT_GET_MODE_FIRST
+            if mode != UpdateMode::First
                 && torrent_id == self.torrent_id.get()
                 && self.building.get()
             {

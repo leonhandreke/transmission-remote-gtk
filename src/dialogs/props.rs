@@ -26,6 +26,7 @@ use crate::peers::{self, PeersModel};
 use crate::prefs;
 use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
 use crate::torrent_model as tm;
+use crate::torrent_model::UpdateMode;
 use crate::torrent_view;
 use crate::trackers::{TrackersModel, TrackersView};
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
@@ -218,7 +219,7 @@ impl TorrentPropsDialog {
             let files_model = FilesModel::new();
             let files_view =
                 FilesView::new(&files_model, win, client, Some("TrgFilesTreeView-dialog"));
-            files_model.update(&json, p::TORRENT_GET_MODE_FIRST);
+            files_model.update(&json, UpdateMode::First);
             notebook.insert_page(
                 &files_view.tv,
                 Some(&gtk::Label::new(Some(&tr("Files")))),
@@ -229,14 +230,14 @@ impl TorrentPropsDialog {
             let peers_model = PeersModel::new();
             let peers_tv =
                 peers::peers_tree_view_new(&prefs, &peers_model, Some("TrgPeersTreeView-dialog"));
-            peers_model.update(&peers_tv, serial, &json, p::TORRENT_GET_MODE_FIRST);
+            peers_model.update(&peers_tv, serial, &json, UpdateMode::First);
             notebook.insert_page(&peers_tv, Some(&gtk::Label::new(Some(&tr("Peers")))), Some(2));
 
             // Trackers
             let trackers_model = TrackersModel::new();
             let trackers_view =
                 TrackersView::new(&trackers_model, client, win, Some("TrgTrackersTreeView-dialog"));
-            trackers_model.update(serial, &json, p::TORRENT_GET_MODE_FIRST);
+            trackers_model.update(serial, &json, UpdateMode::First);
             notebook.insert_page(
                 &trackers_view.tv,
                 Some(&gtk::Label::new(Some(&tr("Trackers")))),
@@ -448,13 +449,13 @@ impl TorrentPropsDialog {
             && !last.as_ref().is_some_and(|l| Rc::ptr_eq(l, t))
         {
             if let Some(m) = &files_model {
-                m.update(t, p::TORRENT_GET_MODE_UPDATE);
+                m.update(t, UpdateMode::Update);
             }
             if let (Some(m), Some(tv)) = (&peers_model, &peers_tv) {
-                m.update(tv, serial, t, p::TORRENT_GET_MODE_UPDATE);
+                m.update(tv, serial, t, UpdateMode::Update);
             }
             if let Some(m) = &trackers_model {
-                m.update(serial, t, p::TORRENT_GET_MODE_UPDATE);
+                m.update(serial, t, UpdateMode::Update);
             }
             self.info_page_update(t, item);
         }

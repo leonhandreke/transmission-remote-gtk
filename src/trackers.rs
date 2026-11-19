@@ -14,6 +14,7 @@ use crate::i18n::tr;
 use crate::item::{self, Item, Val};
 use crate::main_window::MainWindow;
 use crate::protocol::{self as p, Obj, get_i64, get_str};
+use crate::torrent_model::UpdateMode;
 use crate::tree_view::{
     COLUMN_EDITABLE, COLUMN_EXTRA, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView,
 };
@@ -96,8 +97,8 @@ impl TrackersModel {
         item
     }
 
-    pub fn update(&self, serial: i64, t: &Obj, mode: i32) {
-        if mode == p::TORRENT_GET_MODE_FIRST {
+    pub fn update(&self, serial: i64, t: &Obj, mode: UpdateMode) {
+        if mode == UpdateMode::First {
             self.clear();
             self.torrent_id.set(p::torrent_get_id(t));
             self.accept.set(true);
@@ -107,7 +108,7 @@ impl TrackersModel {
 
         for tracker in p::objects(p::torrent_get_tracker_stats(t)) {
             let id = get_i64(tracker, p::FIELD_ID);
-            let existing = if mode != p::TORRENT_GET_MODE_FIRST {
+            let existing = if mode != UpdateMode::First {
                 item::find_item(&self.store, COL_ID, id).map(|(i, _)| i)
             } else {
                 None

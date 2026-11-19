@@ -20,7 +20,7 @@ use crate::peers::{self, PeersModel};
 use crate::prefs;
 use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
 use crate::state_selector::{FILTER_FLAG_DIR, FILTER_FLAG_TRACKER, StateSelector};
-use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel};
+use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel, UpdateMode};
 use crate::torrent_view;
 use crate::trackers::{TrackersModel, TrackersView};
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
@@ -314,7 +314,7 @@ impl MainWindow {
         self.imp().args.take();
     }
 
-    fn update_selected_torrent_notebook(&self, mode: i32, id: i64) {
+    fn update_selected_torrent_notebook(&self, mode: UpdateMode, id: i64) {
         let client = self.client();
         let serial = client.serial();
         let data = if id >= 0 { client.torrent_data(id) } else { None };
@@ -441,7 +441,7 @@ impl MainWindow {
                 return;
             }
             win.dialog_error_handler(&result);
-            win.on_torrent_get(torrents, p::TORRENT_GET_MODE_INTERACTION);
+            win.on_torrent_get(torrents, UpdateMode::Interaction);
         });
     }
 
@@ -463,7 +463,7 @@ impl MainWindow {
         let weak = self.downgrade();
         self.client().dispatch(p::torrent_get(torrents), move |r| {
             if let Some(win) = weak.upgrade() {
-                win.on_torrent_get(r, p::TORRENT_GET_MODE_INTERACTION);
+                win.on_torrent_get(r, UpdateMode::Interaction);
             }
         });
     }
@@ -542,7 +542,7 @@ impl MainWindow {
                 let was_connected = win.client().is_connected();
                 win.on_session_get(session);
                 if !was_connected && win.client().is_connected() {
-                    win.on_torrent_get(torrents, p::TORRENT_GET_MODE_FIRST);
+                    win.on_torrent_get(torrents, UpdateMode::First);
                     if let Some(args) = win.imp().args.take() {
                         win.add_from_filenames(args);
                     }
@@ -705,9 +705,9 @@ impl MainWindow {
             && (!prefs.get_bool(prefs::ACTIVEONLY_FULLSYNC_ENABLED, prefs::CONNECTION)
                 || (every != 0 && client.serial() % every != 0));
         let (torrents, mode) = if active_only {
-            (p::Torrents::RecentlyActive, p::TORRENT_GET_MODE_ACTIVE)
+            (p::Torrents::RecentlyActive, UpdateMode::Active)
         } else {
-            (p::Torrents::All, p::TORRENT_GET_MODE_UPDATE)
+            (p::Torrents::All, UpdateMode::Update)
         };
         let weak = self.downgrade();
         client.dispatch(p::torrent_get(&torrents), move |r| {
@@ -762,7 +762,7 @@ impl MainWindow {
     }
 
     /// The callback for a torrent_get response
-    fn on_torrent_get(&self, response: Response, mode: i32) {
+    fn on_torrent_get(&self, response: Response, mode: UpdateMode) {
         let client = self.client();
         let prefs = client.prefs().clone();
         let imp = self.imp();
@@ -803,7 +803,7 @@ impl MainWindow {
         self.update_selected_torrent_notebook(mode, self.selected_torrent_id());
         imp.status_bar.update(&stats, &client);
 
-        if mode != p::TORRENT_GET_MODE_INTERACTION {
+        if mode != UpdateMode::Interaction {
             self.start_torrents_timer(interval);
         }
     }
@@ -1384,10 +1384,7 @@ impl MainWindow {
         let weak = self.downgrade();
         selection.connect_selection_changed(move |_, _, _| {
             if let Some(win) = weak.upgrade() {
-                win.update_selected_torrent_notebook(
-                    p::TORRENT_GET_MODE_FIRST,
-                    win.first_selected_id(),
-                );
+                win.update_selected_torrent_notebook(UpdateMode::First, win.first_selected_id());
             }
         });
         // Torrents were added, removed, filtered or sorted. When the selected
@@ -1397,7 +1394,7 @@ impl MainWindow {
             if let Some(win) = weak.upgrade() {
                 let id = win.first_selected_id();
                 if id != win.selected_torrent_id() {
-                    win.update_selected_torrent_notebook(p::TORRENT_GET_MODE_FIRST, id);
+                    win.update_selected_torrent_notebook(UpdateMode::First, id);
                 }
                 win.update_no_results();
             }

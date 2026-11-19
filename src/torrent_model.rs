@@ -77,6 +77,21 @@ pub const COL_SEED_RATIO_MODE: usize = 43;
 pub const COL_SEED_RATIO_LIMIT: usize = 44;
 pub const N_COLUMNS: usize = 45;
 
+/// What a torrent_get was for, which decides how it updates the models
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpdateMode {
+    /// All the torrents, after connecting (or the first look at a torrent):
+    /// the models are filled from scratch
+    First,
+    /// The periodic update of the recently active torrents, with the IDs of
+    /// the removed ones
+    Active,
+    /// Some torrents, after the user changed them
+    Interaction,
+    /// The periodic update of all the torrents: those missing were removed
+    Update,
+}
+
 pub const UPDATE_STATE_CHANGE: u32 = 1 << 0;
 pub const UPDATE_PATH_CHANGE: u32 = 1 << 1;
 pub const UPDATE_ADDREMOVE: u32 = 1 << 2;
@@ -486,7 +501,7 @@ impl TorrentModel {
         }) > 0
     }
 
-    pub fn update(&self, client: &Client, args: &Obj, mode: i32) -> Stats {
+    pub fn update(&self, client: &Client, args: &Obj, mode: UpdateMode) -> Stats {
         let serial = client.serial();
         let mut changed = 0u32;
         let mut added = Vec::new();
@@ -519,17 +534,17 @@ impl TorrentModel {
             store.splice(store.n_items(), 0, &added);
         }
 
-        if mode != p::TORRENT_GET_MODE_FIRST {
+        if mode != UpdateMode::First {
             for item in &added {
                 self.emit_by_name::<()>("torrent-added", &[item]);
             }
         }
 
-        if mode == p::TORRENT_GET_MODE_UPDATE {
+        if mode == UpdateMode::Update {
             if self.remove_stale(serial) {
                 changed |= UPDATE_ADDREMOVE;
             }
-        } else if mode > p::TORRENT_GET_MODE_FIRST
+        } else if mode != UpdateMode::First
             && let Some(removed) = p::get_torrents_removed(args).filter(|r| !r.is_empty())
         {
             for id in removed.iter().map(prefs::value_as_i64) {
