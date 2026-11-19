@@ -1,96 +1,104 @@
-//! Adding torrents (upload.c): files, URLs or magnet links, optionally with
-//! a destination, priority, sequential download and the files' wanted
-//! states and priorities. All of them go in one batch, then the added
-//! torrents are fetched.
+//! Adding torrents: files, URLs or magnet links, optionally with a
+//! destination, priority, sequential download and the files' wanted states
+//! and priorities. All of them go in one batch, then the added torrents are
+//! fetched.
 
+use std::path::Path;
+
+use gtk::glib;
 use gtk::prelude::*;
 
 use crate::client::{Client, Response};
 use crate::i18n::{sprintf, tr};
 use crate::main_window::MainWindow;
+use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW};
 use crate::util;
 
-pub struct Upload {
-    /// the filenames (or URLs)
-    pub list: Vec<String>,
-    pub client: Client,
-    /// a parent window to attach any error dialogs to
-    pub main_window: MainWindow,
-    pub flags: u32,
-    pub dir: Option<String>,
-    pub priority: i64,
+/// How torrents are added
+#[derive(Debug, Default, Clone)]
+pub struct AddOptions {
+    pub paused: bool,
+    /// Delete the local .torrent files once they're read
+    pub delete_local: bool,
+    pub download_dir: Option<String>,
+    pub bandwidth_priority: Option<i64>,
     pub sequential_download: Option<bool>,
+    /// Whether each file of the torrent is wanted
+    pub files_wanted: Option<Vec<bool>>,
+    /// The priority of each file of the torrent
     pub file_priorities: Option<Vec<i64>>,
-    pub file_wanted: Option<Vec<bool>>,
-    pub extra_args: bool,
 }
 
-impl Upload {
-    pub fn new(list: Vec<String>, client: &Client, main_window: &MainWindow, flags: u32) -> Self {
+impl AddOptions {
+    /// The options of the preferences, for adding without the add dialog
+    pub fn from_prefs(prefs: &Prefs) -> Self {
         Self {
-            list,
-            client: client.clone(),
-            main_window: main_window.clone(),
-            flags,
-            dir: None,
-            priority: 0,
-            sequential_download: None,
-            file_priorities: None,
-            file_wanted: None,
-            extra_args: false,
+            paused: prefs.get_bool(prefs::KEY_START_PAUSED, Scope::Global),
+            delete_local: prefs.get_bool(prefs::KEY_DELETE_LOCAL_TORRENT, Scope::Global),
+            ..Default::default()
         }
     }
 
+    /// The request adding a file, URL or magnet link. None (with a message)
+    /// if the file doesn't exist; an error if it can't be read.
     fn request(&self, target: &str) -> Result<Option<p::Request>, String> {
-        let Some(mut req) = p::torrent_add_from_file(target, self.flags)? else {
+        let mut req = if util::is_magnet(target) || util::is_url(target) {
+            p::torrent_add_url(target, self.paused)
+        } else if Path::new(target).is_file() {
+            let metainfo = std::fs::read(target).map_err(|e| e.to_string())?;
+            if self.delete_local {
+                let _ = std::fs::remove_file(target);
+            }
+            p::torrent_add_metainfo(&metainfo, self.paused)
+        } else {
+            glib::g_message!("trg", "file \"{target}\" does not exist.");
             return Ok(None);
         };
 
-        if self.extra_args {
-            req.set(p::FIELD_FILE_DOWNLOAD_DIR, self.dir.clone().unwrap_or_default());
-            req.set(p::FIELD_BANDWIDTH_PRIORITY, self.priority);
+        if let Some(dir) = &self.download_dir {
+            req.set(p::FIELD_FILE_DOWNLOAD_DIR, dir);
+        }
+        if let Some(priority) = self.bandwidth_priority {
+            req.set(p::FIELD_BANDWIDTH_PRIORITY, priority);
         }
         if let Some(sequential) = self.sequential_download {
             req.set(p::FIELD_SEQUENTIAL_DOWNLOAD, sequential);
         }
 
-        if let Some(wanted) = &self.file_wanted {
-            for (i, w) in wanted.iter().enumerate() {
-                let key = if *w { p::FIELD_FILES_WANTED } else { p::FIELD_FILES_UNWANTED };
-                p::add_file_id_to_array(&mut req, key, i as i64);
-            }
+        for (i, wanted) in self.files_wanted.iter().flatten().enumerate() {
+            let key = if *wanted { p::FIELD_FILES_WANTED } else { p::FIELD_FILES_UNWANTED };
+            p::add_file_id_to_array(&mut req, key, i as i64);
         }
 
-        if let Some(priorities) = &self.file_priorities {
-            for (i, pr) in priorities.iter().enumerate() {
-                let key = match *pr {
-                    TR_PRI_LOW => p::FIELD_FILES_PRIORITY_LOW,
-                    TR_PRI_HIGH => p::FIELD_FILES_PRIORITY_HIGH,
-                    _ => p::FIELD_FILES_PRIORITY_NORMAL,
-                };
-                p::add_file_id_to_array(&mut req, key, i as i64);
-            }
+        for (i, priority) in self.file_priorities.iter().flatten().enumerate() {
+            let key = match *priority {
+                TR_PRI_LOW => p::FIELD_FILES_PRIORITY_LOW,
+                TR_PRI_HIGH => p::FIELD_FILES_PRIORITY_HIGH,
+                _ => p::FIELD_FILES_PRIORITY_NORMAL,
+            };
+            p::add_file_id_to_array(&mut req, key, i as i64);
         }
 
         Ok(Some(req))
     }
 }
 
-pub fn do_upload(upload: Upload) {
+/// Adds torrents (files, URLs or magnet links). Errors are shown on win.
+pub fn add_torrents(win: &MainWindow, client: &Client, targets: &[String], options: &AddOptions) {
     let mut reqs = Vec::new();
     let mut errors = Vec::new();
-    for target in &upload.list {
-        match upload.request(target) {
+    for target in targets {
+        match options.request(target) {
             Ok(Some(req)) => reqs.push(req),
             Ok(None) => {}
             Err(e) => errors.push(e),
         }
     }
     if !errors.is_empty() {
-        util::error_dialog(Some(&upload.main_window), &errors.join("\n"));
+        util::error_dialog(Some(win), &errors.join("\n"));
     }
-    dispatch_adds(&upload.main_window, &upload.client, reqs);
+    dispatch_adds(win, client, reqs);
 }
 
 /// Sends torrent_add requests in a batch, then gets the added torrents.

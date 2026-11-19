@@ -185,12 +185,6 @@ pub fn tracker_host(url: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
-pub fn base64_encode_file(filename: &str) -> Result<String, String> {
-    use base64::Engine;
-    let data = std::fs::read(filename).map_err(|e| e.to_string())?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(data))
-}
-
 pub fn rm_trailing_slashes(s: &str) -> &str {
     s.trim_end_matches('/')
 }

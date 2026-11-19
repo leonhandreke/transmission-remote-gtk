@@ -25,7 +25,7 @@ use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel, UpdateMode}
 use crate::torrent_view;
 use crate::trackers::{TrackersModel, TrackersView};
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
-use crate::upload::{self, Upload};
+use crate::upload::{self, AddOptions};
 use crate::util;
 
 #[derive(Default)]
@@ -480,7 +480,7 @@ impl MainWindow {
         if prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, Scope::Global) {
             dialogs::add::TorrentAddDialog::new_from_filenames(self, &client, uris).present();
         } else {
-            upload::do_upload(Upload::new(uris, &client, self, prefs.add_flags()));
+            upload::add_torrents(self, &client, &uris, &AddOptions::from_prefs(prefs));
         }
     }
 

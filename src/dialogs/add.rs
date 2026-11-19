@@ -18,7 +18,7 @@ use crate::item;
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_NORMAL};
-use crate::upload::{self, Upload};
+use crate::upload::{self, AddOptions};
 use crate::util;
 
 const MAGNET_MAX_LINK_WIDTH: usize = 75;
@@ -149,7 +149,7 @@ pub fn add_dialog(win: &MainWindow, client: &Client) {
         if show_options {
             TorrentAddDialog::new_from_filenames(&win, &client, list).present();
         } else {
-            upload::do_upload(Upload::new(list, &client, &win, prefs.add_flags()));
+            upload::add_torrents(&win, &client, &list, &AddOptions::from_prefs(prefs));
         }
     });
 }
@@ -330,41 +330,33 @@ impl TorrentAddDialog {
 
     fn response_cb(&self, response: Response) {
         let imp = self.imp();
-        let mut flags = 0;
-        if imp.paused_check.is_active() {
-            flags |= p::TORRENT_ADD_FLAG_PAUSED;
-        }
-        if imp.delete_check.is_active() {
-            flags |= p::TORRENT_ADD_FLAG_DELETE;
-        }
-
         if response == Response::Accept
             && let Some(win) = imp.win.upgrade()
         {
             let dest = imp.dest_combo.borrow().clone().unwrap();
-            let model = self.files_model();
-            let mut up = Upload::new(imp.filenames.take(), &self.client(), &win, flags);
-            up.dir = Some(dest.dir());
-            up.priority = imp.priority_combo.selected() as i64 - 1;
-            up.extra_args = true;
-            if imp.sequential_check.is_visible() {
-                up.sequential_download = Some(imp.sequential_check.is_active());
-            }
 
             // The wanted state and priority of each file of the torrent
-            let n = model.n_files();
-            let mut wanted = vec![false; n];
-            let mut priorities = vec![0; n];
-            for i in 0..n {
-                if let Some(item) = model.file(i) {
-                    wanted[i] = item.int64(files::COL_WANTED) != 0;
-                    priorities[i] = item.int64(files::COL_PRIORITY);
-                }
-            }
-            up.file_wanted = Some(wanted);
-            up.file_priorities = Some(priorities);
+            let model = self.files_model();
+            let files: Vec<_> = (0..model.n_files()).map(|i| model.file(i)).collect();
+            let wanted =
+                files.iter().map(|f| f.as_ref().is_some_and(|f| f.int64(files::COL_WANTED) != 0));
+            let priorities =
+                files.iter().map(|f| f.as_ref().map_or(0, |f| f.int64(files::COL_PRIORITY)));
 
-            upload::do_upload(up);
+            let options = AddOptions {
+                paused: imp.paused_check.is_active(),
+                delete_local: imp.delete_check.is_active(),
+                download_dir: Some(dest.dir()),
+                // the selected position - 1 is the priority (TR_PRI_LOW is -1)
+                bandwidth_priority: Some(imp.priority_combo.selected() as i64 - 1),
+                sequential_download: imp
+                    .sequential_check
+                    .is_visible()
+                    .then(|| imp.sequential_check.is_active()),
+                files_wanted: Some(wanted.collect()),
+                file_priorities: Some(priorities.collect()),
+            };
+            upload::add_torrents(&win, &self.client(), &imp.filenames.take(), &options);
             dest.save_selection();
         }
 

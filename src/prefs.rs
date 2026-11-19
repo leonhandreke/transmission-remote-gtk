@@ -499,18 +499,6 @@ impl Prefs {
         ok
     }
 
-    /// The flags for adding torrents, from the preferences
-    pub fn add_flags(&self) -> u32 {
-        let mut flags = 0;
-        if self.get_bool(KEY_START_PAUSED, Scope::Global) {
-            flags |= crate::protocol::TORRENT_ADD_FLAG_PAUSED;
-        }
-        if self.get_bool(KEY_DELETE_LOCAL_TORRENT, Scope::Global) {
-            flags |= crate::protocol::TORRENT_ADD_FLAG_DELETE;
-        }
-        flags
-    }
-
     /// The tree view's settings object in "tree-views", created if needed
     pub fn with_tree_view_props<R>(
         &self,

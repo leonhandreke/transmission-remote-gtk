@@ -193,9 +193,6 @@ pub const TORRENT_FLAG_QUEUED: u32 = 1 << 11;
 pub const TORRENT_FLAG_ACTIVE: u32 = 1 << 12;
 pub const TORRENT_FLAG_DOWNLOADING_METADATA: u32 = 1 << 13;
 
-pub const TORRENT_ADD_FLAG_PAUSED: u32 = 1 << 0;
-pub const TORRENT_ADD_FLAG_DELETE: u32 = 1 << 1;
-
 /* session_get */
 /// Not asked for (it's deprecated), but filled in by the client with the
 /// result of free_space for download_dir
@@ -493,33 +490,16 @@ pub fn torrent_get(torrents: &Torrents) -> Request {
     req
 }
 
+/// torrent_add for a URL or magnet link
 pub fn torrent_add_url(url: &str, paused: bool) -> Request {
     Request::new(METHOD_TORRENT_ADD).with(PARAM_FILENAME, url).with(PARAM_PAUSED, paused)
 }
 
-/// torrent_add for a file (sent base64 encoded), URL or magnet link. None
-/// (with a message) if the file doesn't exist; an error if it can't be read.
-pub fn torrent_add_from_file(target: &str, flags: u32) -> Result<Option<Request>, String> {
-    let is_uri = crate::util::is_magnet(target) || crate::util::is_url(target);
-
-    if !is_uri && !std::path::Path::new(target).is_file() {
-        glib_message(&format!("file \"{target}\" does not exist."));
-        return Ok(None);
-    }
-
-    let mut req = Request::new(METHOD_TORRENT_ADD);
-    if is_uri {
-        req.set(PARAM_FILENAME, target);
-    } else {
-        req.set(PARAM_METAINFO, crate::util::base64_encode_file(target)?);
-    }
-    req.set(PARAM_PAUSED, flags & TORRENT_ADD_FLAG_PAUSED != 0);
-
-    if flags & TORRENT_ADD_FLAG_DELETE != 0 {
-        let _ = std::fs::remove_file(target);
-    }
-
-    Ok(Some(req))
+/// torrent_add for the contents of a .torrent file (sent base64 encoded)
+pub fn torrent_add_metainfo(metainfo: &[u8], paused: bool) -> Request {
+    use base64::Engine;
+    let metainfo = base64::engine::general_purpose::STANDARD.encode(metainfo);
+    Request::new(METHOD_TORRENT_ADD).with(PARAM_METAINFO, metainfo).with(PARAM_PAUSED, paused)
 }
 
 /// The torrent of a torrent_add result ({id, name, hash_string}), and
@@ -553,10 +533,6 @@ pub fn tracker_list(trackers: &[(i64, String)]) -> String {
         last_tier = Some(*tier);
     }
     list
-}
-
-fn glib_message(msg: &str) {
-    gtk::glib::g_message!("trg", "{}", msg);
 }
 
 /* Torrents */
