@@ -79,7 +79,8 @@ pub const COL_SEED_RATIO_LIMIT: usize = 44;
 pub const N_COLUMNS: usize = 45;
 
 /// What a torrent_get was for, which decides how it updates the models
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, glib::Enum)]
+#[enum_type(name = "TrgUpdateMode")]
 pub enum UpdateMode {
     /// All the torrents, after connecting (or the first look at a torrent):
     /// the models are filled from scratch

@@ -1,6 +1,7 @@
 data/io.github.TransmissionRemoteGtk.desktop.in
 data/io.github.TransmissionRemoteGtk.appdata.xml.in
 src/add_torrents.rs
+src/client/connection.rs
 src/details.rs
 src/dialogs/add.rs
 src/dialogs/add_url.rs

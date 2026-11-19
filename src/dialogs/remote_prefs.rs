@@ -1,6 +1,6 @@
 //! The settings of the server: loaded from the latest session object of the
 //! client, sent with a session-set on OK. The session is then refreshed (see
-//! MainWindow::dispatch_session_set).
+//! Client::dispatch_session_set).
 
 use std::cell::RefCell;
 
@@ -527,8 +527,6 @@ impl RemotePrefsDialog {
         let mut req = p::session_set().with(p::SGET_ENCRYPTION, encryption);
         imp.widgets.borrow().save(req.params_mut());
 
-        if let Some(win) = imp.win.upgrade() {
-            win.dispatch_session_set(req);
-        }
+        self.client().dispatch_session_set(req);
     }
 }

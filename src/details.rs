@@ -33,7 +33,6 @@ impl DetailLists {
         let trackers_view = TrackersView::new(
             &trackers_model,
             client,
-            win,
             Some(&format!("TrgTrackersTreeView{config_suffix}")),
         );
         let files_model = FilesModel::new();

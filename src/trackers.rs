@@ -5,14 +5,13 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use gtk::gio;
 use gtk::prelude::*;
-use gtk::{gio, glib};
 
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
 use crate::json::{Obj, get_i64, get_str, objects};
-use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{
@@ -146,17 +145,12 @@ impl TrackersModel {
 pub struct TrackersView {
     pub tv: TreeView,
     model: Rc<TrackersModel>,
-    win: glib::WeakRef<MainWindow>,
+    client: Client,
     announce_column: Rc<ColumnDesc>,
 }
 
 impl TrackersView {
-    pub fn new(
-        model: &Rc<TrackersModel>,
-        client: &Client,
-        win: &MainWindow,
-        config_id: Option<&str>,
-    ) -> Rc<Self> {
+    pub fn new(model: &Rc<TrackersModel>, client: &Client, config_id: Option<&str>) -> Rc<Self> {
         let tv = TreeView::new(Some(client.prefs()), config_id.unwrap_or("TrgTrackersTreeView"));
 
         let desc = tv.reg_column(
@@ -211,7 +205,7 @@ impl TrackersView {
         let view = Rc::new(Self {
             tv: tv.clone(),
             model: model.clone(),
-            win: win.downgrade(),
+            client: client.clone(),
             announce_column: announce.clone(),
         });
 
@@ -237,7 +231,6 @@ impl TrackersView {
     /// Sends the announce URLs of the rows as the torrent's tracker list,
     /// ignoring updates from the server meanwhile
     fn send_tracker_list(self: &Rc<Self>) {
-        let Some(win) = self.win.upgrade() else { return };
         let trackers: Vec<(i64, String)> = item::items(&self.model.store)
             .filter_map(|i| Some((i.int64(COL_TIER), i.string(COL_ANNOUNCE)?)))
             .filter(|(_, url)| !url.is_empty())
@@ -246,7 +239,7 @@ impl TrackersView {
             .with(p::FIELD_TRACKER_LIST, p::tracker_list(&trackers));
         self.model.set_accept(false);
         let model = self.model.clone();
-        win.dispatch_interactive_with(req, move |_| model.set_accept(true));
+        self.client.dispatch_interactive_with(req, move |_| model.set_accept(true));
     }
 
     /// Editing an announce URL replaces the tracker, or adds it for a new row

@@ -622,8 +622,8 @@ impl PreferencesDialog {
                 d.save_all();
                 prefs.save();
             }
-            if let Some(win) = d.imp().win.upgrade() {
-                win.reload_dir_aliases();
+            if let Some(client) = d.imp().client.borrow().as_ref() {
+                client.reload_dir_aliases();
             }
             d.imp().widgets.borrow_mut().clear();
             d.destroy();

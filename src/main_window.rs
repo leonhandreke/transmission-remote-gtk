@@ -9,8 +9,8 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gdk, gio, glib};
 
 use crate::add_torrents::{self, AddOptions};
+use crate::client::Client;
 use crate::client::ConnectionState;
-use crate::client::{Client, Response};
 use crate::details::DetailLists;
 use crate::dialogs::{
     self, preferences::PreferencesDialog, remote_prefs::RemotePrefsDialog, stats::StatsDialog,
@@ -33,7 +33,6 @@ use crate::util;
 
 /// The parts of the window that aren't in its template, made by construct()
 pub struct Parts {
-    torrent_model: TorrentModel,
     torrent_tv: TreeView,
     torrent_filter: gtk::CustomFilter,
     toolbar: Toolbar,
@@ -90,11 +89,7 @@ mod imp {
         pub filter_selected_text: RefCell<Option<String>>,
         pub filter_text: RefCell<Option<String>>,
 
-        pub timer_id: RefCell<Option<glib::SourceId>>,
-        pub session_timer_id: RefCell<Option<glib::SourceId>>,
         pub queues_enabled: Cell<bool>,
-        // from connect_profile() until the connection succeeds or fails
-        pub connecting: Cell<bool>,
         pub state_saved: Cell<bool>,
         // the sidebar's default width (0 until it's first shown), not saved
         pub states_default_pos: Cell<i32>,
@@ -250,12 +245,10 @@ impl MainWindow {
         let imp = self.imp();
         let client = self.client();
         let prefs = client.prefs();
-        let (state, profile) = if client.is_connected() {
-            (ConnectionState::Connected, Scope::Connection)
-        } else if imp.connecting.get() {
-            (ConnectionState::Connecting, Scope::Connection)
-        } else {
-            (ConnectionState::Disconnected, Scope::Profile)
+        let state = client.connection_state();
+        let profile = match state {
+            ConnectionState::Disconnected => Scope::Profile,
+            _ => Scope::Connection,
         };
         let name = prefs.get_string(prefs::KEY_PROFILE_NAME, profile).unwrap_or_default();
         self.menu_bar().connection_change(state);
@@ -277,16 +270,8 @@ impl MainWindow {
         imp.not_connected.set_visible(state != ConnectionState::Connected);
     }
 
-    /// Every path out of connecting ends it: success and disconnecting
-    /// (conn_changed()), failure (on_session_get()) and another profile
-    /// (connect_profile()).
-    fn set_connecting(&self, connecting: bool) {
-        self.imp().connecting.set(connecting);
-        self.update_connection();
-    }
-
     fn torrent_model(&self) -> TorrentModel {
-        self.parts().torrent_model.clone()
+        self.client().torrent_model()
     }
 
     fn toolbar(&self) -> &Toolbar {
@@ -307,10 +292,6 @@ impl MainWindow {
 
     pub fn menu_model(&self) -> gio::MenuModel {
         self.menu_bar().model()
-    }
-
-    fn reset_connect_args(&self) {
-        self.imp().args.take();
     }
 
     fn update_selected_torrent_notebook(&self, mode: UpdateMode, id: i64) {
@@ -399,61 +380,6 @@ impl MainWindow {
         torrent_view::selected_ids(&self.torrent_tv())
     }
 
-    /// Sends a request about torrents, and in the same batch, which the
-    /// server executes in order, gets them again (all of them if it's about
-    /// all of them, the recently active ones and removed IDs for a
-    /// removal). Shows its error.
-    pub fn dispatch_interactive(&self, req: p::Request) {
-        self.dispatch_interactive_with(req, |_| {});
-    }
-
-    /// dispatch_interactive(), after() gets the result of the request first
-    pub fn dispatch_interactive_with(
-        &self,
-        req: p::Request,
-        after: impl FnOnce(&Response) + 'static,
-    ) {
-        let refresh = if req.method == p::METHOD_TORRENT_REMOVE {
-            p::Torrents::RecentlyActive
-        } else {
-            p::Torrents::of(&req)
-        };
-        let weak = self.downgrade();
-        self.client().dispatch_batch(vec![req, p::torrent_get(&refresh)], move |mut results| {
-            let Some(win) = weak.upgrade() else { return };
-            let (Some(torrents), Some(result)) = (results.pop(), results.pop()) else { return };
-            after(&result);
-            if !win.client().is_connected() {
-                return;
-            }
-            win.dialog_error_handler(&result);
-            win.on_torrent_get(torrents, UpdateMode::Interaction);
-        });
-    }
-
-    /// Sends a session_set, and in the same batch gets the session again
-    pub fn dispatch_session_set(&self, req: p::Request) {
-        let weak = self.downgrade();
-        self.client().update_session_after(vec![req], move |results, session| {
-            let Some(win) = weak.upgrade() else { return };
-            if let Some(result) = results.first() {
-                win.dialog_error_handler(result);
-            }
-            win.on_session_get(session);
-        });
-    }
-
-    /// Gets torrents (after they changed outside of a batch, such as adding
-    /// them)
-    pub fn refresh_torrents(&self, torrents: &p::Torrents) {
-        let weak = self.downgrade();
-        self.client().dispatch(p::torrent_get(torrents), move |r| {
-            if let Some(win) = weak.upgrade() {
-                win.on_torrent_get(r, UpdateMode::Interaction);
-            }
-        });
-    }
-
     /// Adds torrents (files, URLs or magnet links), with the add dialog if
     /// that's what the preferences say
     pub fn add_from_filenames(&self, uris: Vec<String>) {
@@ -469,35 +395,9 @@ impl MainWindow {
         }
     }
 
-    fn disconnect(&self) {
-        self.client().inc_connid();
-        self.conn_changed(false);
-        self.imp().status_bar.reset();
-    }
-
-    /// parameter is the index of the profile to connect to, or -1 for the
-    /// current one
+    /// Connects to the profile with index, or the current one for -1
     pub fn connect_profile(&self, index: i32) {
-        let client = self.client();
-        let prefs = client.prefs().clone();
-        let current = prefs.profile();
-        let profile =
-            (index >= 0 && (index as usize) < prefs.n_profiles()).then_some(index as usize);
-
-        if client.is_connected() {
-            self.disconnect();
-        }
-
-        match profile {
-            Some(p) if Some(p) != current => prefs.set_profile(Some(p)),
-            _ => prefs.emit_profile_changed(),
-        }
-
-        if let Err(msg) = client.parse_settings() {
-            self.reset_connect_args();
-            // drops the attempt to connect to another profile, if any
-            client.inc_connid();
-            self.set_connecting(false);
+        if let Err(msg) = self.client().connect_to_profile(index) {
             // open the preferences once the (modal) error is dismissed
             let weak = self.downgrade();
             util::error_dialog_full(
@@ -509,32 +409,7 @@ impl MainWindow {
                     }
                 })),
             );
-            return;
         }
-
-        self.imp().status_bar.push_connection_msg(&tr("Connecting..."));
-        // a new connid drops the responses of an attempt in progress
-        client.inc_connid();
-        self.set_connecting(true);
-        let weak = self.downgrade();
-        // the session and the torrents in one go
-        client.dispatch_batch(
-            vec![p::session_get(), p::torrent_get(&p::Torrents::All)],
-            move |mut results| {
-                let Some(win) = weak.upgrade() else { return };
-                let (Some(torrents), Some(session)) = (results.pop(), results.pop()) else {
-                    return;
-                };
-                let was_connected = win.client().is_connected();
-                win.on_session_get(session);
-                if !was_connected && win.client().is_connected() {
-                    win.on_torrent_get(torrents, UpdateMode::First);
-                    if let Some(args) = win.imp().args.take() {
-                        win.add_from_filenames(args);
-                    }
-                }
-            },
-        );
     }
 
     fn preferences_dialog(&self) -> PreferencesDialog {
@@ -607,154 +482,22 @@ impl MainWindow {
             if result != Ok(1) {
                 return;
             }
-            let req = p::torrent_remove(&ids, delete_data);
-            let w = win.downgrade();
-            win.dispatch_interactive_with(req, move |r| {
+            let client = win.client();
+            let c = client.clone();
+            client.dispatch_interactive_with(p::torrent_remove(&ids, delete_data), move |r| {
                 // the free space changed
-                if let (true, Ok(_), Some(win)) = (delete_data, r, w.upgrade()) {
-                    let w = win.downgrade();
-                    win.client().update_session(move |r| {
-                        if let Some(win) = w.upgrade() {
-                            win.on_session_get(r);
-                        }
-                    });
+                if delete_data && r.is_ok() {
+                    c.refresh_session();
                 }
             });
         });
     }
 
-    fn start_session_timer(&self) {
-        let prefs = self.client().prefs().clone();
-        let interval =
-            prefs.get_int(prefs::KEY_SESSION_UPDATE_INTERVAL, Scope::Connection).max(1) as u32;
-        let weak = self.downgrade();
-        let id = glib::timeout_add_seconds_local_once(interval, move || {
-            if let Some(win) = weak.upgrade() {
-                // a one-shot timer, so the id is no longer valid
-                win.imp().session_timer_id.take();
-                let w = win.downgrade();
-                win.client().update_session(move |r| {
-                    if let Some(win) = w.upgrade() {
-                        win.on_session_get(r);
-                        win.start_session_timer();
-                    }
-                });
-            }
-        });
-        if let Some(old) = self.imp().session_timer_id.replace(Some(id)) {
-            old.remove();
-        }
-    }
-
-    fn start_torrents_timer(&self, interval: u32) {
-        let weak = self.downgrade();
-        let id = glib::timeout_add_seconds_local_once(interval, move || {
-            if let Some(win) = weak.upgrade() {
-                win.imp().timer_id.take();
-                win.update_torrents();
-            }
-        });
-        if let Some(old) = self.imp().timer_id.replace(Some(id)) {
-            old.remove();
-        }
-    }
-
-    fn update_torrents(&self) {
-        let client = self.client();
-        if !client.is_connected() {
-            return;
-        }
-        let prefs = client.prefs();
-        let every = prefs.get_int(prefs::ACTIVEONLY_FULLSYNC_EVERY, Scope::Connection);
-        let active_only = prefs.get_bool(prefs::KEY_UPDATE_ACTIVE_ONLY, Scope::Connection)
-            && (!prefs.get_bool(prefs::ACTIVEONLY_FULLSYNC_ENABLED, Scope::Connection)
-                || (every != 0 && client.serial() % every != 0));
-        let (torrents, mode) = if active_only {
-            (p::Torrents::RecentlyActive, UpdateMode::Active)
-        } else {
-            (p::Torrents::All, UpdateMode::Update)
-        };
-        let weak = self.downgrade();
-        client.dispatch(p::torrent_get(&torrents), move |r| {
-            if let Some(win) = weak.upgrade() {
-                win.on_torrent_get(r, mode);
-            }
-        });
-    }
-
-    fn on_session_get(&self, response: Response) {
-        let client = self.client();
-        let is_connected = client.is_connected();
-        let last_session = client.session_clone();
-        let new_session = response.as_ref().ok().cloned();
-
-        // servers older than 4.1 fail with Error::Unsupported
-        if !is_connected {
-            if self.dialog_error_handler(&response) {
-                self.reset_connect_args();
-                self.set_connecting(false);
-                return;
-            }
-            if let Some(s) = &new_session {
-                self.imp().status_bar.connect(s, &client);
-            }
-        }
-
-        if let Some(new_session) = new_session {
-            let reload_aliases = last_session.as_ref().is_some_and(|l| {
-                get_str(l, p::SGET_DOWNLOAD_DIR) != get_str(&new_session, p::SGET_DOWNLOAD_DIR)
-            });
-            let changed = |k| {
-                last_session.as_ref().is_some_and(|l| get_bool(l, k) != get_bool(&new_session, k))
-            };
-            let refresh_speed = changed(p::SGET_ALT_SPEED_ENABLED)
-                || changed(p::SGET_SPEED_LIMIT_DOWN_ENABLED)
-                || changed(p::SGET_SPEED_LIMIT_UP_ENABLED);
-
-            client.set_session(new_session);
-
-            if reload_aliases {
-                self.reload_dir_aliases();
-            }
-            if refresh_speed {
-                self.imp().status_bar.update_speed(&self.torrent_model().stats(), &client);
-            }
-        }
-
-        if !is_connected {
-            self.conn_changed(true);
-        }
-    }
-
-    /// The callback for a torrent_get response
-    fn on_torrent_get(&self, response: Response, mode: UpdateMode) {
-        let client = self.client();
-        let prefs = client.prefs().clone();
+    /// The client updated the torrents: the filter, the sorting, the details
+    /// and the status bar follow
+    fn torrents_updated(&self, mode: UpdateMode) {
         let imp = self.imp();
-
-        // Disconnected between request and response callback
-        if !client.is_connected() {
-            return;
-        }
-
-        let mut interval = prefs.get_int(prefs::KEY_UPDATE_INTERVAL, Scope::Connection);
-        if interval < 1 {
-            interval = prefs::INTERVAL_DEFAULT;
-        }
-        let interval = interval as u32;
-
-        let obj = match response {
-            Ok(obj) => obj,
-            Err(error) => {
-                self.on_torrent_get_failed(&error, interval);
-                return;
-            }
-        };
-
-        client.reset_fail_count();
-        client.inc_serial();
-
-        let stats = self.torrent_model().update(&client, &obj, mode);
+        let client = self.client();
 
         // The filter and sorter don't watch the items, so the values they
         // look at may have changed.
@@ -764,29 +507,13 @@ impl MainWindow {
         self.torrent_tv().resort();
 
         self.update_selected_torrent_notebook(mode, self.selected_torrent_id());
-        imp.status_bar.update(&stats, &client);
+        imp.status_bar.update(&self.torrent_model().stats(), &client);
 
-        if mode != UpdateMode::Interaction {
-            self.start_torrents_timer(interval);
-        }
-    }
-
-    /// A failed torrent_get: retried with the next update, until there were
-    /// too many failures, which disconnects
-    fn on_torrent_get_failed(&self, error: &crate::client::Error, interval: u32) {
-        let client = self.client();
-        let prefs = client.prefs().clone();
-        let max_retries = prefs.get_int(prefs::KEY_RETRIES, Scope::Connection);
-        if client.inc_fail_count() as i64 >= max_retries {
-            self.conn_changed(false);
-            self.show_error(&error.to_string());
-        } else {
-            let status_msg = sprintf(
-                &tr("Request %d/%d failed: %s"),
-                &[&client.fail_count(), &max_retries, &error.to_string()],
-            );
-            self.imp().status_bar.push_connection_msg(&status_msg);
-            self.start_torrents_timer(interval);
+        // files to add once connected
+        if mode == UpdateMode::First
+            && let Some(args) = imp.args.take()
+        {
+            self.add_from_filenames(args);
         }
     }
 
@@ -841,21 +568,6 @@ impl MainWindow {
         self.update_no_results();
     }
 
-    pub fn reload_dir_aliases(&self) {
-        self.torrent_model().reload_dir_aliases(&self.client());
-    }
-
-    /// Shows the error of a failed request. Returns whether it failed.
-    fn dialog_error_handler(&self, response: &Response) -> bool {
-        match response {
-            Err(error) => {
-                self.show_error(&error.to_string());
-                true
-            }
-            Ok(_) => false,
-        }
-    }
-
     fn show_error(&self, msg: &str) {
         let sb = &self.imp().status_bar;
         sb.clear_indicators();
@@ -874,33 +586,38 @@ impl MainWindow {
         self.menu_bar().torrent_actions_sensitive(false);
     }
 
-    fn conn_changed(&self, connected: bool) {
+    /// The client connected, disconnected, or started connecting
+    fn connection_changed(&self) {
         let imp = self.imp();
         let client = self.client();
+        let state = client.connection_state();
 
-        // connecting succeeded, or was stopped
-        imp.connecting.set(false);
-
+        let connected = state == ConnectionState::Connected;
         let parts = self.parts();
         parts.torrent_tv.set_sensitive(connected);
         parts.details.set_sensitive(connected);
         imp.gen_details.set_sensitive(connected);
 
-        if connected {
-            self.start_session_timer();
-        } else {
-            self.torrent_scrub();
-            self.state_selector().disconnect();
-            self.torrent_model().remove_all();
-            if let Some(id) = imp.timer_id.take() {
-                id.remove();
+        let status_bar = &imp.status_bar;
+        match state {
+            ConnectionState::Connected => {
+                if let Some(session) = client.session_clone() {
+                    status_bar.connect(&session, &client);
+                }
             }
-            if let Some(id) = imp.session_timer_id.take() {
-                id.remove();
+            ConnectionState::Connecting => {
+                status_bar.reset();
+                status_bar.push_connection_msg(&tr("Connecting..."));
+            }
+            ConnectionState::Disconnected => {
+                // not added when connecting failed
+                imp.args.take();
+                self.torrent_scrub();
+                self.state_selector().disconnect();
+                status_bar.reset();
             }
         }
 
-        client.status_change(connected);
         self.update_no_results();
         self.update_connection();
     }
@@ -935,7 +652,7 @@ impl MainWindow {
         });
         self.add_action(&connect);
 
-        action("disconnect", |w| w.disconnect());
+        action("disconnect", |w| w.client().disconnect());
         action("add", |w| {
             if w.client().is_connected() {
                 dialogs::add::add_dialog(w, &w.client());
@@ -992,7 +709,7 @@ impl MainWindow {
             |name: &str, guard: fn(&MainWindow) -> bool, req: fn(&[i64]) -> p::Request| {
                 self.add_window_action(name, move |w| {
                     if guard(w) {
-                        w.dispatch_interactive(req(&w.selected_ids()));
+                        w.client().dispatch_interactive(req(&w.selected_ids()));
                     }
                 });
             };
@@ -1056,8 +773,11 @@ impl MainWindow {
 
     fn session_updated(&self) {
         let imp = self.imp();
-        let Some(session) = self.client().session_clone() else { return };
+        let client = self.client();
+        let Some(session) = client.session_clone() else { return };
         imp.status_bar.session_update(&session);
+        // the speed limits may have changed
+        imp.status_bar.update_speed(&self.torrent_model().stats(), &client);
 
         let queues_enabled = session.contains_key(p::SGET_DOWNLOAD_QUEUE_ENABLED)
             && (get_bool(&session, p::SGET_DOWNLOAD_QUEUE_ENABLED)
@@ -1129,7 +849,6 @@ impl MainWindow {
         let toolbar = Toolbar::new(&prefs);
 
         let parts = Parts {
-            torrent_model: model.clone(),
             torrent_tv: tv.clone(),
             torrent_filter: filter,
             toolbar: toolbar.clone(),
@@ -1228,15 +947,39 @@ impl MainWindow {
         // the restored filter
         self.refilter();
 
-        // the lists are enabled once connected (conn_changed)
+        // the lists are enabled once connected (connection_changed)
         tv.set_sensitive(false);
         self.parts().details.set_sensitive(false);
 
-        imp.status_bar.set_client(self, &client);
+        imp.status_bar.set_client(&client);
         let weak = self.downgrade();
         client.connect_session_updated(move |_| {
             if let Some(win) = weak.upgrade() {
                 win.session_updated();
+            }
+        });
+        let weak = self.downgrade();
+        client.connect_connection_changed(move |_| {
+            if let Some(win) = weak.upgrade() {
+                win.connection_changed();
+            }
+        });
+        let weak = self.downgrade();
+        client.connect_torrents_updated(move |_, mode| {
+            if let Some(win) = weak.upgrade() {
+                win.torrents_updated(mode);
+            }
+        });
+        let weak = self.downgrade();
+        client.connect_request_failed(move |_, msg| {
+            if let Some(win) = weak.upgrade() {
+                win.show_error(msg);
+            }
+        });
+        let weak = self.downgrade();
+        client.connect_status_message(move |_, msg| {
+            if let Some(win) = weak.upgrade() {
+                win.imp().status_bar.push_connection_msg(msg);
             }
         });
 

@@ -5,6 +5,7 @@
 use gtk::prelude::*;
 use gtk::{gio, glib};
 
+use crate::client::Client;
 use crate::format;
 use crate::i18n::tr;
 use crate::json::{get_bool, get_i64};
@@ -18,7 +19,8 @@ use crate::util;
 pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::MenuModel]) {
     let ids = torrent_view::selected_ids(tv);
     // The radio items show the values of the first selected torrent
-    let current = win.client().torrent_data(win.selected_torrent_id()).map(|(t, _)| t);
+    let client = win.client();
+    let current = client.torrent_data(win.selected_torrent_id()).map(|(t, _)| t);
     let current = current.as_deref();
     let actions = gio::SimpleActionGroup::new();
 
@@ -31,7 +33,7 @@ pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::M
         let limit = current
             .filter(|t| get_bool(t, enabled_key))
             .map_or(-1, |t| get_i64(t, speed_key) as i32);
-        torrent_set_action(win, &actions, &ids, name, limit, move |req, v| {
+        torrent_set_action(&client, &actions, &ids, name, limit, move |req, v| {
             if v >= 0 {
                 req.set(speed_key, v);
             }
@@ -52,7 +54,7 @@ pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::M
         p::FIELD_UPLOAD_LIMIT,
     ));
     let priority = current.map_or(p::TR_PRI_UNSET, |t| get_i64(t, p::FIELD_BANDWIDTH_PRIORITY));
-    torrent_set_action(win, &actions, &ids, "priority", priority as i32, |req, v| {
+    torrent_set_action(&client, &actions, &ids, "priority", priority as i32, |req, v| {
         req.set(p::FIELD_BANDWIDTH_PRIORITY, v);
     });
     section.append_item(&priority_menu());
@@ -64,7 +66,7 @@ pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::M
 /// A radio action ("torrent.<name>") setting a value of the torrents ids
 /// with a torrent_set, its state being the current value
 fn torrent_set_action(
-    win: &MainWindow,
+    client: &Client,
     actions: &gio::SimpleActionGroup,
     ids: &[i64],
     name: &str,
@@ -73,16 +75,14 @@ fn torrent_set_action(
 ) {
     let action =
         gio::SimpleAction::new_stateful(name, Some(glib::VariantTy::INT32), &state.to_variant());
-    let weak = win.downgrade();
+    let client = client.clone();
     let ids = ids.to_vec();
     action.connect_change_state(move |action, value| {
-        let (Some(win), Some(v)) = (weak.upgrade(), value.and_then(|v| v.get::<i32>())) else {
-            return;
-        };
+        let Some(v) = value.and_then(|v| v.get::<i32>()) else { return };
         action.set_state(&v.to_variant());
         let mut req = p::torrent_set(&ids);
         set(&mut req, v);
-        win.dispatch_interactive(req);
+        client.dispatch_interactive(req);
     });
     actions.add_action(&action);
 }

@@ -126,7 +126,7 @@ pub fn dispatch_adds(win: &MainWindow, client: &Client, reqs: Vec<p::Request>) {
             }
         }
         if !ids.is_empty() {
-            win.refresh_torrents(&p::Torrents::Ids(ids));
+            win.client().refresh_torrents(&p::Torrents::Ids(ids));
         }
         if !messages.is_empty() {
             util::error_dialog(Some(&win), &messages.join("\n"));

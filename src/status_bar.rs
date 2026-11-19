@@ -11,7 +11,6 @@ use crate::client::Client;
 use crate::format;
 use crate::i18n::{sprintf, tr};
 use crate::json::{Obj, get_bool, get_i64, get_str, value_as_i64};
-use crate::main_window::MainWindow;
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
 use crate::torrent_model::Stats;
@@ -32,7 +31,6 @@ mod imp {
         #[template_child]
         pub info_lbl: TemplateChild<gtk::Label>,
         pub client: RefCell<Option<Client>>,
-        pub win: glib::WeakRef<MainWindow>,
     }
 
     #[glib::object_subclass]
@@ -147,8 +145,8 @@ impl StatusBar {
         }));
 
         let req = p::session_set().with(p::SGET_ALT_SPEED_ENABLED, !alt_speed_on);
-        if let Some(win) = imp.win.upgrade() {
-            win.dispatch_session_set(req);
+        if let Some(client) = imp.client.borrow().as_ref() {
+            client.dispatch_session_set(req);
         }
     }
 
@@ -268,8 +266,7 @@ impl StatusBar {
     }
 
     /// The main window has the status bar in its template, so this is set later
-    pub fn set_client(&self, win: &MainWindow, client: &Client) {
+    pub fn set_client(&self, client: &Client) {
         *self.imp().client.borrow_mut() = Some(client.clone());
-        self.imp().win.set(Some(win));
     }
 }

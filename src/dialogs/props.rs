@@ -267,9 +267,7 @@ impl TorrentPropsDialog {
                 );
             imp.widgets.borrow().save(req.params_mut());
 
-            if let Some(win) = imp.win.upgrade() {
-                win.dispatch_interactive(req);
-            }
+            self.client().dispatch_interactive(req);
         }
 
         self.destroy();

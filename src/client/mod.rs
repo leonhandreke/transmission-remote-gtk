@@ -5,8 +5,10 @@
 //! 2. holds the RPC transport (rpc::Transport), for connection reuse,
 //! 3. has the torrents (the torrent model), and finds them by their ID,
 //! 4. dispatches asynchronous requests (and batches of them), unless the
-//!    connection changed in the meantime, and tracks failures,
-//! 5. holds the connection state and an update serial,
+//!    connection changed in the meantime,
+//! 5. connects, and keeps the session and the torrents up to date (see
+//!    connection.rs), with the connection state, an update serial and the
+//!    failures,
 //! 6. holds the latest session object of a session_get response, with the
 //!    free space of the download directory (from free_space), and emits
 //!    "session-updated" with it.
@@ -23,7 +25,9 @@ use crate::json::{Obj, get_bool, get_f64, get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self, Request};
 use crate::rpc::{self, Config, Transport};
-use crate::torrent_model::{TorrentItem, TorrentItemExt, TorrentModel};
+use crate::torrent_model::{TorrentItem, TorrentItemExt, TorrentModel, UpdateMode};
+
+mod connection;
 
 pub use crate::rpc::Error;
 
@@ -52,6 +56,10 @@ mod imp {
         pub seed_ratio_limited: Cell<bool>,
         pub seed_ratio_limit: Cell<f64>,
         pub torrent_model: TorrentModel,
+        /// From connect_to_profile() until the connection succeeds or fails
+        pub connecting: Cell<bool>,
+        pub torrents_timer: RefCell<Option<glib::SourceId>>,
+        pub session_timer: RefCell<Option<glib::SourceId>>,
     }
 
     impl Default for Client {
@@ -66,6 +74,9 @@ mod imp {
                 seed_ratio_limited: Default::default(),
                 seed_ratio_limit: Default::default(),
                 torrent_model: TorrentModel::new(),
+                connecting: Default::default(),
+                torrents_timer: Default::default(),
+                session_timer: Default::default(),
             }
         }
     }
@@ -79,7 +90,22 @@ mod imp {
     impl ObjectImpl for Client {
         fn signals() -> &'static [glib::subclass::Signal] {
             static SIGNALS: OnceLock<Vec<glib::subclass::Signal>> = OnceLock::new();
-            SIGNALS.get_or_init(|| vec![glib::subclass::Signal::builder("session-updated").build()])
+            SIGNALS.get_or_init(|| {
+                vec![
+                    glib::subclass::Signal::builder("session-updated").build(),
+                    // see connection.rs for these
+                    glib::subclass::Signal::builder("connection-changed").build(),
+                    glib::subclass::Signal::builder("torrents-updated")
+                        .param_types([UpdateMode::static_type()])
+                        .build(),
+                    glib::subclass::Signal::builder("request-failed")
+                        .param_types([String::static_type()])
+                        .build(),
+                    glib::subclass::Signal::builder("status-message")
+                        .param_types([String::static_type()])
+                        .build(),
+                ]
+            })
         }
 
         fn dispose(&self) {
@@ -180,7 +206,7 @@ impl Client {
         self.imp().session.borrow().is_some()
     }
 
-    pub fn inc_connid(&self) {
+    fn inc_connid(&self) {
         let c = &self.imp().connid;
         c.set(c.get() + 1);
     }
@@ -198,17 +224,17 @@ impl Client {
         s.set(s.get() + 1);
     }
 
-    pub fn fail_count(&self) -> u32 {
+    fn fail_count(&self) -> u32 {
         self.imp().fail_count.get()
     }
 
-    pub fn inc_fail_count(&self) -> u32 {
+    fn inc_fail_count(&self) -> u32 {
         let c = &self.imp().fail_count;
         c.set(c.get() + 1);
         c.get()
     }
 
-    pub fn reset_fail_count(&self) {
+    fn reset_fail_count(&self) {
         self.imp().fail_count.set(0);
     }
 
@@ -230,13 +256,6 @@ impl Client {
     pub fn torrent_data(&self, id: i64) -> Option<(Rc<Obj>, TorrentItem)> {
         let item = self.torrent_model().find(id)?;
         Some((item.torrent_json()?, item))
-    }
-
-    pub fn status_change(&self, connected: bool) {
-        if !connected {
-            *self.imp().session.borrow_mut() = None;
-            self.prefs().set_connection(None);
-        }
     }
 
     /// Reads the connection settings of the current profile, which becomes

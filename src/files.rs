@@ -554,10 +554,10 @@ impl FilesView {
     /// Sends a request changing the files, which then get updated. Updates
     /// from the server are ignored meanwhile.
     pub fn dispatch_files_update(self: &Rc<Self>, req: p::Request) {
-        let Some(win) = self.win.as_ref().and_then(|w| w.upgrade()) else { return };
+        let Some(client) = &self.client else { return };
         self.model.set_accept(false);
         let view = self.clone();
-        win.dispatch_interactive_with(req, move |_| view.model.set_accept(true));
+        client.dispatch_interactive_with(req, move |_| view.model.set_accept(true));
     }
 
     /// Sends the wanted state and priority of all the files

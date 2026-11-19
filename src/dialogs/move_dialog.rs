@@ -108,8 +108,8 @@ impl TorrentMoveDialog {
                     imp.move_check.is_active(),
                 );
                 combo.save_selection();
-                if let Some(win) = imp.win.upgrade() {
-                    win.dispatch_interactive(req);
+                if let Some(client) = imp.client.borrow().as_ref() {
+                    client.dispatch_interactive(req);
                 }
             }
             d.destroy();
