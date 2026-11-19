@@ -19,7 +19,7 @@ fn speed_units() -> [String; 4] {
 }
 
 /// tr_formatter_size_B()
-pub fn format_size(bytes: i64) -> String {
+pub fn size(bytes: i64) -> String {
     let units = size_units();
     let k = DISK_K as f64;
     let values = [k, k * k, k * k * k, k * k * k * k];
@@ -39,7 +39,7 @@ pub fn format_size(bytes: i64) -> String {
 }
 
 /// tr_formatter_speed_KBps()
-pub fn format_speed_kbps(kbps: f64) -> String {
+pub fn speed_kbps(kbps: f64) -> String {
     let units = speed_units();
     let k = SPEED_K as f64;
     let mut speed = kbps;
@@ -59,13 +59,13 @@ pub fn format_speed_kbps(kbps: f64) -> String {
 }
 
 /// A speed in bytes per second
-pub fn format_speed(bytes_per_second: i64) -> String {
-    format_speed_kbps((bytes_per_second / DISK_K) as f64)
+pub fn speed(bytes_per_second: i64) -> String {
+    speed_kbps((bytes_per_second / DISK_K) as f64)
 }
 
 /// tr_strlsize(): "None" for 0
-pub fn format_size_or_none(bytes: i64) -> String {
-    if bytes == 0 { qtr("None") } else { format_size(bytes) }
+pub fn size_or_none(bytes: i64) -> String {
+    if bytes == 0 { qtr("None") } else { size(bytes) }
 }
 
 pub fn truncd(x: f64, decimal_places: i32) -> f64 {
@@ -74,7 +74,7 @@ pub fn truncd(x: f64, decimal_places: i32) -> f64 {
 }
 
 /// tr_strlpercent()
-pub fn format_percent(x: f64) -> String {
+pub fn percent(x: f64) -> String {
     let precision = if x < 10.0 {
         2
     } else if x < 100.0 {
@@ -86,7 +86,7 @@ pub fn format_percent(x: f64) -> String {
 }
 
 /// tr_strlratio()
-pub fn format_ratio(ratio: f64) -> String {
+pub fn ratio(ratio: f64) -> String {
     if ratio.is_nan() {
         tr("None")
     } else if ratio.is_infinite() {
@@ -101,13 +101,13 @@ pub fn format_ratio(ratio: f64) -> String {
 }
 
 /// tr_strltime_short(): hh:mm:ss
-pub fn format_time_short(seconds: i64) -> String {
+pub fn time_short(seconds: i64) -> String {
     let s = seconds.max(0);
     format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, (s % 3600) % 60)
 }
 
 /// tr_strltime_long(): "2 days, 3 hours"
-pub fn format_time_long(seconds: i64) -> String {
+pub fn time_long(seconds: i64) -> String {
     let s = seconds.max(0);
     let days = s / 86400;
     let hours = (s % 86400) / 3600;
@@ -131,7 +131,7 @@ pub fn format_time_long(seconds: i64) -> String {
 }
 
 /// "%F %H:%M:%S" in local time, "N/A" for 0
-pub fn epoch_to_string(epoch: i64) -> String {
+pub fn date_time(epoch: i64) -> String {
     if epoch == 0 {
         return tr("N/A");
     }
@@ -181,9 +181,9 @@ mod tests {
 
     #[test]
     fn formats() {
-        assert_eq!(format_time_short(3725), "01:02:05");
-        assert_eq!(format_ratio(1.236), "1.23");
-        assert_eq!(format_percent(5.555), "5.55%");
+        assert_eq!(time_short(3725), "01:02:05");
+        assert_eq!(ratio(1.236), "1.23");
+        assert_eq!(percent(5.555), "5.55%");
         assert_eq!(truncd(1.239, 2), 1.23);
         assert!(
             add_links_to_text("see http://a.b/c?d=1 & more")

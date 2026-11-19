@@ -223,16 +223,12 @@ impl RowValues {
         let have_total = self.have_unchecked + self.have_valid;
         let is_seed = self.have_valid >= self.total_size;
         let seed_ratio = self.seed_ratio(client);
-        let size = format::format_size_or_none;
+        let size = format::size_or_none;
 
         let mut s = if self.flags & TORRENT_FLAG_DOWNLOADING != 0 {
             sprintf(
                 &tr("%1$s of %2$s (%3$s)"),
-                &[
-                    &size(have_total),
-                    &size(self.size_when_done),
-                    &format::format_percent(self.done),
-                ],
+                &[&size(have_total), &size(self.size_when_done), &format::percent(self.done)],
             )
         } else if !is_seed {
             match seed_ratio {
@@ -241,10 +237,10 @@ impl RowValues {
                     &[
                         &size(have_total),
                         &size(self.total_size),
-                        &format::format_percent(self.done),
+                        &format::percent(self.done),
                         &size(self.uploaded_ever),
-                        &format::format_ratio(self.ratio),
-                        &format::format_ratio(goal),
+                        &format::ratio(self.ratio),
+                        &format::ratio(goal),
                     ],
                 ),
                 None => sprintf(
@@ -252,9 +248,9 @@ impl RowValues {
                     &[
                         &size(have_total),
                         &size(self.total_size),
-                        &format::format_percent(self.done),
+                        &format::percent(self.done),
                         &size(self.uploaded_ever),
-                        &format::format_ratio(self.ratio),
+                        &format::ratio(self.ratio),
                     ],
                 ),
             }
@@ -265,8 +261,8 @@ impl RowValues {
                     &[
                         &size(self.total_size),
                         &size(self.uploaded_ever),
-                        &format::format_ratio(self.ratio),
-                        &format::format_ratio(goal),
+                        &format::ratio(self.ratio),
+                        &format::ratio(goal),
                     ],
                 ),
                 None => sprintf(
@@ -274,7 +270,7 @@ impl RowValues {
                     &[
                         &size(self.size_when_done),
                         &size(self.uploaded_ever),
-                        &format::format_ratio(self.ratio),
+                        &format::ratio(self.ratio),
                     ],
                 ),
             }
@@ -288,7 +284,7 @@ impl RowValues {
             if self.eta < 0 {
                 s.push_str(&tr("Remaining time unknown"));
             } else {
-                s.push_str(&sprintf(&tr("%s remaining"), &[&format::format_time_long(self.eta)]));
+                s.push_str(&sprintf(&tr("%s remaining"), &[&format::time_long(self.eta)]));
             }
         }
 
@@ -299,8 +295,8 @@ impl RowValues {
         let have_meta = self.file_count > 0;
         let have_up = have_meta && self.peers_from_us > 0;
         let have_down = have_meta && self.peers_to_us > 0;
-        let down = format::format_speed_kbps((self.down_speed / format::SPEED_K) as f64);
-        let up = format::format_speed_kbps((self.up_speed / format::SPEED_K) as f64);
+        let down = format::speed_kbps((self.down_speed / format::SPEED_K) as f64);
+        let up = format::speed_kbps((self.up_speed / format::SPEED_K) as f64);
 
         if have_down && have_up {
             sprintf(&tr("%1$s %2$s, %3$s %4$s"), &[&UNICODE_DOWN, &down, &UNICODE_UP, &up])
@@ -326,13 +322,13 @@ impl RowValues {
         } else if flags & TORRENT_FLAG_SEEDING_WAIT != 0 {
             tr("Queued for seeding")
         } else if flags & TORRENT_FLAG_CHECKING != 0 {
-            sprintf(&tr("Verifying data (%1$s tested)"), &[&format::format_percent(self.done)])
+            sprintf(&tr("Verifying data (%1$s tested)"), &[&format::percent(self.done)])
         } else if flags & (TORRENT_FLAG_DOWNLOADING | TORRENT_FLAG_SEEDING) != 0 {
             // (the C version meant to show the ratio only while seeding, but
             // its test, flags & ~DOWNLOADING, is always true)
             format!(
                 "{}, {}",
-                sprintf(&tr("Ratio %s"), &[&format::format_ratio(self.ratio)]),
+                sprintf(&tr("Ratio %s"), &[&format::ratio(self.ratio)]),
                 self.short_transfer_string()
             )
         } else {
@@ -377,7 +373,7 @@ impl RowValues {
                         "Downloading metadata from %1$lu peers (%2$s done)",
                         n,
                     ),
-                    &[&n, &format::format_percent(self.metadata_percent_complete)],
+                    &[&n, &format::percent(self.metadata_percent_complete)],
                 )
             }
         } else if flags & TORRENT_FLAG_SEEDING != 0 {

@@ -206,7 +206,7 @@ impl StatusBar {
         let alt = get_bool(session, p::SGET_ALT_SPEED_ENABLED);
 
         if free >= 0 {
-            imp.free_lbl.set_text(&sprintf(&tr("Free space: %s"), &[&format::format_size(free)]));
+            imp.free_lbl.set_text(&sprintf(&tr("Free space: %s"), &[&format::size(free)]));
         } else {
             imp.free_lbl.set_text("");
         }
@@ -243,7 +243,7 @@ impl StatusBar {
 
         let limit = |l: i64| {
             if l >= 0 {
-                sprintf(&tr(" (Limit: %s)"), &[&format::format_speed_kbps(l as f64)])
+                sprintf(&tr(" (Limit: %s)"), &[&format::speed_kbps(l as f64)])
             } else {
                 String::new()
             }
@@ -252,9 +252,9 @@ impl StatusBar {
         let text = sprintf(
             &tr("Down: %s%s, Up: %s%s"),
             &[
-                &format::format_speed(stats.down_rate_total),
+                &format::speed(stats.down_rate_total),
                 &limit(down_limit),
-                &format::format_speed(stats.up_rate_total),
+                &format::speed(stats.up_rate_total),
                 &limit(up_limit),
             ],
         );

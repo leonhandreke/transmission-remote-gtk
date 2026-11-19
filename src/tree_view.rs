@@ -156,16 +156,16 @@ fn format_value(desc: &ColumnDesc, value: &Val) -> Option<String> {
     match desc.ctype {
         ColType::Speed => {
             let speed = value.as_i64();
-            (speed > 0).then(|| format::format_speed(speed))
+            (speed > 0).then(|| format::speed(speed))
         }
         ColType::Epoch => {
             let epoch = value.as_i64();
-            (epoch > 0).then(|| format::epoch_to_string(epoch))
+            (epoch > 0).then(|| format::date_time(epoch))
         }
         ColType::Eta => {
             let eta = value.as_i64();
             if eta > 0 {
-                Some(format::format_time_short(eta))
+                Some(format::time_short(eta))
             } else if eta == -2 {
                 Some("\u{221E}".into())
             } else {
@@ -174,11 +174,11 @@ fn format_value(desc: &ColumnDesc, value: &Val) -> Option<String> {
         }
         ColType::Size => {
             let size = value.as_i64();
-            (size > 0).then(|| format::format_size(size))
+            (size > 0).then(|| format::size(size))
         }
         ColType::Ratio => {
             let ratio = value.as_f64();
-            (ratio > 0.0).then(|| format::format_ratio(ratio))
+            (ratio > 0.0).then(|| format::ratio(ratio))
         }
         ColType::Prio => match value.as_i64() {
             TR_PRI_LOW => Some(tr("Low")),

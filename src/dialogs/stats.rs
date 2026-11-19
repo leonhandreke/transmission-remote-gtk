@@ -215,14 +215,14 @@ impl StatsDialog {
                 c.set_text(&f(cumulat));
             };
             set(&imp.up_session, &imp.up_cumulat, &|o| {
-                format::format_size(get_i64(o, p::STATS_UPLOADED_BYTES))
+                format::size(get_i64(o, p::STATS_UPLOADED_BYTES))
             });
             set(&imp.down_session, &imp.down_cumulat, &|o| {
-                format::format_size(get_i64(o, p::STATS_DOWNLOADED_BYTES))
+                format::size(get_i64(o, p::STATS_DOWNLOADED_BYTES))
             });
             // NAN and INFINITY are handled by format_ratio
             set(&imp.ratio_session, &imp.ratio_cumulat, &|o| {
-                format::format_ratio(
+                format::ratio(
                     get_f64(o, p::STATS_UPLOADED_BYTES) / get_f64(o, p::STATS_DOWNLOADED_BYTES),
                 )
             });
@@ -233,7 +233,7 @@ impl StatsDialog {
                 get_i64(o, p::STATS_SESSION_COUNT).to_string()
             });
             set(&imp.active_session, &imp.active_cumulat, &|o| {
-                format::format_time_long(get_i64(o, p::STATS_SECONDS_ACTIVE))
+                format::time_long(get_i64(o, p::STATS_SECONDS_ACTIVE))
             });
 
             imp.error_shown.set(false);
