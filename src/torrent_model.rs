@@ -29,7 +29,7 @@ use crate::item::{self, Item, Val};
 use crate::json::{Obj, get_f64, get_i64, get_obj, get_str, objects, value_as_i64};
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
-use crate::util::{self, HostRegex};
+use crate::util;
 
 pub const COL_ICON: usize = 0;
 pub const COL_NAME: usize = 1;
@@ -162,7 +162,6 @@ mod imp {
     pub struct TorrentModel {
         pub store: gio::ListStore,
         pub ht: RefCell<HashMap<i64, Item>>,
-        pub host_regex: HostRegex,
         pub stats: RefCell<Stats>,
     }
 
@@ -171,7 +170,6 @@ mod imp {
             Self {
                 store: gio::ListStore::new::<Item>(),
                 ht: Default::default(),
-                host_regex: HostRegex::new(),
                 stats: Default::default(),
             }
         }
@@ -270,10 +268,6 @@ impl TorrentModel {
     /// The download directories of all the torrents
     pub fn download_dirs(&self) -> Vec<String> {
         self.imp().ht.borrow().values().filter_map(|i| i.string(COL_DOWNLOADDIR)).collect()
-    }
-
-    pub fn host_regex(&self) -> &HostRegex {
-        &self.imp().host_regex
     }
 
     pub fn connect_torrent_completed<F: Fn(&Item) + 'static>(&self, f: F) {
@@ -392,7 +386,7 @@ impl TorrentModel {
         let first_tracker_host = objects(tracker_stats)
             .next()
             .and_then(|tr| get_str(tr, p::FIELD_HOST))
-            .and_then(|h| self.imp().host_regex.first(h));
+            .and_then(util::tracker_host);
 
         let pex = get_i64(pf, p::TPEERFROM_FROMPEX);
         let dht = get_i64(pf, p::TPEERFROM_FROMDHT);

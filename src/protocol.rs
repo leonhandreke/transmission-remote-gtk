@@ -698,11 +698,9 @@ pub fn torrent_get_status_string(value: i64, flags: u32) -> String {
     }
 }
 
-pub fn torrent_has_tracker(t: &Obj, rx: &crate::util::HostRegex, search: Option<&str>) -> bool {
-    objects(torrent_get_tracker_stats(t)).any(|tracker| {
-        let host = get_str(tracker, FIELD_ANNOUNCE).and_then(|a| rx.first(a));
-        host.as_deref() == search
-    })
+pub fn torrent_has_tracker(t: &Obj, host: Option<&str>) -> bool {
+    objects(torrent_get_tracker_stats(t))
+        .any(|tracker| get_str(tracker, FIELD_ANNOUNCE).and_then(crate::util::tracker_host) == host)
 }
 
 pub fn get_torrents(args: &Obj) -> &[Value] {

@@ -161,35 +161,28 @@ pub fn is_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://")
 }
 
-/// The host of a tracker URL, without www., tracker. and the like
-pub struct HostRegex(glib::Regex);
+/// The host of a tracker's URL, without "www.", "tracker." and the like,
+/// which is what tells the trackers apart. Like the regular expression
+/// ^[^:/?#]+:?//(?:www\.|torrent\.|torrents\.|tracker\.|\d+\.)?([^/?#:]*)
+pub fn tracker_host(url: &str) -> Option<&str> {
+    let is_delimiter = |c| matches!(c, ':' | '/' | '?' | '#');
+    let scheme_end = url.find(is_delimiter).filter(|&i| i > 0)?;
+    let rest = &url[scheme_end..];
+    let mut rest = rest.strip_prefix(':').unwrap_or(rest).strip_prefix("//")?;
 
-impl Default for HostRegex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl HostRegex {
-    pub fn new() -> Self {
-        Self(
-            glib::Regex::new(
-                r"^[^:/?#]+:?//(?:www\.|torrent\.|torrents\.|tracker\.|\d+\.)?([^/?#:]*)",
-                glib::RegexCompileFlags::OPTIMIZE,
-                glib::RegexMatchFlags::empty(),
-            )
-            .ok()
-            .flatten()
-            .expect("the host regex is valid"),
-        )
+    let prefix = ["www.", "torrent.", "torrents.", "tracker."]
+        .iter()
+        .find_map(|p| rest.strip_prefix(p))
+        .or_else(|| {
+            let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            rest[digits..].strip_prefix('.').filter(|_| digits > 0)
+        });
+    if let Some(r) = prefix {
+        rest = r;
     }
 
-    /// The first group of the match, like trg_gregex_get_first()
-    pub fn first(&self, src: &str) -> Option<String> {
-        let s = glib::GString::from(src);
-        let mi = self.0.match_(s.as_gstr(), glib::RegexMatchFlags::empty()).ok()?;
-        if mi.matches() { mi.fetch(1).map(|s| s.to_string()) } else { None }
-    }
+    let end = rest.find(is_delimiter).unwrap_or(rest.len());
+    Some(&rest[..end])
 }
 
 pub fn base64_encode_file(filename: &str) -> Result<String, String> {
@@ -401,5 +394,17 @@ mod tests {
             add_links_to_text("see http://a.b/c?d=1 & more")
                 .contains("<a href='http://a.b/c?d=1'>")
         );
+    }
+
+    #[test]
+    fn tracker_hosts() {
+        assert_eq!(tracker_host("udp://tracker.example.org:6969/announce"), Some("example.org"));
+        assert_eq!(tracker_host("https://www.example.org/announce?x"), Some("example.org"));
+        assert_eq!(tracker_host("http://torrents.example.org"), Some("example.org"));
+        assert_eq!(tracker_host("http://9.example.org/"), Some("example.org"));
+        assert_eq!(tracker_host("http://torrentsite.org/"), Some("torrentsite.org"));
+        assert_eq!(tracker_host("http:example.org"), None);
+        assert_eq!(tracker_host("//example.org"), None);
+        assert_eq!(tracker_host("example.org:443"), None);
     }
 }

@@ -835,12 +835,7 @@ impl MainWindow {
         if criteria != 0 {
             if criteria & FILTER_FLAG_TRACKER != 0 {
                 let Some(json) = item.torrent_json() else { return false };
-                let selector = self.state_selector();
-                if !p::torrent_has_tracker(
-                    &json,
-                    selector.host_regex(),
-                    imp.filter_selected_text.borrow().as_deref(),
-                ) {
+                if !p::torrent_has_tracker(&json, imp.filter_selected_text.borrow().as_deref()) {
                     return false;
                 }
             } else if criteria & FILTER_FLAG_DIR != 0 {

@@ -15,7 +15,7 @@ use crate::json::{get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol as p;
 use crate::torrent_model::{self as tm, Stats, TorrentItemExt, TorrentModel};
-use crate::util::{self, HostRegex};
+use crate::util;
 
 pub const FILTER_FLAG_TRACKER: u32 = 1 << 14;
 pub const FILTER_FLAG_DIR: u32 = 1 << 15;
@@ -75,7 +75,6 @@ mod imp {
         pub client: RefCell<Option<Client>>,
         pub trackers: RefCell<HashMap<String, Item>>,
         pub directories: RefCell<HashMap<String, Item>>,
-        pub host_regex: HostRegex,
         pub n_categories: Cell<i32>,
         pub states: RefCell<States>,
     }
@@ -99,7 +98,6 @@ mod imp {
                 client: Default::default(),
                 trackers: Default::default(),
                 directories: Default::default(),
-                host_regex: HostRegex::new(),
                 n_categories: Cell::new(0),
                 states: Default::default(),
             }
@@ -203,10 +201,6 @@ impl StateSelector {
         });
     }
 
-    pub fn host_regex(&self) -> &HostRegex {
-        &self.imp().host_regex
-    }
-
     pub fn flag(&self) -> u32 {
         self.imp().flag.get()
     }
@@ -307,8 +301,9 @@ impl StateSelector {
 
             if update_trackers {
                 for tracker in objects(p::torrent_get_tracker_stats(&t)) {
-                    let Some(host) =
-                        get_str(tracker, p::FIELD_ANNOUNCE).and_then(|a| imp.host_regex.first(a))
+                    let Some(host) = get_str(tracker, p::FIELD_ANNOUNCE)
+                        .and_then(util::tracker_host)
+                        .map(str::to_string)
                     else {
                         continue;
                     };
