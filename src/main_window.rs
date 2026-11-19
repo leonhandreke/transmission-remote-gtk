@@ -958,17 +958,20 @@ impl MainWindow {
         self.update_connection();
     }
 
+    /// A "win." action without a parameter
+    fn add_window_action(&self, name: &str, f: impl Fn(&Self) + 'static) {
+        let action = gio::SimpleAction::new(name, None);
+        let weak = self.downgrade();
+        action.connect_activate(move |_, _| {
+            if let Some(win) = weak.upgrade() {
+                f(&win);
+            }
+        });
+        self.add_action(&action);
+    }
+
     fn add_actions(&self) {
-        let action = |name: &str, f: fn(&MainWindow)| {
-            let a = gio::SimpleAction::new(name, None);
-            let weak = self.downgrade();
-            a.connect_activate(move |_, _| {
-                if let Some(win) = weak.upgrade() {
-                    f(&win);
-                }
-            });
-            self.add_action(&a);
-        };
+        let action = |name: &str, f: fn(&MainWindow)| self.add_window_action(name, f);
 
         // parameter: profile index, -1 for the current profile. state: the
         // current profile
@@ -994,26 +997,6 @@ impl MainWindow {
         action("add-url", |w| dialogs::add_url::TorrentAddUrlDialog::new(w, &w.client()).present());
         action("properties", |w| w.open_props());
         action("copy-magnet", |w| w.copy_magnet_link());
-        action("resume", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_start(Some(&w.selected_ids())));
-            }
-        });
-        action("pause", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_pause(Some(&w.selected_ids())));
-            }
-        });
-        action("verify", |w| {
-            if w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_verify(&w.selected_ids()));
-            }
-        });
-        action("reannounce", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_reannounce(&w.selected_ids()));
-            }
-        });
         action("move", |w| {
             if w.is_ready_for_torrent_action() {
                 dialogs::move_dialog::TorrentMoveDialog::new(w, &w.client(), &w.torrent_tv())
@@ -1035,41 +1018,6 @@ impl MainWindow {
                 );
             }
         });
-        action("start-now", |w| {
-            if w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_start_now(&w.selected_ids()));
-            }
-        });
-        action("up-queue", |w| {
-            if w.imp().queues_enabled.get() && w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_queue_move_up(&w.selected_ids()));
-            }
-        });
-        action("down-queue", |w| {
-            if w.imp().queues_enabled.get() && w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_queue_move_down(&w.selected_ids()));
-            }
-        });
-        action("bottom-queue", |w| {
-            if w.imp().queues_enabled.get() && w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_queue_move_bottom(&w.selected_ids()));
-            }
-        });
-        action("top-queue", |w| {
-            if w.imp().queues_enabled.get() && w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_queue_move_top(&w.selected_ids()));
-            }
-        });
-        action("resume-all", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_start(None));
-            }
-        });
-        action("pause-all", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_pause(None));
-            }
-        });
         action("connect-current", |w| w.connect_profile(-1));
         action("local-prefs", |w| w.open_local_prefs());
         action("edit-profiles", |w| w.edit_profiles());
@@ -1085,6 +1033,33 @@ impl MainWindow {
             about.set_hide_on_close(false);
             about.present();
         });
+
+        // Requests about the selected torrents (or all of them), sent when
+        // connected, and for some when a torrent is selected, or the queues
+        // are enabled
+        let connected: fn(&MainWindow) -> bool = |w| w.client().is_connected();
+        let selected: fn(&MainWindow) -> bool = MainWindow::is_ready_for_torrent_action;
+        let queued: fn(&MainWindow) -> bool =
+            |w| w.imp().queues_enabled.get() && w.is_ready_for_torrent_action();
+        let request =
+            |name: &str, guard: fn(&MainWindow) -> bool, req: fn(&[i64]) -> p::Request| {
+                self.add_window_action(name, move |w| {
+                    if guard(w) {
+                        w.dispatch_interactive(req(&w.selected_ids()));
+                    }
+                });
+            };
+        request("resume", connected, |ids| p::torrent_start(Some(ids)));
+        request("pause", connected, |ids| p::torrent_pause(Some(ids)));
+        request("verify", selected, p::torrent_verify);
+        request("reannounce", connected, p::torrent_reannounce);
+        request("start-now", selected, p::torrent_start_now);
+        request("up-queue", queued, p::torrent_queue_move_up);
+        request("down-queue", queued, p::torrent_queue_move_down);
+        request("top-queue", queued, p::torrent_queue_move_top);
+        request("bottom-queue", queued, p::torrent_queue_move_bottom);
+        request("resume-all", connected, |_| p::torrent_start(None));
+        request("pause-all", connected, |_| p::torrent_pause(None));
     }
 
     fn action_notify(&self, name: &str, f: fn(&MainWindow, bool, bool)) {
