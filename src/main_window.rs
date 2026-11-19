@@ -1487,8 +1487,6 @@ impl MainWindow {
             parts.trackers_view.as_ref().unwrap().tv.set_sensitive(false);
         }
 
-        // There's no system tray in GTK 4
-
         imp.status_bar.set_client(self, &client);
         let weak = self.downgrade();
         client.connect_session_updated(move |_| {

@@ -672,7 +672,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       Label {
-        label: _("System Tray");
+        label: _("Notifications");
         xalign: 0;
         hexpand: true;
 
@@ -687,52 +687,6 @@ template $TrgPreferencesDialog: $TrgDialog {
         }
       }
 
-      CheckButton system_tray_check {
-        label: _("Show in system tray");
-        use-underline: true;
-        sensitive: false;
-        tooltip-text: _("System tray not supported.");
-        hexpand: true;
-        margin-start: 18;
-
-        layout {
-          column: 0;
-          row: 7;
-          column-span: 2;
-        }
-      }
-
-      CheckButton minimize_to_tray_check {
-        label: _("Minimize to tray");
-        use-underline: true;
-        sensitive: false;
-        tooltip-text: _("System tray not supported.");
-        hexpand: true;
-        margin-start: 18;
-
-        layout {
-          column: 0;
-          row: 8;
-          column-span: 2;
-        }
-      }
-
-      Label {
-        label: _("Notifications");
-        xalign: 0;
-        hexpand: true;
-
-        styles [
-          "heading",
-        ]
-
-        layout {
-          column: 0;
-          row: 9;
-          column-span: 2;
-        }
-      }
-
       CheckButton add_notify_check {
         label: _("Torrent added notifications");
         use-underline: true;
@@ -741,7 +695,7 @@ template $TrgPreferencesDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 10;
+          row: 7;
           column-span: 2;
         }
       }
@@ -754,7 +708,7 @@ template $TrgPreferencesDialog: $TrgDialog {
 
         layout {
           column: 0;
-          row: 11;
+          row: 8;
           column-span: 2;
         }
       }

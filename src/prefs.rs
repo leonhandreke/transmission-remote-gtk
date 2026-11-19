@@ -44,7 +44,6 @@ pub const KEY_COMPLETE_NOTIFY: &str = "complete-notify";
 pub const KEY_ADD_NOTIFY: &str = "add-notify";
 pub const KEY_WINDOW_WIDTH: &str = "window-width";
 pub const KEY_WINDOW_HEIGHT: &str = "window-height";
-pub const KEY_SYSTEM_TRAY: &str = "system-tray";
 pub const KEY_FILTER_TRACKERS: &str = "filter-trackers";
 pub const KEY_DIRECTORIES_FIRST: &str = "directories-first";
 pub const KEY_FILTER_DIRS: &str = "filter-dirs";
@@ -71,7 +70,6 @@ pub const KEY_DESTINATIONS: &str = "destinations";
 pub const KEY_LAST_MOVE_DESTINATION: &str = "last-move-destination";
 pub const KEY_LAST_ADD_DESTINATION: &str = "last-add-destination";
 pub const KEY_DESTINATIONS_SUBKEY_DIR: &str = "dir";
-pub const KEY_MINIMIZE_TO_TRAY: &str = "minimize-to-tray";
 
 pub const NOFLAGS: u32 = 1 << 0;
 pub const GLOBAL: u32 = 1 << 1;
@@ -249,7 +247,6 @@ impl Prefs {
                 KEY_DIRECTORIES_FIRST,
                 KEY_ADD_OPTIONS_DIALOG,
                 KEY_SHOW_STATE_SELECTOR,
-                KEY_MINIMIZE_TO_TRAY,
             ] {
                 d.insert(key.into(), json!(true));
             }

@@ -387,10 +387,6 @@ mod imp {
         #[template_child]
         pub show_notebook_check: TemplateChild<gtk::Widget>,
         #[template_child]
-        pub system_tray_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub minimize_to_tray_check: TemplateChild<gtk::Widget>,
-        #[template_child]
         pub add_notify_check: TemplateChild<gtk::Widget>,
         #[template_child]
         pub complete_notify_check: TemplateChild<gtk::Widget>,
@@ -607,8 +603,6 @@ impl PreferencesDialog {
                 prefs::GLOBAL,
             ),
             (imp.show_notebook_check.get().upcast(), prefs::KEY_SHOW_NOTEBOOK, prefs::GLOBAL),
-            (imp.system_tray_check.get().upcast(), prefs::KEY_SYSTEM_TRAY, prefs::GLOBAL),
-            (imp.minimize_to_tray_check.get().upcast(), prefs::KEY_MINIMIZE_TO_TRAY, prefs::GLOBAL),
             (imp.add_notify_check.get().upcast(), prefs::KEY_ADD_NOTIFY, prefs::GLOBAL),
             (imp.complete_notify_check.get().upcast(), prefs::KEY_COMPLETE_NOTIFY, prefs::GLOBAL),
         ];
