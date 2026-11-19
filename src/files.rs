@@ -1,8 +1,6 @@
-//! The files of a torrent as a tree (trg-files-model.c, trg-files-tree.c,
-//! and trg-files-tree-view.c). A directory (ID -1)
-//! has its children in a list store; its columns sum up (size, bytes
-//! completed, progress) or combine (wanted, priority: TR_PRI_MIXED if its
-//! files differ) those of its children.
+//! The files of a torrent as a tree. A directory (ID -1) has its children in a
+//! list store; its columns sum up (size, bytes completed, progress) or combine
+//! (wanted, priority: TR_PRI_MIXED if its files differ) those of its children.
 //!
 //! The view is used for the files of the selected torrent, and (locally) for
 //! the files of a torrent to add.

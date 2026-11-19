@@ -1,6 +1,5 @@
-//! The status bar (trg-status-bar.c): the connection status on the left, the
-//! free space and the speeds (with the limits) on the right, and the
-//! alternative speed toggle.
+//! The status bar: the connection status on the left, the free space and the
+//! speeds (with the limits) on the right, and the alternative speed toggle.
 
 use std::cell::RefCell;
 

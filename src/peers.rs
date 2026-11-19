@@ -1,6 +1,5 @@
-//! The peers of the selected torrent, updated by IP (trg-peers-model.c and
-//! trg-peers-tree-view.c). The host names are looked up asynchronously if
-//! the column is showing.
+//! The peers of the selected torrent, updated by IP. The host names are looked
+//! up asynchronously if the column is showing.
 
 use std::cell::RefCell;
 use std::collections::HashMap;

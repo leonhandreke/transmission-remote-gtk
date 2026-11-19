@@ -1,11 +1,11 @@
-//! The main menu (trg-menu-bar.c), a GMenuModel. The menu items activate actions installed
-//! on the main window ("win." prefix), apart from the stateful view actions
-//! (check and radio items) which are created here as they're backed by
-//! preferences. It's shown in the window with a GtkPopoverMenuBar, or on
-//! macOS in the system menu bar with gtk_application_set_menubar(). There
-//! GTK provides the application menu, with About, Preferences and Quit
-//! (app.about, app.preferences and app.quit), so those aren't repeated in the
-//! other menus, and the Help menu links to the project page (app.help).
+//! The main menu, a GMenuModel. The menu items activate actions installed on
+//! the main window ("win." prefix), apart from the stateful view actions (check
+//! and radio items) which are created here as they're backed by preferences.
+//! It's shown in the window with a GtkPopoverMenuBar, or on macOS in the system
+//! menu bar with gtk_application_set_menubar(). There GTK provides the
+//! application menu, with About, Preferences and Quit (app.about,
+//! app.preferences and app.quit), so those aren't repeated in the other menus,
+//! and the Help menu links to the project page (app.help).
 
 use std::cell::{Cell, RefCell};
 

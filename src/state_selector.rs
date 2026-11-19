@@ -1,5 +1,5 @@
 //! The sidebar of torrent states, trackers and directories to filter the
-//! torrents by (trg-state-selector.c). Its rows count the torrents.
+//! torrents by. Its rows count the torrents.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;

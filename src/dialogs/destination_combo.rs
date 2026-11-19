@@ -1,7 +1,6 @@
-//! An entry for a download directory, with a menu button to choose the
-//! default directory, the saved destinations (labels) or the directory of an
-//! existing torrent. Emits "changed" when the directory changes
-//! (trg-destination-combo.c).
+//! An entry for a download directory, with a menu button to choose the default
+//! directory, the saved destinations (labels) or the directory of an existing
+//! torrent. Emits "changed" when the directory changes.
 
 use std::cell::RefCell;
 

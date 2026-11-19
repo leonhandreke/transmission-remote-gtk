@@ -1,4 +1,4 @@
-//! Adding a torrent from a URL or magnet link (trg-torrent-add-url-dialog.c)
+//! Adding a torrent from a URL or magnet link
 
 use std::cell::RefCell;
 

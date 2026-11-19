@@ -1,4 +1,4 @@
-//! The properties of the selected torrents (trg-torrent-props-dialog.c).
+//! The properties of the selected torrents.
 //!
 //! The torrent list is passed into here, which this gets the selection from.
 //! If there are multiple selections, the first populates the fields. The IDs

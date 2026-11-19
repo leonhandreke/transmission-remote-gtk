@@ -1,4 +1,4 @@
-//! Moving torrents to another location (trg-torrent-move-dialog.c)
+//! Moving torrents to another location
 
 use std::cell::RefCell;
 

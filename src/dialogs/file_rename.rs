@@ -1,4 +1,4 @@
-//! Renaming a file or directory of a torrent (trg-file-rename-dialog.c)
+//! Renaming a file or directory of a torrent
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

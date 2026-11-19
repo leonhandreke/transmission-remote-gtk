@@ -1,5 +1,4 @@
-//! The statistics of the server (trg-stats-dialog.c), refreshed while the
-//! dialog is open.
+//! The statistics of the server, refreshed while the dialog is open.
 
 use std::cell::{Cell, RefCell};
 

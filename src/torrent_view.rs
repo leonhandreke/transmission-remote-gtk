@@ -1,5 +1,5 @@
-//! The list of torrents: the columns of a TreeView in the classic style, a
-//! list of TorrentRows in the Transmission styles (torrent-row.c).
+//! The list of torrents: the columns of a TreeView in the classic style, a list
+//! of TorrentRows in the Transmission styles.
 
 use std::cell::{Cell, RefCell};
 

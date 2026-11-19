@@ -1,5 +1,5 @@
-//! The local preferences: the connection profiles, updates, adding torrents
-//! and the view (trg-preferences-dialog.c and trg-persistent-tree-view.c).
+//! The local preferences: the connection profiles, updates, adding torrents and
+//! the view.
 //!
 //! The widgets of the template which show a preference are listed with the
 //! key and scope of the preference, and loaded and saved with them.

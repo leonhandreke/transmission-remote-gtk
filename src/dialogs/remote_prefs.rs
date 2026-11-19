@@ -1,6 +1,6 @@
-//! The settings of the server (trg-remote-prefs-dialog.c): loaded from the
-//! latest session object of the client, sent with a session-set on OK. The
-//! session is then refreshed (see MainWindow::on_session_set).
+//! The settings of the server: loaded from the latest session object of the
+//! client, sent with a session-set on OK. The session is then refreshed (see
+//! MainWindow::dispatch_session_set).
 
 use std::cell::RefCell;
 

@@ -1,5 +1,5 @@
-//! Decoding .torrent files (bencode.c and trg-file-parser.c): their name and
-//! the tree of their files, for the add dialog.
+//! Decoding .torrent files: their name and the tree of their files, for the add
+//! dialog.
 
 use std::collections::BTreeMap;
 

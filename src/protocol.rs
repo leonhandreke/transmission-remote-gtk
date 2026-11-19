@@ -1,8 +1,7 @@
 //! The Transmission RPC protocol (4.1 and later, see docs/rpc-spec.md of
-//! Transmission): the method names and keys, the requests, and getters for
-//! the fields of torrents, trackers, peers, files and the session
-//! (protocol-constants.h, requests.c, torrent.c, session-get.c and json.c
-//! in the C version). The wire format is in rpc.
+//! Transmission): the method names and keys, the requests, and getters for the
+//! fields of torrents, trackers, peers, files and the session. The wire format
+//! is in rpc.
 
 use serde_json::{Value, json};
 

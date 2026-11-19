@@ -1,5 +1,5 @@
-//! Adding torrents from files, with options: the destination, the priority
-//! and the files to download (trg-torrent-add-dialog.c), or straight away.
+//! Adding torrents from files, with options: the destination, the priority and
+//! the files to download, or straight away.
 
 use std::cell::RefCell;
 use std::rc::Rc;

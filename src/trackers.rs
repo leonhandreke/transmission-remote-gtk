@@ -1,7 +1,6 @@
-//! The trackers of the selected torrent (trg-trackers-model.c and
-//! trg-trackers-tree-view.c): editing an announce URL replaces the tracker,
-//! the context menu adds and deletes them. Changes send the whole list of
-//! the rows (tracker_list).
+//! The trackers of the selected torrent: editing an announce URL replaces the
+//! tracker, the context menu adds and deletes them. Changes send the whole list
+//! of the rows (tracker_list).
 
 use std::cell::Cell;
 use std::rc::Rc;

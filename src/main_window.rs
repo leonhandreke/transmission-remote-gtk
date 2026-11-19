@@ -1,5 +1,6 @@
-//! The rather large main window, which glues everything together
-//! (trg-main-window.c).
+//! The main window, which glues everything together: it connects to the server,
+//! updates the torrents and the session periodically, and has the actions of
+//! the menus and the toolbar.
 
 use std::cell::{Cell, OnceCell, RefCell};
 

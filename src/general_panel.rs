@@ -1,5 +1,5 @@
-//! The General page of the torrent details: the selected torrent's state
-//! and statistics (trg-general-panel.c).
+//! The General page of the torrent details: the selected torrent's state and
+//! statistics.
 
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};

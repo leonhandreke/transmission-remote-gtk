@@ -1,5 +1,5 @@
-//! The application (trg-gtk-app.c): the main window, the command line,
-//! files opened from the Finder, and the macOS conventions.
+//! The application: the main window, the command line, files opened from the
+//! Finder, and the macOS conventions.
 
 use std::cell::RefCell;
 

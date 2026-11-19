@@ -1,4 +1,4 @@
-//! The about dialog (trg-about-window.c)
+//! The about dialog
 
 use gtk::glib;
 use gtk::prelude::*;
