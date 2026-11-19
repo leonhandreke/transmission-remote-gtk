@@ -170,7 +170,7 @@ impl DestinationCombo {
         }
 
         // all previously used download dirs, sorted
-        let mut dirs = client.torrent_model().map(|m| m.download_dirs()).unwrap_or_default();
+        let mut dirs = client.torrent_model().download_dirs();
         dirs.sort();
         for dir in dirs.iter().filter(|d| **d != default_dir) {
             self.insert(None, dir, DestType::Existing);

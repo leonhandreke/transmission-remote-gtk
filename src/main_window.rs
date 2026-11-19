@@ -1080,8 +1080,7 @@ impl MainWindow {
 
         gtk::Window::set_default_icon_name(env!("TRG_PACKAGE_NAME"));
 
-        let model = TorrentModel::new();
-        client.set_torrent_model(&model);
+        let model = client.torrent_model();
 
         let weak = self.downgrade();
         model.connect_torrent_completed(move |item| {

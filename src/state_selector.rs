@@ -293,7 +293,7 @@ impl StateSelector {
         if !client.is_connected() || !(update_trackers || update_dirs) {
             return;
         }
-        let Some(model) = client.torrent_model() else { return };
+        let model = client.torrent_model();
         let n_cat = imp.n_categories.get() as usize;
 
         for torrent in item::items(&model.store()) {

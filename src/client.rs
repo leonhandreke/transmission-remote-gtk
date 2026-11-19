@@ -3,7 +3,7 @@
 //!
 //! 1. holds the preferences,
 //! 2. holds the RPC transport (rpc::Transport), for connection reuse,
-//! 3. finds torrents by their ID (in the torrent model),
+//! 3. has the torrents (the torrent model), and finds them by their ID,
 //! 4. dispatches asynchronous requests (and batches of them), unless the
 //!    connection changed in the meantime, and tracks failures,
 //! 5. holds the connection state and an update serial,
@@ -51,7 +51,7 @@ mod imp {
         pub session: RefCell<Option<Obj>>,
         pub seed_ratio_limited: Cell<bool>,
         pub seed_ratio_limit: Cell<f64>,
-        pub torrent_model: RefCell<Option<TorrentModel>>,
+        pub torrent_model: TorrentModel,
     }
 
     impl Default for Client {
@@ -65,7 +65,7 @@ mod imp {
                 session: Default::default(),
                 seed_ratio_limited: Default::default(),
                 seed_ratio_limit: Default::default(),
-                torrent_model: Default::default(),
+                torrent_model: TorrentModel::new(),
             }
         }
     }
@@ -220,18 +220,15 @@ impl Client {
         self.imp().seed_ratio_limit.get()
     }
 
-    pub fn set_torrent_model(&self, model: &TorrentModel) {
-        *self.imp().torrent_model.borrow_mut() = Some(model.clone());
-    }
-
-    pub fn torrent_model(&self) -> Option<TorrentModel> {
-        self.imp().torrent_model.borrow().clone()
+    /// The torrents
+    pub fn torrent_model(&self) -> TorrentModel {
+        self.imp().torrent_model.clone()
     }
 
     /// Looks up a torrent by its ID: its JSON object (from the last update)
     /// and item.
     pub fn torrent_data(&self, id: i64) -> Option<(Rc<Obj>, TorrentItem)> {
-        let item = self.torrent_model()?.find(id)?;
+        let item = self.torrent_model().find(id)?;
         Some((item.torrent_json()?, item))
     }
 

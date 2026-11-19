@@ -131,7 +131,7 @@ mod imp {
         fn dispose(&self) {
             let handler = self.update_handler.take();
             if let (Some(h), Some(model)) =
-                (handler, self.client.borrow().as_ref().and_then(|c| c.torrent_model()))
+                (handler, self.client.borrow().as_ref().map(|c| c.torrent_model()))
             {
                 model.disconnect(h);
             }
@@ -216,14 +216,13 @@ impl TorrentPropsDialog {
             imp.lists.set(lists).ok();
             imp.last_json.replace(Some(json.clone()));
 
-            if let Some(model) = client.torrent_model() {
-                let weak = d.downgrade();
-                imp.update_handler.replace(Some(model.connect_update(move || {
-                    if let Some(d) = weak.upgrade() {
-                        d.models_updated();
-                    }
-                })));
-            }
+            let weak = d.downgrade();
+            let handler = client.torrent_model().connect_update(move || {
+                if let Some(d) = weak.upgrade() {
+                    d.models_updated();
+                }
+            });
+            imp.update_handler.replace(Some(handler));
         } else if let Some(n) = notebook.page_num(&imp.info_page.get()) {
             notebook.remove_page(Some(n));
         }
