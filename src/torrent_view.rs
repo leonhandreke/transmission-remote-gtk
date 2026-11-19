@@ -21,6 +21,10 @@ use crate::protocol::{
 use crate::torrent_model::*;
 use crate::tree_view::{self, COLUMN_EXTRA, COLUMN_HIDE_FROM_TOP_MENU, ColType, TreeView};
 
+/// Paused or queued
+const INACTIVE: u32 =
+    TORRENT_FLAG_PAUSED | TORRENT_FLAG_DOWNLOADING_WAIT | TORRENT_FLAG_SEEDING_WAIT;
+
 const UNICODE_UP: &str = "\u{2191}";
 const UNICODE_DOWN: &str = "\u{2193}";
 const SMALL_SCALE: f64 = 0.9;
@@ -324,13 +328,13 @@ impl RowValues {
         } else if flags & TORRENT_FLAG_CHECKING != 0 {
             sprintf(&tr("Verifying data (%1$s tested)"), &[&format::percent(self.done)])
         } else if flags & (TORRENT_FLAG_DOWNLOADING | TORRENT_FLAG_SEEDING) != 0 {
-            // (the C version meant to show the ratio only while seeding, but
-            // its test, flags & ~DOWNLOADING, is always true)
-            format!(
-                "{}, {}",
-                sprintf(&tr("Ratio %s"), &[&format::ratio(self.ratio)]),
-                self.short_transfer_string()
-            )
+            let transfer = self.short_transfer_string();
+            if flags & TORRENT_FLAG_DOWNLOADING != 0 {
+                transfer
+            } else {
+                // seeding
+                format!("{}, {transfer}", sprintf(&tr("Ratio %s"), &[&format::ratio(self.ratio)]))
+            }
         } else {
             String::new()
         }
@@ -389,10 +393,11 @@ impl RowValues {
             String::new()
         };
 
-        // (always, as in the C version, which meant to skip this for paused
-        // and waiting torrents but tests flags & ~flag)
+        // the speeds, unless it's paused, waiting or being checked
         let t = self.short_transfer_string();
-        if !t.is_empty() {
+        if flags & (INACTIVE | TORRENT_FLAG_WAITING_CHECK | TORRENT_FLAG_CHECKING) == 0
+            && !t.is_empty()
+        {
             s.push_str(" - ");
             s.push_str(&t);
         }
@@ -565,7 +570,11 @@ impl TorrentRow {
 
         let percent_done = v.percent_done(&client);
 
+        // paused and queued torrents are dimmed, unless they have an error
+        let sensitive = v.flags & INACTIVE == 0 || v.error != 0;
+
         imp.icon.set_from_gicon(&v.icon());
+        imp.icon.set_sensitive(sensitive);
 
         if let Some(name) = imp.name.borrow().as_ref() {
             name.set_text(&item.string(COL_NAME).unwrap_or_default());
@@ -573,6 +582,7 @@ impl TorrentRow {
         }
 
         imp.bar.set_fraction(percent_done.clamp(0.0, 100.0) / 100.0);
+        imp.bar.set_sensitive(sensitive);
 
         let status_text = if imp.compact.get() {
             imp.bar.set_text(Some(&format::progress_text(percent_done)));
