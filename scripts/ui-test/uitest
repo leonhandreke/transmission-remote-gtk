@@ -271,7 +271,7 @@ start_app() {
         [[ -f ${TRG_SESSION_ENV:-} ]] || die "no GNOME Shell session (uitest linux up)"
         mapfile -t session <"$TRG_SESSION_ENV"
     fi
-    env "${debug[@]}" "${session[@]}" XDG_CONFIG_HOME="$dir/xdg/config" XDG_DATA_HOME="$dir/xdg/data" \
+    env "${debug[@]}" ${session[@]+"${session[@]}"} XDG_CONFIG_HOME="$dir/xdg/config" XDG_DATA_HOME="$dir/xdg/data" \
         XDG_CACHE_HOME="$dir/xdg/cache" XDG_STATE_HOME="$dir/xdg/state" \
         TRG_DEBUG_SNAPSHOT="$dir/snapshots" \
         "$bin" >>"$dir/app.log" 2>&1 &
