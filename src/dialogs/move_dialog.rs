@@ -7,8 +7,8 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
 use crate::client::Client;
-use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::destination_combo::DestinationCombo;
+use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::{sprintf, tr};
 use crate::main_window::MainWindow;
 use crate::prefs;

@@ -8,7 +8,7 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
 use crate::client::{Client, Response};
-use crate::dialog::{Dialog, DialogImpl, TrgDialogExt};
+use crate::dialogs::dialog::{Dialog, DialogImpl, TrgDialogExt};
 use crate::json::{Obj, get_f64, get_i64, get_obj};
 use crate::main_window::MainWindow;
 use crate::protocol as p;

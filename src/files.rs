@@ -17,7 +17,7 @@ use gtk::{CompositeTemplate, gio, glib};
 use serde_json::Value;
 
 use crate::client::Client;
-use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::{sprintf, tr};
 use crate::item::{self, Item, Val};
 use crate::json::{Obj, get_i64, get_str, value_as_i64};
