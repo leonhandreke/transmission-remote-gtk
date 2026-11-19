@@ -330,10 +330,6 @@ impl Prefs {
         self.state().profile
     }
 
-    pub fn connection(&self) -> Option<usize> {
-        self.state().connection
-    }
-
     pub fn set_connection(&self, profile: Option<usize>) {
         self.state_mut().connection = profile;
     }
@@ -379,20 +375,6 @@ impl Prefs {
             st.connection = fix(st.connection);
         }
         self.emit_profile_changed();
-    }
-
-    /// A profile's object (a copy)
-    pub fn profile_object(&self, index: usize) -> Option<Map<String, Value>> {
-        self.state().profiles().get(index).and_then(Value::as_object).cloned()
-    }
-
-    pub fn with_profile_mut<R>(
-        &self,
-        index: usize,
-        f: impl FnOnce(&mut Map<String, Value>) -> R,
-    ) -> Option<R> {
-        let mut st = self.state_mut();
-        st.profiles_mut().get_mut(index).and_then(Value::as_object_mut).map(f)
     }
 
     pub fn with_root_mut<R>(&self, f: impl FnOnce(&mut Map<String, Value>) -> R) -> R {
