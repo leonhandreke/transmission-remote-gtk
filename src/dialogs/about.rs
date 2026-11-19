@@ -5,7 +5,7 @@ use gtk::prelude::*;
 
 pub fn about_window_new(parent: Option<&gtk::Window>) -> gtk::AboutDialog {
     let builder =
-        gtk::Builder::from_resource("/io/github/TransmissionRemoteGtk/ui/trg-about-window.ui");
+        gtk::Builder::from_resource("/io/github/TransmissionRemoteGtk/ui/about-window.ui");
     let dialog: gtk::AboutDialog = builder.object("about_dialog").unwrap();
 
     dialog.set_transient_for(parent);

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/TransmissionRemoteGtk/ui">
+    <file preprocess="xml-stripblanks">status-bar.ui</file>
+    <file preprocess="xml-stripblanks">toolbar.ui</file>
+    <file preprocess="xml-stripblanks">torrent-add-url-dialog.ui</file>
+    <file preprocess="xml-stripblanks">torrent-move-dialog.ui</file>
+    <file preprocess="xml-stripblanks">file-rename-dialog.ui</file>
+    <file preprocess="xml-stripblanks">general-panel.ui</file>
+    <file preprocess="xml-stripblanks">stats-dialog.ui</file>
+    <file preprocess="xml-stripblanks">menu-bar.ui</file>
+    <file preprocess="xml-stripblanks">preferences-dialog.ui</file>
+    <file preprocess="xml-stripblanks">remote-prefs-dialog.ui</file>
+    <file preprocess="xml-stripblanks">torrent-props-dialog.ui</file>
+    <file preprocess="xml-stripblanks">torrent-add-dialog.ui</file>
+    <file preprocess="xml-stripblanks">main-window.ui</file>
+    <file preprocess="xml-stripblanks">files-tree-view.ui</file>
+    <file preprocess="xml-stripblanks">trackers-tree-view.ui</file>
+    <file preprocess="xml-stripblanks">destination-combo.ui</file>
+    <file preprocess="xml-stripblanks">about-window.ui</file>
+  </gresource>
+</gresources>

@@ -20,7 +20,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-torrent-move-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/torrent-move-dialog.ui")]
     pub struct TorrentMoveDialog {
         #[template_child]
         pub grid: TemplateChild<gtk::Grid>,

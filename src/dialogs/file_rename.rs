@@ -19,7 +19,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-file-rename-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/file-rename-dialog.ui")]
     pub struct FileRenameDialog {
         #[template_child]
         pub name_entry: TemplateChild<gtk::Entry>,

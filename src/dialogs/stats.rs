@@ -31,7 +31,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-stats-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/stats-dialog.ui")]
     pub struct StatsDialog {
         #[template_child]
         pub grid: TemplateChild<gtk::Grid>,

@@ -22,7 +22,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-status-bar.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/status-bar.ui")]
     pub struct StatusBar {
         #[template_child]
         pub speed_lbl: TemplateChild<gtk::Label>,

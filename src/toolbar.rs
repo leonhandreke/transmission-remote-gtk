@@ -17,7 +17,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-toolbar.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/toolbar.ui")]
     pub struct Toolbar {
         #[template_child]
         pub server_button: TemplateChild<gtk::MenuButton>,

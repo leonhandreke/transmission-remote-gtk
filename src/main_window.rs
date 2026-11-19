@@ -52,7 +52,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-main-window.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/main-window.ui")]
     pub struct MainWindow {
         #[template_child]
         pub menu_bar: TemplateChild<gtk::PopoverMenuBar>,

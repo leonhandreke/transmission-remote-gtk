@@ -26,7 +26,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-remote-prefs-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/remote-prefs-dialog.ui")]
     pub struct RemotePrefsDialog {
         #[template_child]
         pub encryption_combo: TemplateChild<gtk::DropDown>,

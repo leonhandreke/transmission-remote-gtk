@@ -15,7 +15,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-general-panel.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/general-panel.ui")]
     pub struct GeneralPanel {
         #[template_child]
         pub gen_name_label: TemplateChild<gtk::Label>,

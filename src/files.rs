@@ -643,7 +643,7 @@ impl FilesView {
         add("collapse-all", Box::new(|v| v.tv.collapse_all()), true);
 
         let builder = gtk::Builder::from_resource(
-            "/io/github/TransmissionRemoteGtk/ui/trg-files-tree-view.ui",
+            "/io/github/TransmissionRemoteGtk/ui/files-tree-view.ui",
         );
         let menu = gio::Menu::new();
 

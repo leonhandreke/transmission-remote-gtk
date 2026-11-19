@@ -18,7 +18,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-torrent-add-url-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/torrent-add-url-dialog.ui")]
     pub struct TorrentAddUrlDialog {
         #[template_child]
         pub url_entry: TemplateChild<gtk::Entry>,

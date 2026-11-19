@@ -50,7 +50,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-torrent-props-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/torrent-props-dialog.ui")]
     pub struct TorrentPropsDialog {
         #[template_child]
         pub notebook: TemplateChild<gtk::Notebook>,

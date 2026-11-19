@@ -27,7 +27,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-torrent-add-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/torrent-add-dialog.ui")]
     pub struct TorrentAddDialog {
         #[template_child]
         pub source_chooser: TemplateChild<gtk::Button>,

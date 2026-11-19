@@ -27,7 +27,7 @@ mod imp {
     use std::sync::OnceLock;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-destination-combo.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/destination-combo.ui")]
     pub struct DestinationCombo {
         #[template_child]
         pub entry: TemplateChild<gtk::Entry>,

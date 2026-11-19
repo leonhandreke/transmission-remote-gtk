@@ -133,7 +133,7 @@ impl MenuBar {
         }
 
         let builder =
-            gtk::Builder::from_resource("/io/github/TransmissionRemoteGtk/ui/trg-menu-bar.ui");
+            gtk::Builder::from_resource("/io/github/TransmissionRemoteGtk/ui/menu-bar.ui");
         let menu: gio::Menu = builder.object("main_menu").unwrap();
 
         // The connect submenu of the File menu

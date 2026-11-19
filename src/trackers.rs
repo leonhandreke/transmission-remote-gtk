@@ -300,7 +300,7 @@ impl TrackersView {
         actions.add_action(&add);
 
         let builder = gtk::Builder::from_resource(
-            "/io/github/TransmissionRemoteGtk/ui/trg-trackers-tree-view.ui",
+            "/io/github/TransmissionRemoteGtk/ui/trackers-tree-view.ui",
         );
         let menu = gio::Menu::new();
         if with_delete && let Some(m) = builder.object::<gio::MenuModel>("delete_menu") {

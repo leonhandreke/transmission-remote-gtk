@@ -322,7 +322,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-preferences-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/preferences-dialog.ui")]
     pub struct PreferencesDialog {
         #[template_child]
         pub notebook: TemplateChild<gtk::Notebook>,

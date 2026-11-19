@@ -28,13 +28,15 @@ fn blueprints(out_dir: &Path) -> PathBuf {
     let ui_dir = out_dir.join("ui");
     fs::create_dir_all(&ui_dir).unwrap();
 
-    let mut files: Vec<PathBuf> = fs::read_dir("src")
+    let mut files: Vec<PathBuf> = fs::read_dir("src/ui")
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|e| e == "blp"))
         .collect();
     files.sort();
 
+    // also when a file is added
+    println!("cargo:rerun-if-changed=src/ui");
     println!("cargo:rerun-if-env-changed=BLUEPRINT_COMPILER");
     let compiler = env::var("BLUEPRINT_COMPILER").unwrap_or_else(|_| "blueprint-compiler".into());
     // The compiler may be a command line (eg. "python3 /path/to/blueprint-compiler.py")
@@ -44,7 +46,7 @@ fn blueprints(out_dir: &Path) -> PathBuf {
     let status = cmd
         .arg("batch-compile")
         .arg(&ui_dir)
-        .arg("src")
+        .arg("src/ui")
         .args(&files)
         .status()
         .expect("blueprint-compiler (>= 0.16) is needed to build the user interface");
@@ -59,7 +61,7 @@ fn blueprints(out_dir: &Path) -> PathBuf {
 
 fn resources(ui_dir: &Path) {
     let ui_dir = ui_dir.to_str().unwrap();
-    glib_build_tools::compile_resources(&[ui_dir], "src/trg.gresource.xml", "trg-ui.gresource");
+    glib_build_tools::compile_resources(&[ui_dir], "src/ui/ui.gresource.xml", "trg-ui.gresource");
     glib_build_tools::compile_resources(
         &["data"],
         &format!("data/{APPLICATION_ID}.gresource.xml"),
