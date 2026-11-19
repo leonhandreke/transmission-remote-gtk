@@ -266,8 +266,8 @@ impl TorrentPropsDialog {
         d.limits_page_load(&json);
 
         let (width, height) = if show_details {
-            let w = prefs.get_int("dialog-width", prefs::GLOBAL);
-            let h = prefs.get_int("dialog-height", prefs::GLOBAL);
+            let w = prefs.get_int(prefs::KEY_PROPS_DIALOG_WIDTH, prefs::GLOBAL);
+            let h = prefs.get_int(prefs::KEY_PROPS_DIALOG_HEIGHT, prefs::GLOBAL);
             if w <= 0 || h <= 0 { (700, 600) } else { (w, h) }
         } else {
             (500, 500)
@@ -287,8 +287,8 @@ impl TorrentPropsDialog {
         if imp.show_details.get() {
             let prefs = self.client().prefs().clone();
             let (w, h) = self.default_size();
-            prefs.set_int("dialog-width", w as i64, prefs::GLOBAL);
-            prefs.set_int("dialog-height", h as i64, prefs::GLOBAL);
+            prefs.set_int(prefs::KEY_PROPS_DIALOG_WIDTH, w as i64, prefs::GLOBAL);
+            prefs.set_int(prefs::KEY_PROPS_DIALOG_HEIGHT, h as i64, prefs::GLOBAL);
             let details = imp.details.borrow();
             let flags = PERSIST_SORT | PERSIST_LAYOUT;
             if let Some(tv) = &details.peers_tv {

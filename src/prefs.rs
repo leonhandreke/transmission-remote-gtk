@@ -44,6 +44,9 @@ pub const KEY_COMPLETE_NOTIFY: &str = "complete-notify";
 pub const KEY_ADD_NOTIFY: &str = "add-notify";
 pub const KEY_WINDOW_WIDTH: &str = "window-width";
 pub const KEY_WINDOW_HEIGHT: &str = "window-height";
+/// The size of the properties dialog, when it has the details of a torrent
+pub const KEY_PROPS_DIALOG_WIDTH: &str = "dialog-width";
+pub const KEY_PROPS_DIALOG_HEIGHT: &str = "dialog-height";
 pub const KEY_FILTER_TRACKERS: &str = "filter-trackers";
 pub const KEY_DIRECTORIES_FIRST: &str = "directories-first";
 pub const KEY_FILTER_DIRS: &str = "filter-dirs";
