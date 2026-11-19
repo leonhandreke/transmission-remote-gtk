@@ -63,6 +63,21 @@ template $TrgToolbar: Box {
     }
   }
 
+  // Magnet links are the most common URLs to add, so the icon is a magnet
+  Button {
+    has-frame: false;
+    tooltip-text: _("Add from URL");
+    action-name: "win.add-url";
+
+    accessibility {
+      label: _("Add from URL");
+    }
+
+    Image {
+      icon-name: "trg-magnet-symbolic";
+    }
+  }
+
   Separator {
     orientation: vertical;
     margin-start: 4;

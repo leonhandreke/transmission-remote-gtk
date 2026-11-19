@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- a horseshoe magnet, for magnet links: the arch and its two arms, with
+       the pole tips set off by a gap -->
+  <g fill="#2e3436">
+    <path d="M1 5L5 5L5 8A3 3 0 0 0 11 8L11 5L15 5L15 8A7 7 0 0 1 1 8Z"/>
+    <path d="M1 1.5A0.5 0.5 0 0 1 1.5 1L4.5 1A0.5 0.5 0 0 1 5 1.5L5 4L1 4ZM11 1.5A0.5 0.5 0 0 1 11.5 1L14.5 1A0.5 0.5 0 0 1 15 1.5L15 4L11 4Z"/>
+  </g>
+</svg>
