@@ -3,6 +3,7 @@ data/io.github.TransmissionRemoteGtk.appdata.xml.in
 src/add_torrents.rs
 src/dialogs/add.rs
 src/dialogs/add_url.rs
+src/dialogs/file_rename.rs
 src/dialogs/move_dialog.rs
 src/dialogs/preferences.rs
 src/dialogs/props.rs
