@@ -7,7 +7,7 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
 use crate::main_window::MainWindow;
 use crate::protocol::{self as p, get_bool};
@@ -88,7 +88,7 @@ impl TorrentAddUrlDialog {
         d.set_transient_for(Some(win));
         d.on_response(|d, response| {
             let imp = d.imp();
-            if response == dialog::RESPONSE_ACCEPT {
+            if response == Response::Accept {
                 let client = imp.client.borrow().clone().unwrap();
                 let text = imp.url_entry.text().to_string();
                 let win = imp.win.upgrade();

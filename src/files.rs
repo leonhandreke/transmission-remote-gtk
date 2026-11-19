@@ -17,7 +17,7 @@ use gtk::{CompositeTemplate, gio, glib};
 use serde_json::Value;
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::{sprintf, tr};
 use crate::item::{self, Item, Val};
 use crate::main_window::MainWindow;
@@ -769,7 +769,7 @@ impl FileRenameDialog {
 
         d.on_response(|d, response| {
             let imp = d.imp();
-            if response == dialog::RESPONSE_ACCEPT {
+            if response == Response::Accept {
                 let name = imp.name_entry.text();
                 let path = imp.orig_path.borrow().clone().unwrap_or_default();
                 let req = p::torrent_rename_path(&[imp.torrent_id.get()], &path, &name);

@@ -3,8 +3,8 @@
 //!
 //! In a template, children go into the content area, and children of type
 //! "action" ([action] in Blueprint) into the row of buttons, which respond
-//! through the dialog.* actions: "dialog.accept" responds with ACCEPT, and so
-//! on. They're separate actions, so a response can be disabled (and its
+//! through the dialog.* actions: "dialog.accept" responds with
+//! Response::Accept, and so on. They're separate actions, so a response can be disabled (and its
 //! button made insensitive) with action_set_enabled().
 
 use std::cell::{Cell, RefCell};
@@ -13,23 +13,23 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib};
 
-pub const RESPONSE_ACCEPT: i32 = -3;
-pub const RESPONSE_DELETE_EVENT: i32 = -4;
-pub const RESPONSE_OK: i32 = -5;
-pub const RESPONSE_CANCEL: i32 = -6;
-pub const RESPONSE_CLOSE: i32 = -7;
-pub const RESPONSE_YES: i32 = -8;
-pub const RESPONSE_NO: i32 = -9;
-pub const RESPONSE_APPLY: i32 = -10;
+/// How a dialog was answered, like GtkDialog's response IDs
+#[derive(Clone, Copy, Debug, PartialEq, Eq, glib::Enum)]
+#[enum_type(name = "TrgDialogResponse")]
+pub enum Response {
+    Accept,
+    Ok,
+    Cancel,
+    Close,
+    /// The window was closed
+    DeleteEvent,
+}
 
-const RESPONSE_ACTIONS: &[(&str, i32)] = &[
-    ("accept", RESPONSE_ACCEPT),
-    ("cancel", RESPONSE_CANCEL),
-    ("ok", RESPONSE_OK),
-    ("close", RESPONSE_CLOSE),
-    ("apply", RESPONSE_APPLY),
-    ("yes", RESPONSE_YES),
-    ("no", RESPONSE_NO),
+const RESPONSE_ACTIONS: &[(&str, Response)] = &[
+    ("accept", Response::Accept),
+    ("cancel", Response::Cancel),
+    ("ok", Response::Ok),
+    ("close", Response::Close),
 ];
 
 const GUI_PAD: i32 = 6;
@@ -82,7 +82,7 @@ mod imp {
             SIGNALS.get_or_init(|| {
                 vec![
                     glib::subclass::Signal::builder("response")
-                        .param_types([i32::static_type()])
+                        .param_types([Response::static_type()])
                         .build(),
                 ]
             })
@@ -105,7 +105,7 @@ mod imp {
         /// handlers usually destroy the window themselves.
         fn close_request(&self) -> glib::Propagation {
             let obj = self.obj().clone();
-            super::TrgDialogExt::response(&obj, RESPONSE_DELETE_EVENT);
+            super::TrgDialogExt::response(&obj, Response::DeleteEvent);
             if self.destroyed.get() {
                 return glib::Propagation::Stop;
             }
@@ -182,15 +182,15 @@ impl Dialog {
 
 /// The methods of a dialog, for its subclasses
 pub trait TrgDialogExt: IsA<Dialog> + 'static {
-    fn response(&self, response: i32) {
+    fn response(&self, response: Response) {
         self.emit_by_name::<()>("response", &[&response]);
     }
 
     /// Calls f with the dialog and the response
-    fn on_response<F: Fn(&Self, i32) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    fn on_response<F: Fn(&Self, Response) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_local("response", false, move |args| {
             let d = args[0].get::<Dialog>().unwrap();
-            f(d.downcast_ref::<Self>().unwrap(), args[1].get::<i32>().unwrap());
+            f(d.downcast_ref::<Self>().unwrap(), args[1].get::<Response>().unwrap());
             None
         })
     }

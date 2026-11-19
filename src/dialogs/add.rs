@@ -10,7 +10,7 @@ use gtk::{CompositeTemplate, gio, glib};
 
 use crate::bencode;
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::destination_combo::DestinationCombo;
 use crate::files::{self, FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
@@ -328,7 +328,7 @@ impl TorrentAddDialog {
         *imp.filenames.borrow_mut() = filenames;
     }
 
-    fn response_cb(&self, response: i32) {
+    fn response_cb(&self, response: Response) {
         let imp = self.imp();
         let mut flags = 0;
         if imp.paused_check.is_active() {
@@ -338,7 +338,7 @@ impl TorrentAddDialog {
             flags |= p::TORRENT_ADD_FLAG_DELETE;
         }
 
-        if response == dialog::RESPONSE_ACCEPT
+        if response == Response::Accept
             && let Some(win) = imp.win.upgrade()
         {
             let dest = imp.dest_combo.borrow().clone().unwrap();

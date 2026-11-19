@@ -16,7 +16,7 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::files::{FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
@@ -282,7 +282,7 @@ impl TorrentPropsDialog {
         self.imp().client.borrow().clone().unwrap()
     }
 
-    fn response_cb(&self, response: i32) {
+    fn response_cb(&self, response: Response) {
         let imp = self.imp();
 
         if imp.show_details.get() {
@@ -303,7 +303,7 @@ impl TorrentPropsDialog {
             }
         }
 
-        if response == dialog::RESPONSE_OK {
+        if response == Response::Ok {
             let mut req = p::torrent_set(&imp.target_ids.borrow())
                 .with(p::FIELD_SEED_RATIO_MODE, imp.seed_ratio_mode_combo.selected())
                 .with(

@@ -7,7 +7,7 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::destination_combo::DestinationCombo;
 use crate::i18n::{sprintf, tr};
 use crate::main_window::MainWindow;
@@ -100,7 +100,7 @@ impl TorrentMoveDialog {
 
         d.on_response(|d, response| {
             let imp = d.imp();
-            if response == dialog::RESPONSE_ACCEPT {
+            if response == Response::Accept {
                 let combo = imp.location_combo.borrow().clone().unwrap();
                 let req = p::torrent_set_location(
                     &imp.ids.borrow(),

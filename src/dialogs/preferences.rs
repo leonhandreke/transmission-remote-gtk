@@ -13,7 +13,7 @@ use gtk::{CompositeTemplate, gio, glib};
 use serde_json::{Value, json};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
 use crate::macos;
@@ -631,7 +631,7 @@ impl PreferencesDialog {
 
         d.on_response(|d, response| {
             let prefs = d.prefs();
-            if response == dialog::RESPONSE_OK {
+            if response == Response::Ok {
                 d.save_all();
                 prefs.save();
             }

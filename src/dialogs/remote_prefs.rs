@@ -10,7 +10,7 @@ use gtk::{CompositeTemplate, glib};
 use serde_json::json;
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialog::{self, Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::i18n::{sprintf, tr};
 use crate::main_window::MainWindow;
@@ -440,7 +440,7 @@ impl RemotePrefsDialog {
         )));
 
         d.on_response(|d, response| {
-            if response == dialog::RESPONSE_OK {
+            if response == Response::Ok {
                 d.update_session();
             }
             d.destroy();
