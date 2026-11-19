@@ -60,19 +60,7 @@ mod tb_imp {
         }
     }
 
-    impl ObjectImpl for Toolbar {
-        fn constructed(&self) {
-            self.parent_constructed();
-            // The theme's green, as GTK has no style class for it
-            let css = gtk::CssProvider::new();
-            css.load_from_string("image.server-connected { color: @success_color; }");
-            gtk::style_context_add_provider_for_display(
-                &self.obj().display(),
-                &css,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        }
-    }
+    impl ObjectImpl for Toolbar {}
     impl WidgetImpl for Toolbar {}
     impl BoxImpl for Toolbar {}
 }

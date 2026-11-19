@@ -173,6 +173,16 @@ impl App {
             crate::macos::disable_window_tabbing();
         }
 
+        let css = gtk::CssProvider::new();
+        css.load_from_resource("/io/github/TransmissionRemoteGtk/style.css");
+        if let Some(display) = gtk::gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &css,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+
         let client = self.imp().client.borrow().clone().unwrap();
         let window = MainWindow::new(self.upcast_ref(), &client);
         menus::set_accels(self.upcast_ref());

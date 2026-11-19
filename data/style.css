@@ -1,0 +1,13 @@
+/* The application's style, loaded at startup (see app.rs) */
+
+/* The server picker's dot while connected: the theme's green, as GTK has no
+ * style class for it */
+image.server-connected {
+  color: @success_color;
+}
+
+/* The theme pads flow box children (room for their selection and focus),
+ * which would indent the General details' groups from the keys around them */
+flowbox.general-groups > flowboxchild {
+  padding: 0;
+}

@@ -83,20 +83,7 @@ mod gp_imp {
         }
     }
 
-    impl ObjectImpl for GeneralPanel {
-        fn constructed(&self) {
-            self.parent_constructed();
-            // The theme pads flow box children (room for their selection and
-            // focus), which would indent the groups from the keys around them
-            let css = gtk::CssProvider::new();
-            css.load_from_string("flowbox.general-groups > flowboxchild { padding: 0; }");
-            gtk::style_context_add_provider_for_display(
-                &self.obj().display(),
-                &css,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        }
-    }
+    impl ObjectImpl for GeneralPanel {}
     impl WidgetImpl for GeneralPanel {}
     impl BoxImpl for GeneralPanel {}
 }

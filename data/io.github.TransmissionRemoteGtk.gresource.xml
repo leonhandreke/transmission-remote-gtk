@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
   <gresource prefix="/io/github/TransmissionRemoteGtk">
+    <file>style.css</file>
     <!-- Symbolic icons Adwaita doesn't have: the Not Connected page's plug,
          the toolbar's magnet for adding from a URL and the server picker's
          status -->
