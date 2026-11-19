@@ -15,7 +15,7 @@ use gtk::glib::subclass::prelude::*;
 use serde_json::{Map, Value, json};
 
 use crate::i18n::tr;
-use crate::json::{value_as_bool, value_as_f64, value_as_i64};
+use crate::json::{value_as_bool, value_as_i64};
 
 pub const FILENAME: &str = "config.json";
 pub const PORT_DEFAULT: i64 = 9091;
@@ -287,10 +287,6 @@ impl Prefs {
         self.get_value(key, scope).map(|v| value_as_i64(&v)).unwrap_or(0)
     }
 
-    pub fn get_double(&self, key: &str, scope: Scope) -> f64 {
-        self.get_value(key, scope).map(|v| value_as_f64(&v)).unwrap_or(0.0)
-    }
-
     pub fn get_bool(&self, key: &str, scope: Scope) -> bool {
         self.get_value(key, scope).map(|v| value_as_bool(&v)).unwrap_or(false)
     }
@@ -317,25 +313,8 @@ impl Prefs {
         self.set_value(key, json!(value), scope);
     }
 
-    pub fn set_double(&self, key: &str, value: f64, scope: Scope) {
-        self.set_value(key, json!(value), scope);
-    }
-
     pub fn set_bool(&self, key: &str, value: bool, scope: Scope) {
         self.set_value(key, json!(value), scope);
-    }
-
-    /// Removes a value from a scope
-    pub fn remove(&self, key: &str, scope: Scope) {
-        let mut st = self.state_mut();
-        let location = st.location(scope);
-        if let Some(obj) = st.object_mut(location) {
-            obj.remove(key);
-        }
-    }
-
-    pub fn profile_id(&self) -> i64 {
-        self.state().user.get(KEY_PROFILE_ID).map(value_as_i64).unwrap_or(0)
     }
 
     pub fn n_profiles(&self) -> usize {

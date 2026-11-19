@@ -267,10 +267,6 @@ impl StatusBar {
         self.update_speed(stats, client);
     }
 
-    pub fn speed_text(&self) -> String {
-        self.imp().speed_lbl.text().to_string()
-    }
-
     /// The main window has the status bar in its template, so this is set later
     pub fn set_client(&self, win: &MainWindow, client: &Client) {
         *self.imp().client.borrow_mut() = Some(client.clone());

@@ -301,10 +301,6 @@ impl MainWindow {
         self.parts().state_selector.clone()
     }
 
-    pub fn status_bar(&self) -> StatusBar {
-        self.imp().status_bar.get()
-    }
-
     pub fn selected_torrent_id(&self) -> i64 {
         self.imp().selected_torrent_id.get()
     }

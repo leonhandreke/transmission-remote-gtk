@@ -700,28 +700,6 @@ pub fn file_get_progress(length: i64, completed: i64) -> f64 {
 
 /* Session */
 
-/// The version number of "2.94 (d8e60ee44f)" (0 if there's no session)
-pub fn session_get_version(s: Option<&Obj>) -> f64 {
-    let Some(v) = s.and_then(|s| get_str(s, SGET_VERSION)) else {
-        return 0.0;
-    };
-    // the leading number, like g_ascii_strtod(): "4.1.4 (a6d907d9ea)" is 4.1
-    let mut seen_dot = false;
-    let num: String = v
-        .trim()
-        .chars()
-        .take_while(|c| {
-            if *c == '.' && !seen_dot {
-                seen_dot = true;
-                true
-            } else {
-                c.is_ascii_digit()
-            }
-        })
-        .collect();
-    num.trim_end_matches('.').parse().unwrap_or(0.0)
-}
-
 pub fn session_get_cache_size_mib(s: &Obj) -> i64 {
     if s.contains_key(SGET_CACHE_SIZE_MIB) { get_i64(s, SGET_CACHE_SIZE_MIB) } else { -1 }
 }
@@ -729,14 +707,6 @@ pub fn session_get_cache_size_mib(s: &Obj) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn versions() {
-        let s = |v: &str| json!({ SGET_VERSION: v }).as_object().unwrap().clone();
-        assert_eq!(session_get_version(Some(&s("4.1.4 (a6d907d9ea)"))), 4.1);
-        assert_eq!(session_get_version(Some(&s("2.94"))), 2.94);
-        assert_eq!(session_get_version(None), 0.0);
-    }
 
     #[test]
     fn tracker_lists() {

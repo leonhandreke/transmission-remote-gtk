@@ -7,7 +7,7 @@
 //! Response::Accept, and so on. They're separate actions, so a response can be disabled (and its
 //! button made insensitive) with action_set_enabled().
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -43,7 +43,6 @@ mod imp {
         pub content_area: gtk::Box,
         pub action_area: gtk::Box,
         pub destroyed: Cell<bool>,
-        pub responded: RefCell<Option<i32>>,
     }
 
     impl Default for Dialog {
@@ -52,7 +51,6 @@ mod imp {
                 content_area: gtk::Box::new(gtk::Orientation::Vertical, 0),
                 action_area: gtk::Box::new(gtk::Orientation::Horizontal, GUI_PAD),
                 destroyed: Cell::new(false),
-                responded: Default::default(),
             }
         }
     }

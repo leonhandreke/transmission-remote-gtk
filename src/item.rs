@@ -223,10 +223,6 @@ impl Item {
         self.with(column, Val::as_f64)
     }
 
-    pub fn boolean(&self, column: usize) -> bool {
-        self.with(column, |v| v.as_i64() != 0)
-    }
-
     pub fn json(&self, column: usize) -> Option<Rc<Obj>> {
         self.with(column, |v| match v {
             Val::Json(j) => j.clone(),

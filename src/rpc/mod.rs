@@ -7,9 +7,8 @@
 //! [`Error::Unsupported`]. [`Transport`] sends requests over HTTP with
 //! libsoup, which runs on the glib main loop.
 //!
-//! JSON-RPC 2.0 allows batches (several requests in one HTTP request, which
-//! Transmission executes in order) and notifications (requests without an
-//! id, which the server answers with no content).
+//! JSON-RPC 2.0 allows batches: several requests in one HTTP request, which
+//! Transmission executes in order.
 
 mod transport;
 
@@ -117,8 +116,7 @@ struct JsonRpcRequest<'a> {
     jsonrpc: &'static str,
     method: &'a str,
     params: &'a Obj,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<u64>,
+    id: u64,
 }
 
 #[derive(Deserialize)]
@@ -162,15 +160,14 @@ impl From<ErrorObject> for Error {
     }
 }
 
-/// A request, or several in a batch, with the ids first_id, first_id + 1,
-/// ... or none for notifications
-pub(crate) fn encode_jsonrpc(requests: &[Request], first_id: Option<u64>) -> Vec<u8> {
-    fn envelope(i: usize, r: &Request, first_id: Option<u64>) -> JsonRpcRequest<'_> {
+/// A request, or several in a batch, with the ids first_id, first_id + 1, ...
+pub(crate) fn encode_jsonrpc(requests: &[Request], first_id: u64) -> Vec<u8> {
+    fn envelope(i: usize, r: &Request, first_id: u64) -> JsonRpcRequest<'_> {
         JsonRpcRequest {
             jsonrpc: JSONRPC_VERSION,
             method: r.method,
             params: &r.params,
-            id: first_id.map(|id| id + i as u64),
+            id: first_id + i as u64,
         }
     }
     let encoded = if requests.len() == 1 {
@@ -293,22 +290,16 @@ mod tests {
     fn encodes_requests_and_batches() {
         let r = Request::new("torrent_get").with("ids", [1]);
         let single: Value =
-            serde_json::from_slice(&encode_jsonrpc(std::slice::from_ref(&r), Some(7))).unwrap();
+            serde_json::from_slice(&encode_jsonrpc(std::slice::from_ref(&r), 7)).unwrap();
         assert_eq!(
             single,
             json!({"jsonrpc": "2.0", "method": "torrent_get", "params": {"ids": [1]}, "id": 7})
         );
 
-        let batch: Value = serde_json::from_slice(&encode_jsonrpc(
-            &[r.clone(), Request::new("session_get")],
-            Some(7),
-        ))
-        .unwrap();
+        let batch: Value =
+            serde_json::from_slice(&encode_jsonrpc(&[r, Request::new("session_get")], 7)).unwrap();
         assert_eq!(batch[1]["id"], 8);
         assert_eq!(batch[1]["method"], "session_get");
-
-        let notification: Value = serde_json::from_slice(&encode_jsonrpc(&[r], None)).unwrap();
-        assert!(notification.get("id").is_none());
     }
 
     #[test]

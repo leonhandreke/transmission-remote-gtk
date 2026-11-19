@@ -49,8 +49,6 @@ mod imp {
         pub fail_count: Cell<u32>,
         pub update_serial: Cell<i64>,
         pub session: RefCell<Option<Obj>>,
-        pub version: Cell<f64>,
-        pub ssl: Cell<bool>,
         pub seed_ratio_limited: Cell<bool>,
         pub seed_ratio_limit: Cell<f64>,
         pub torrent_model: RefCell<Option<TorrentModel>>,
@@ -65,8 +63,6 @@ mod imp {
                 fail_count: Default::default(),
                 update_serial: Default::default(),
                 session: Default::default(),
-                version: Default::default(),
-                ssl: Default::default(),
                 seed_ratio_limited: Default::default(),
                 seed_ratio_limit: Default::default(),
                 torrent_model: Default::default(),
@@ -134,9 +130,6 @@ impl Client {
 
     pub fn set_session(&self, mut session: Obj) {
         let imp = self.imp();
-        if imp.session.borrow().is_none() {
-            imp.version.set(protocol::session_get_version(Some(&session)));
-        }
 
         // the free space of the last update, if it isn't in this one
         let dir = get_str(&session, protocol::SGET_DOWNLOAD_DIR).map(str::to_string);
@@ -179,19 +172,8 @@ impl Client {
         }
     }
 
-    pub fn version(&self) -> f64 {
-        self.imp().version.get()
-    }
-
     pub fn version_string(&self) -> Option<String> {
         self.session().and_then(|s| get_str(&s, protocol::SGET_VERSION).map(str::to_string))
-    }
-
-    /// The server's rpc_version_semver
-    pub fn rpc_version(&self) -> Option<String> {
-        self.session()
-            .and_then(|s| get_str(&s, protocol::SGET_RPC_VERSION_SEMVER).map(str::to_string))
-            .or_else(|| self.imp().transport.rpc_version())
     }
 
     pub fn is_connected(&self) -> bool {
@@ -238,10 +220,6 @@ impl Client {
         self.imp().seed_ratio_limit.get()
     }
 
-    pub fn ssl(&self) -> bool {
-        self.imp().ssl.get()
-    }
-
     pub fn set_torrent_model(&self, model: &TorrentModel) {
         *self.imp().torrent_model.borrow_mut() = Some(model.clone());
     }
@@ -281,7 +259,6 @@ impl Client {
         }
 
         let ssl = prefs.get_bool(prefs::KEY_SSL, Scope::Connection);
-        self.imp().ssl.set(ssl);
 
         let url = format!("{}://{host}:{port}{path}", if ssl { "https" } else { "http" });
         if let Err(e) = glib::Uri::parse(&url, glib::UriFlags::NONE) {
@@ -333,16 +310,6 @@ impl Client {
     pub fn dispatch<F: FnOnce(Response) + 'static>(&self, req: Request, callback: F) {
         self.dispatch_batch(vec![req], move |mut r| {
             callback(r.pop().unwrap_or_else(|| Err(Error::Decode(String::new()))))
-        });
-    }
-
-    /// Sends requests whose results are of no interest, as notifications
-    pub fn notify(&self, reqs: Vec<Request>) {
-        let client = self.clone();
-        glib::spawn_future_local(async move {
-            if let Err(e) = client.imp().transport.notify(reqs).await {
-                glib::g_message!("trg", "notification failed: {e}");
-            }
         });
     }
 
