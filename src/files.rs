@@ -642,9 +642,8 @@ impl FilesView {
         add("expand-all", Box::new(|v| v.tv.expand_all()), true);
         add("collapse-all", Box::new(|v| v.tv.collapse_all()), true);
 
-        let builder = gtk::Builder::from_resource(
-            "/io/github/TransmissionRemoteGtk/ui/files-tree-view.ui",
-        );
+        let builder =
+            gtk::Builder::from_resource("/io/github/TransmissionRemoteGtk/ui/files-tree-view.ui");
         let menu = gio::Menu::new();
 
         // Files of a torrent on the server can be renamed
