@@ -19,6 +19,7 @@ mod client;
 mod debug_snapshot;
 mod dialogs;
 mod files;
+mod format;
 mod general_panel;
 mod i18n;
 mod item;

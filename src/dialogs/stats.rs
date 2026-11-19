@@ -9,6 +9,7 @@ use gtk::{CompositeTemplate, glib};
 
 use crate::client::{Client, Response};
 use crate::dialogs::dialog::{Dialog, DialogImpl, TrgDialogExt};
+use crate::format;
 use crate::json::{Obj, get_f64, get_i64, get_obj};
 use crate::main_window::MainWindow;
 use crate::protocol as p;
@@ -214,14 +215,14 @@ impl StatsDialog {
                 c.set_text(&f(cumulat));
             };
             set(&imp.up_session, &imp.up_cumulat, &|o| {
-                util::format_size(get_i64(o, p::STATS_UPLOADED_BYTES))
+                format::format_size(get_i64(o, p::STATS_UPLOADED_BYTES))
             });
             set(&imp.down_session, &imp.down_cumulat, &|o| {
-                util::format_size(get_i64(o, p::STATS_DOWNLOADED_BYTES))
+                format::format_size(get_i64(o, p::STATS_DOWNLOADED_BYTES))
             });
             // NAN and INFINITY are handled by format_ratio
             set(&imp.ratio_session, &imp.ratio_cumulat, &|o| {
-                util::format_ratio(
+                format::format_ratio(
                     get_f64(o, p::STATS_UPLOADED_BYTES) / get_f64(o, p::STATS_DOWNLOADED_BYTES),
                 )
             });
@@ -232,7 +233,7 @@ impl StatsDialog {
                 get_i64(o, p::STATS_SESSION_COUNT).to_string()
             });
             set(&imp.active_session, &imp.active_cumulat, &|o| {
-                util::format_time_long(get_i64(o, p::STATS_SECONDS_ACTIVE))
+                format::format_time_long(get_i64(o, p::STATS_SECONDS_ACTIVE))
             });
 
             imp.error_shown.set(false);

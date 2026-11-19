@@ -4,12 +4,12 @@
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
+use crate::format;
 use crate::i18n::tr;
 use crate::item::Item;
 use crate::json::{Obj, get_bool, get_f64, get_i64, get_str};
 use crate::protocol as p;
 use crate::torrent_model as tm;
-use crate::util;
 
 mod imp {
     use super::*;
@@ -127,12 +127,12 @@ impl GeneralPanel {
         let leechers = item.int64(tm::COL_LEECHERS);
         let status = item.string(tm::COL_STATUS).unwrap_or_default();
 
-        i.gen_size_label.set_text(&util::format_size(get_i64(t, p::FIELD_SIZEWHENDONE)));
+        i.gen_size_label.set_text(&format::format_size(get_i64(t, p::FIELD_SIZEWHENDONE)));
 
         let rate = |rate: i64, limited: &str, limit: &str| {
-            let s = util::format_speed(rate);
+            let s = format::format_speed(rate);
             if get_bool(t, limited) {
-                format!("{s} [{}]", util::format_speed_kbps(get_i64(t, limit) as f64))
+                format!("{s} [{}]", format::format_speed_kbps(get_i64(t, limit) as f64))
             } else {
                 s
             }
@@ -148,25 +148,25 @@ impl GeneralPanel {
             p::FIELD_UPLOAD_LIMIT,
         ));
 
-        i.gen_corrupted_label.set_text(&util::format_size(get_i64(t, p::FIELD_CORRUPTEVER)));
+        i.gen_corrupted_label.set_text(&format::format_size(get_i64(t, p::FIELD_CORRUPTEVER)));
         let uploaded = get_i64(t, p::FIELD_UPLOADEDEVER);
-        i.gen_uploaded_label.set_text(&util::format_size(uploaded));
+        i.gen_uploaded_label.set_text(&format::format_size(uploaded));
         i.gen_hash_label.set_text(get_str(t, p::FIELD_HASH_STRING).unwrap_or(""));
 
         let have_valid = get_i64(t, p::FIELD_HAVEVALID);
-        i.gen_downloaded_label.set_text(&util::format_size(get_i64(t, p::FIELD_DOWNLOADEDEVER)));
+        i.gen_downloaded_label.set_text(&format::format_size(get_i64(t, p::FIELD_DOWNLOADEDEVER)));
 
         if uploaded > 0 && have_valid > 0 {
-            i.gen_ratio_label.set_text(&util::format_ratio(uploaded as f64 / have_valid as f64));
+            i.gen_ratio_label.set_text(&format::format_ratio(uploaded as f64 / have_valid as f64));
         } else {
             i.gen_ratio_label.set_text(&tr("N/A"));
         }
 
-        i.gen_limit_label.set_text(&util::format_ratio(get_f64(t, p::FIELD_SEED_RATIO_LIMIT)));
+        i.gen_limit_label.set_text(&format::format_ratio(get_f64(t, p::FIELD_SEED_RATIO_LIMIT)));
 
         let completed_at = get_i64(t, p::FIELD_DONE_DATE);
         i.gen_completedat_label.set_text(&if completed_at > 0 {
-            util::epoch_to_string(completed_at)
+            format::epoch_to_string(completed_at)
         } else {
             String::new()
         });
@@ -182,11 +182,11 @@ impl GeneralPanel {
             _ => {}
         }
 
-        i.gen_completed_label.set_text(&util::format_percent(p::torrent_get_percent_done(t)));
+        i.gen_completed_label.set_text(&format::format_percent(p::torrent_get_percent_done(t)));
         i.gen_name_label.set_text(p::torrent_get_name(t));
         i.gen_downloaddir_label.set_text(get_str(t, p::FIELD_DOWNLOAD_DIR).unwrap_or(""));
         i.gen_comment_label
-            .set_markup(&util::add_links_to_text(get_str(t, p::FIELD_COMMENT).unwrap_or("")));
+            .set_markup(&format::add_links_to_text(get_str(t, p::FIELD_COMMENT).unwrap_or("")));
 
         let error = get_str(t, p::FIELD_ERROR_STRING).unwrap_or("");
         if !error.is_empty() {
@@ -204,7 +204,7 @@ impl GeneralPanel {
         }
 
         let eta = get_i64(t, p::FIELD_ETA);
-        i.gen_eta_label.set_text(&if eta > 0 { util::format_time_long(eta) } else { tr("N/A") });
+        i.gen_eta_label.set_text(&if eta > 0 { format::format_time_long(eta) } else { tr("N/A") });
 
         i.gen_seeders_label.set_text(&seeders.max(0).to_string());
         i.gen_leechers_label.set_text(&leechers.max(0).to_string());

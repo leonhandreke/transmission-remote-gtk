@@ -19,6 +19,7 @@ use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::files::{FilesModel, FilesView};
+use crate::format;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
 use crate::json::{Obj, get_bool, get_i64, get_str};
@@ -334,7 +335,7 @@ impl TorrentPropsDialog {
 
         let creator = get_str(t, p::FIELD_CREATOR).unwrap_or("");
         let date_created = get_i64(t, p::FIELD_DATE_CREATED);
-        let date = util::epoch_to_string(date_created);
+        let date = format::epoch_to_string(date_created);
         let origin = if !creator.is_empty() && date_created > 0 {
             sprintf(&tr("Created by %1$s on %2$s"), &[&creator, &date])
         } else if date_created > 0 {
@@ -349,10 +350,10 @@ impl TorrentPropsDialog {
         imp.comment_buffer.set_text(get_str(t, p::FIELD_COMMENT).unwrap_or(""));
         imp.destination_lb.set_text(get_str(t, p::FIELD_DOWNLOAD_DIR).unwrap_or(""));
         imp.state_lb.set_text(&item.string(tm::COL_STATUS).unwrap_or_default());
-        imp.date_started_lb.set_text(&util::epoch_to_string(get_i64(t, p::FIELD_ADDED_DATE)));
+        imp.date_started_lb.set_text(&format::epoch_to_string(get_i64(t, p::FIELD_ADDED_DATE)));
 
         let eta = item.int64(tm::COL_ETA);
-        imp.eta_lb.set_text(&if eta > 0 { util::format_time_long(eta) } else { String::new() });
+        imp.eta_lb.set_text(&if eta > 0 { format::format_time_long(eta) } else { String::new() });
 
         imp.hash_lb.set_text(get_str(t, p::FIELD_HASH_STRING).unwrap_or(""));
         imp.error_lb.set_text(&if error != 0 {
@@ -364,13 +365,13 @@ impl TorrentPropsDialog {
         if flags & p::TORRENT_FLAG_ACTIVE != 0 {
             imp.last_activity_lb.set_text(&tr("Active now"));
         } else {
-            imp.last_activity_lb.set_text(&util::epoch_to_string(item.int64(tm::COL_LASTACTIVE)));
+            imp.last_activity_lb.set_text(&format::epoch_to_string(item.int64(tm::COL_LASTACTIVE)));
         }
 
-        imp.size_lb.set_text(&util::format_size_or_none(item.int64(tm::COL_SIZEWHENDONE)));
-        imp.dl_lb.set_text(&util::format_size_or_none(item.int64(tm::COL_DOWNLOADED)));
-        imp.ul_lb.set_text(&util::format_size_or_none(item.int64(tm::COL_UPLOADED)));
-        imp.have_lb.set_text(&util::format_size_or_none(item.int64(tm::COL_HAVE_VALID)));
+        imp.size_lb.set_text(&format::format_size_or_none(item.int64(tm::COL_SIZEWHENDONE)));
+        imp.dl_lb.set_text(&format::format_size_or_none(item.int64(tm::COL_DOWNLOADED)));
+        imp.ul_lb.set_text(&format::format_size_or_none(item.int64(tm::COL_UPLOADED)));
+        imp.have_lb.set_text(&format::format_size_or_none(item.int64(tm::COL_HAVE_VALID)));
     }
 
     fn limits_page_load(&self, json: &Obj) {

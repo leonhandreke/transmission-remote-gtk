@@ -22,12 +22,12 @@ use gtk::subclass::prelude::*;
 use gtk::{gdk, gio, glib, graphene};
 use serde_json::{Value, json};
 
+use crate::format;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
 use crate::json::value_as_i64;
 use crate::prefs::{self, Prefs};
 use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL};
-use crate::util;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ColType {
@@ -156,16 +156,16 @@ fn format_value(desc: &ColumnDesc, value: &Val) -> Option<String> {
     match desc.ctype {
         ColType::Speed => {
             let speed = value.as_i64();
-            (speed > 0).then(|| util::format_speed(speed))
+            (speed > 0).then(|| format::format_speed(speed))
         }
         ColType::Epoch => {
             let epoch = value.as_i64();
-            (epoch > 0).then(|| util::epoch_to_string(epoch))
+            (epoch > 0).then(|| format::epoch_to_string(epoch))
         }
         ColType::Eta => {
             let eta = value.as_i64();
             if eta > 0 {
-                Some(util::format_time_short(eta))
+                Some(format::format_time_short(eta))
             } else if eta == -2 {
                 Some("\u{221E}".into())
             } else {
@@ -174,11 +174,11 @@ fn format_value(desc: &ColumnDesc, value: &Val) -> Option<String> {
         }
         ColType::Size => {
             let size = value.as_i64();
-            (size > 0).then(|| util::format_size(size))
+            (size > 0).then(|| format::format_size(size))
         }
         ColType::Ratio => {
             let ratio = value.as_f64();
-            (ratio > 0.0).then(|| util::format_ratio(ratio))
+            (ratio > 0.0).then(|| format::format_ratio(ratio))
         }
         ColType::Prio => match value.as_i64() {
             TR_PRI_LOW => Some(tr("Low")),
@@ -210,7 +210,7 @@ impl CellState {
                 let progress = value.as_f64().clamp(0.0, 100.0);
                 let bar = self.widget.downcast_ref::<gtk::ProgressBar>().unwrap();
                 bar.set_fraction(progress / 100.0);
-                bar.set_text(Some(&util::progress_text(progress)));
+                bar.set_text(Some(&format::progress_text(progress)));
             }
             ColType::Wanted => {
                 let wanted = value.as_i64();

@@ -13,6 +13,7 @@ use crate::client::ConnectionState;
 use crate::client::{Client, Response};
 use crate::dialogs;
 use crate::files::{FilesModel, FilesView};
+use crate::format;
 use crate::general_panel::GeneralPanel;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
@@ -1238,7 +1239,7 @@ impl MainWindow {
             // GTK 3 showed this checked but insensitive. A disabled action
             // doesn't show its state in a GTK 4 menu, so this is a normal
             // (checked) radio item, choosing it sets the same limit again.
-            let item = gio::MenuItem::new(Some(&util::format_speed_kbps(limit as f64)), None);
+            let item = gio::MenuItem::new(Some(&format::format_speed_kbps(limit as f64)), None);
             item.set_action_and_target_value(Some(&detailed), Some(&(limit as i32).to_variant()));
             section.append_item(&item);
         }
@@ -1246,7 +1247,7 @@ impl MainWindow {
 
         let section = gio::Menu::new();
         for v in presets {
-            let item = gio::MenuItem::new(Some(&util::format_speed_kbps(v as f64)), None);
+            let item = gio::MenuItem::new(Some(&format::format_speed_kbps(v as f64)), None);
             item.set_action_and_target_value(Some(&detailed), Some(&(v as i32).to_variant()));
             section.append_item(&item);
         }
