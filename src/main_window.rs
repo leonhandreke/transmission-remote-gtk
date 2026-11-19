@@ -17,7 +17,7 @@ use crate::item::Item;
 use crate::menus::{ConnectionState, MenuBar, Toolbar};
 use crate::panels::{GeneralPanel, StatusBar};
 use crate::peers::{self, PeersModel};
-use crate::prefs;
+use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
 use crate::state_selector::{FILTER_FLAG_DIR, FILTER_FLAG_TRACKER, StateSelector};
 use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel, UpdateMode};
@@ -248,18 +248,18 @@ impl MainWindow {
         let client = self.client();
         let prefs = client.prefs();
         let (state, profile) = if client.is_connected() {
-            (ConnectionState::Connected, prefs::CONNECTION)
+            (ConnectionState::Connected, Scope::Connection)
         } else if imp.connecting.get() {
-            (ConnectionState::Connecting, prefs::CONNECTION)
+            (ConnectionState::Connecting, Scope::Connection)
         } else {
-            (ConnectionState::Disconnected, prefs::PROFILE)
+            (ConnectionState::Disconnected, Scope::Profile)
         };
         let name = prefs.get_string(prefs::KEY_PROFILE_NAME, profile).unwrap_or_default();
         self.menu_bar().connection_change(state);
         self.toolbar().set_connection(state, &name);
 
         let has_host =
-            prefs.get_string(prefs::KEY_HOSTNAME, prefs::PROFILE).is_some_and(|h| !h.is_empty());
+            prefs.get_string(prefs::KEY_HOSTNAME, Scope::Profile).is_some_and(|h| !h.is_empty());
         let stack = &imp.not_connected_stack;
         let page = match state {
             ConnectionState::Connecting => "connecting",
@@ -340,7 +340,7 @@ impl MainWindow {
     }
 
     fn torrent_event_notification(&self, icon_name: &str, desc: &str, pref_key: &str, item: &Item) {
-        if !self.client().prefs().get_bool(pref_key, prefs::NOFLAGS) {
+        if !self.client().prefs().get_bool(pref_key, Scope::Global) {
             return;
         }
         let name = item.string(tm::COL_NAME).unwrap_or_default();
@@ -356,8 +356,8 @@ impl MainWindow {
     fn save_window_size(&self) {
         let prefs = self.client().prefs().clone();
         let (width, height) = self.default_size();
-        prefs.set_int(prefs::KEY_WINDOW_HEIGHT, height as i64, prefs::GLOBAL);
-        prefs.set_int(prefs::KEY_WINDOW_WIDTH, width as i64, prefs::GLOBAL);
+        prefs.set_int(prefs::KEY_WINDOW_HEIGHT, height as i64, Scope::Global);
+        prefs.set_int(prefs::KEY_WINDOW_WIDTH, width as i64, Scope::Global);
     }
 
     /// Persists the window and tree view layout. This has to happen before
@@ -371,13 +371,13 @@ impl MainWindow {
         let prefs = self.client().prefs().clone();
 
         self.save_window_size();
-        prefs.set_int(prefs::KEY_NOTEBOOK_PANED_POS, imp.vpaned.position() as i64, prefs::GLOBAL);
+        prefs.set_int(prefs::KEY_NOTEBOOK_PANED_POS, imp.vpaned.position() as i64, Scope::Global);
         // Only a sidebar width that was chosen (by dragging), otherwise it
         // follows the width of its states. The default is a set position too.
         let pos = imp.hpaned.position();
         let dragged = imp.hpaned.is_position_set() && pos != imp.states_default_pos.get();
         let states_pos = if dragged { pos } else { 0 };
-        prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, prefs::GLOBAL);
+        prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, Scope::Global);
 
         {
             let parts = imp.parts.borrow();
@@ -476,7 +476,7 @@ impl MainWindow {
             return;
         }
         let prefs = client.prefs();
-        if prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, prefs::GLOBAL) {
+        if prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, Scope::Global) {
             dialogs::add::TorrentAddDialog::new_from_filenames(self, &client, uris).present();
         } else {
             upload::do_upload(Upload::new(uris, &client, self, prefs.add_flags()));
@@ -661,7 +661,7 @@ impl MainWindow {
     fn start_session_timer(&self) {
         let prefs = self.client().prefs().clone();
         let interval =
-            prefs.get_int(prefs::KEY_SESSION_UPDATE_INTERVAL, prefs::CONNECTION).max(1) as u32;
+            prefs.get_int(prefs::KEY_SESSION_UPDATE_INTERVAL, Scope::Connection).max(1) as u32;
         let weak = self.downgrade();
         let id = glib::timeout_add_seconds_local_once(interval, move || {
             if let Some(win) = weak.upgrade() {
@@ -700,9 +700,9 @@ impl MainWindow {
             return;
         }
         let prefs = client.prefs();
-        let every = prefs.get_int(prefs::ACTIVEONLY_FULLSYNC_EVERY, prefs::CONNECTION);
-        let active_only = prefs.get_bool(prefs::KEY_UPDATE_ACTIVE_ONLY, prefs::CONNECTION)
-            && (!prefs.get_bool(prefs::ACTIVEONLY_FULLSYNC_ENABLED, prefs::CONNECTION)
+        let every = prefs.get_int(prefs::ACTIVEONLY_FULLSYNC_EVERY, Scope::Connection);
+        let active_only = prefs.get_bool(prefs::KEY_UPDATE_ACTIVE_ONLY, Scope::Connection)
+            && (!prefs.get_bool(prefs::ACTIVEONLY_FULLSYNC_ENABLED, Scope::Connection)
                 || (every != 0 && client.serial() % every != 0));
         let (torrents, mode) = if active_only {
             (p::Torrents::RecentlyActive, UpdateMode::Active)
@@ -772,7 +772,7 @@ impl MainWindow {
             return;
         }
 
-        let mut interval = prefs.get_int(prefs::KEY_UPDATE_INTERVAL, prefs::CONNECTION);
+        let mut interval = prefs.get_int(prefs::KEY_UPDATE_INTERVAL, Scope::Connection);
         if interval < 1 {
             interval = prefs::INTERVAL_DEFAULT;
         }
@@ -813,7 +813,7 @@ impl MainWindow {
     fn on_torrent_get_failed(&self, error: &crate::client::Error, interval: u32) {
         let client = self.client();
         let prefs = client.prefs().clone();
-        let max_retries = prefs.get_int(prefs::KEY_RETRIES, prefs::CONNECTION);
+        let max_retries = prefs.get_int(prefs::KEY_RETRIES, Scope::Connection);
         if client.inc_fail_count() as i64 >= max_retries {
             self.conn_changed(false);
             self.show_error(&error.to_string());
@@ -1492,9 +1492,9 @@ impl MainWindow {
             }
         });
 
-        let width = prefs.get_int(prefs::KEY_WINDOW_WIDTH, prefs::GLOBAL);
-        let height = prefs.get_int(prefs::KEY_WINDOW_HEIGHT, prefs::GLOBAL);
-        let pos = prefs.get_int(prefs::KEY_NOTEBOOK_PANED_POS, prefs::GLOBAL);
+        let width = prefs.get_int(prefs::KEY_WINDOW_WIDTH, Scope::Global);
+        let height = prefs.get_int(prefs::KEY_WINDOW_HEIGHT, Scope::Global);
+        let pos = prefs.get_int(prefs::KEY_NOTEBOOK_PANED_POS, Scope::Global);
 
         if width > 0 && height > 0 {
             self.set_default_size(width as i32, height as i32);
@@ -1505,12 +1505,12 @@ impl MainWindow {
             imp.vpaned.set_position(pos as i32);
         }
 
-        selector.set_visible(prefs.get_bool(prefs::KEY_SHOW_STATE_SELECTOR, prefs::GLOBAL));
-        imp.notebook.set_visible(prefs.get_bool(prefs::KEY_SHOW_NOTEBOOK, prefs::GLOBAL));
+        selector.set_visible(prefs.get_bool(prefs::KEY_SHOW_STATE_SELECTOR, Scope::Global));
+        imp.notebook.set_visible(prefs.get_bool(prefs::KEY_SHOW_NOTEBOOK, Scope::Global));
 
         // A saved position wider than a third of the window is ignored, like
         // those saved when long directory names widened the sidebar.
-        let pos = prefs.get_int(prefs::KEY_STATES_PANED_POS, prefs::GLOBAL);
+        let pos = prefs.get_int(prefs::KEY_STATES_PANED_POS, Scope::Global);
         let window_width = if width > 0 { width } else { self.default_width() as i64 };
         if pos > 0 && pos <= window_width / 3 {
             imp.hpaned.set_position(pos as i32);
@@ -1574,8 +1574,8 @@ impl MainWindow {
 
     pub fn auto_connect_if_required(&self) {
         let prefs = self.client().prefs().clone();
-        let host = prefs.get_string(prefs::KEY_HOSTNAME, prefs::PROFILE).unwrap_or_default();
-        if !host.is_empty() && prefs.get_bool(prefs::KEY_AUTO_CONNECT, prefs::PROFILE) {
+        let host = prefs.get_string(prefs::KEY_HOSTNAME, Scope::Profile).unwrap_or_default();
+        if !host.is_empty() && prefs.get_bool(prefs::KEY_AUTO_CONNECT, Scope::Profile) {
             self.connect_profile(-1);
         }
     }

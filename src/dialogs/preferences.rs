@@ -2,7 +2,7 @@
 //! and the view (trg-preferences-dialog.c and trg-persistent-tree-view.c).
 //!
 //! The widgets of the template which show a preference are listed with the
-//! key and flags of the preference, and loaded and saved with them.
+//! key and scope of the preference, and loaded and saved with them.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -18,7 +18,7 @@ use crate::i18n::tr;
 use crate::item::{self, Item, Val};
 use crate::macos;
 use crate::main_window::MainWindow;
-use crate::prefs::{self, Prefs};
+use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self as p, get_str};
 use crate::tree_view::{COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView};
 use crate::util;
@@ -80,7 +80,7 @@ pub struct PersistentTreeView {
     down_button: gtk::Button,
     add_select: RefCell<Option<usize>>,
     key: String,
-    flags: u32,
+    scope: Scope,
 }
 
 fn new_persistent_item() -> Item {
@@ -88,7 +88,7 @@ fn new_persistent_item() -> Item {
 }
 
 impl PersistentTreeView {
-    fn new(key: &str, flags: u32) -> Rc<Self> {
+    fn new(key: &str, scope: Scope) -> Rc<Self> {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
         let store = gio::ListStore::new::<Item>();
 
@@ -129,7 +129,7 @@ impl PersistentTreeView {
             down_button: down_button.clone(),
             add_select: Default::default(),
             key: key.to_string(),
-            flags,
+            scope,
         });
 
         let weak = Rc::downgrade(&ptv);
@@ -249,7 +249,7 @@ impl PersistentTreeView {
     }
 
     fn refresh(&self, prefs: &Prefs) {
-        let entries = prefs.get_array(&self.key, self.flags).unwrap_or_default();
+        let entries = prefs.get_array(&self.key, self.scope).unwrap_or_default();
         let columns = self.columns.borrow();
         let items: Vec<Item> = p::objects(&entries)
             .map(|obj| {
@@ -276,26 +276,26 @@ impl PersistentTreeView {
                 Value::Object(obj)
             })
             .collect();
-        prefs.set_value(&self.key, Value::Array(entries), self.flags);
+        prefs.set_value(&self.key, Value::Array(entries), self.scope);
     }
 }
 
 /// A widget showing a preference
 pub enum PrefWidget {
-    Simple { widget: gtk::Widget, key: &'static str, flags: u32 },
+    Simple { widget: gtk::Widget, key: &'static str, scope: Scope },
     List(Rc<PersistentTreeView>),
 }
 
 impl PrefWidget {
     fn refresh(&self, prefs: &Prefs) {
         match self {
-            PrefWidget::Simple { widget, key, flags } => {
+            PrefWidget::Simple { widget, key, scope } => {
                 if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
-                    check.set_active(prefs.get_bool(key, *flags));
+                    check.set_active(prefs.get_bool(key, *scope));
                 } else if let Some(spin) = widget.downcast_ref::<gtk::SpinButton>() {
-                    spin.set_value(prefs.get_int(key, *flags) as f64);
+                    spin.set_value(prefs.get_int(key, *scope) as f64);
                 } else if let Some(e) = widget.dynamic_cast_ref::<gtk::Editable>() {
-                    e.set_text(&prefs.get_string(key, *flags).unwrap_or_default());
+                    e.set_text(&prefs.get_string(key, *scope).unwrap_or_default());
                 }
             }
             PrefWidget::List(ptv) => ptv.refresh(prefs),
@@ -304,13 +304,13 @@ impl PrefWidget {
 
     fn save(&self, prefs: &Prefs) {
         match self {
-            PrefWidget::Simple { widget, key, flags } => {
+            PrefWidget::Simple { widget, key, scope } => {
                 if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
-                    prefs.set_bool(key, check.is_active(), *flags);
+                    prefs.set_bool(key, check.is_active(), *scope);
                 } else if let Some(spin) = widget.downcast_ref::<gtk::SpinButton>() {
-                    prefs.set_int(key, spin.value_as_int() as i64, *flags);
+                    prefs.set_int(key, spin.value_as_int() as i64, *scope);
                 } else if let Some(e) = widget.dynamic_cast_ref::<gtk::Editable>() {
-                    prefs.set_string(key, &e.text(), *flags);
+                    prefs.set_string(key, &e.text(), *scope);
                 }
             }
             PrefWidget::List(ptv) => ptv.save(prefs),
@@ -550,64 +550,64 @@ impl PreferencesDialog {
         }
         d.profile_combo_populate();
 
-        let simple: Vec<(gtk::Widget, &'static str, u32)> = vec![
-            (imp.profile_name_entry.get().upcast(), prefs::KEY_PROFILE_NAME, prefs::PROFILE),
-            (imp.hostname_entry.get().upcast(), prefs::KEY_HOSTNAME, prefs::PROFILE),
-            (imp.port_spin.get().upcast(), prefs::KEY_PORT, prefs::PROFILE),
-            (imp.rpc_url_path_entry.get().upcast(), prefs::KEY_RPC_URL_PATH, prefs::PROFILE),
-            (imp.username_entry.get().upcast(), prefs::KEY_USERNAME, prefs::PROFILE),
-            (imp.password_entry.get().upcast(), prefs::KEY_PASSWORD, prefs::PROFILE),
-            (imp.auto_connect_check.get().upcast(), prefs::KEY_AUTO_CONNECT, prefs::PROFILE),
-            (imp.ssl_check.get().upcast(), prefs::KEY_SSL, prefs::PROFILE),
-            (imp.ssl_validate_check.get().upcast(), prefs::KEY_SSL_VALIDATE, prefs::PROFILE),
-            (imp.timeout_spin.get().upcast(), prefs::KEY_TIMEOUT, prefs::PROFILE),
-            (imp.retries_spin.get().upcast(), prefs::KEY_RETRIES, prefs::PROFILE),
+        let simple: Vec<(gtk::Widget, &'static str, Scope)> = vec![
+            (imp.profile_name_entry.get().upcast(), prefs::KEY_PROFILE_NAME, Scope::Profile),
+            (imp.hostname_entry.get().upcast(), prefs::KEY_HOSTNAME, Scope::Profile),
+            (imp.port_spin.get().upcast(), prefs::KEY_PORT, Scope::Profile),
+            (imp.rpc_url_path_entry.get().upcast(), prefs::KEY_RPC_URL_PATH, Scope::Profile),
+            (imp.username_entry.get().upcast(), prefs::KEY_USERNAME, Scope::Profile),
+            (imp.password_entry.get().upcast(), prefs::KEY_PASSWORD, Scope::Profile),
+            (imp.auto_connect_check.get().upcast(), prefs::KEY_AUTO_CONNECT, Scope::Profile),
+            (imp.ssl_check.get().upcast(), prefs::KEY_SSL, Scope::Profile),
+            (imp.ssl_validate_check.get().upcast(), prefs::KEY_SSL_VALIDATE, Scope::Profile),
+            (imp.timeout_spin.get().upcast(), prefs::KEY_TIMEOUT, Scope::Profile),
+            (imp.retries_spin.get().upcast(), prefs::KEY_RETRIES, Scope::Profile),
             (
                 imp.update_active_only_check.get().upcast(),
                 prefs::KEY_UPDATE_ACTIVE_ONLY,
-                prefs::PROFILE,
+                Scope::Profile,
             ),
             (
                 imp.full_update_check.get().upcast(),
                 prefs::ACTIVEONLY_FULLSYNC_ENABLED,
-                prefs::PROFILE,
+                Scope::Profile,
             ),
-            (imp.full_update_spin.get().upcast(), prefs::ACTIVEONLY_FULLSYNC_EVERY, prefs::PROFILE),
-            (imp.update_interval_spin.get().upcast(), prefs::KEY_UPDATE_INTERVAL, prefs::PROFILE),
+            (imp.full_update_spin.get().upcast(), prefs::ACTIVEONLY_FULLSYNC_EVERY, Scope::Profile),
+            (imp.update_interval_spin.get().upcast(), prefs::KEY_UPDATE_INTERVAL, Scope::Profile),
             (
                 imp.session_update_interval_spin.get().upcast(),
                 prefs::KEY_SESSION_UPDATE_INTERVAL,
-                prefs::PROFILE,
+                Scope::Profile,
             ),
-            (imp.start_paused_check.get().upcast(), prefs::KEY_START_PAUSED, prefs::GLOBAL),
+            (imp.start_paused_check.get().upcast(), prefs::KEY_START_PAUSED, Scope::Global),
             (
                 imp.add_options_dialog_check.get().upcast(),
                 prefs::KEY_ADD_OPTIONS_DIALOG,
-                prefs::GLOBAL,
+                Scope::Global,
             ),
             (
                 imp.delete_local_torrent_check.get().upcast(),
                 prefs::KEY_DELETE_LOCAL_TORRENT,
-                prefs::GLOBAL,
+                Scope::Global,
             ),
             (
                 imp.show_state_selector_check.get().upcast(),
                 prefs::KEY_SHOW_STATE_SELECTOR,
-                prefs::GLOBAL,
+                Scope::Global,
             ),
-            (imp.filter_dirs_check.get().upcast(), prefs::KEY_FILTER_DIRS, prefs::GLOBAL),
-            (imp.filter_trackers_check.get().upcast(), prefs::KEY_FILTER_TRACKERS, prefs::GLOBAL),
+            (imp.filter_dirs_check.get().upcast(), prefs::KEY_FILTER_DIRS, Scope::Global),
+            (imp.filter_trackers_check.get().upcast(), prefs::KEY_FILTER_TRACKERS, Scope::Global),
             (
                 imp.directories_first_check.get().upcast(),
                 prefs::KEY_DIRECTORIES_FIRST,
-                prefs::GLOBAL,
+                Scope::Global,
             ),
-            (imp.show_notebook_check.get().upcast(), prefs::KEY_SHOW_NOTEBOOK, prefs::GLOBAL),
-            (imp.add_notify_check.get().upcast(), prefs::KEY_ADD_NOTIFY, prefs::GLOBAL),
-            (imp.complete_notify_check.get().upcast(), prefs::KEY_COMPLETE_NOTIFY, prefs::GLOBAL),
+            (imp.show_notebook_check.get().upcast(), prefs::KEY_SHOW_NOTEBOOK, Scope::Global),
+            (imp.add_notify_check.get().upcast(), prefs::KEY_ADD_NOTIFY, Scope::Global),
+            (imp.complete_notify_check.get().upcast(), prefs::KEY_COMPLETE_NOTIFY, Scope::Global),
         ];
-        for (widget, key, flags) in simple {
-            let wd = PrefWidget::Simple { widget, key, flags };
+        for (widget, key, scope) in simple {
+            let wd = PrefWidget::Simple { widget, key, scope };
             wd.refresh(&d.prefs());
             imp.widgets.borrow_mut().push(wd);
         }
@@ -615,14 +615,14 @@ impl PreferencesDialog {
         d.add_persistent_list(
             &imp.headers_box,
             prefs::KEY_CUSTOM_HEADERS,
-            prefs::PROFILE,
+            Scope::Profile,
             (prefs::KEY_CUSTOM_HEADER_NAME, &tr("Name")),
             (prefs::KEY_CUSTOM_HEADER_VALUE, &tr("Value")),
         );
         d.add_persistent_list(
             &imp.destinations_box,
             prefs::KEY_DESTINATIONS,
-            prefs::CONNECTION,
+            Scope::Connection,
             (prefs::SUBKEY_LABEL, &tr("Label")),
             (prefs::KEY_DESTINATIONS_SUBKEY_DIR, &tr("Directory")),
         );
@@ -694,7 +694,7 @@ impl PreferencesDialog {
     fn profile_combo_populate(&self) {
         let imp = self.imp();
         let prefs = self.prefs();
-        let profile_id = prefs.get_int(prefs::KEY_PROFILE_ID, prefs::GLOBAL);
+        let profile_id = prefs.get_int(prefs::KEY_PROFILE_ID, Scope::Global);
         let profiles = prefs.profiles();
 
         imp.populating.set(true);
@@ -720,11 +720,11 @@ impl PreferencesDialog {
         &self,
         bx: &gtk::Box,
         key: &str,
-        flags: u32,
+        scope: Scope,
         col1: (&str, &str),
         col2: (&str, &str),
     ) {
-        let ptv = PersistentTreeView::new(key, flags);
+        let ptv = PersistentTreeView::new(key, scope);
         let first = ptv.add_column(0, col1.0, col1.1);
         ptv.set_add_select(first);
         ptv.add_column(1, col2.0, col2.1);

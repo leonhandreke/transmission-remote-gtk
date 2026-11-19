@@ -10,7 +10,7 @@ use gtk::{gio, glib, pango};
 use crate::client::Client;
 use crate::i18n::{ntr, sprintf, tr};
 use crate::item::Item;
-use crate::prefs;
+use crate::prefs::{self, Scope};
 use crate::protocol::{
     self as p, TORRENT_FLAG_CHECKING, TORRENT_FLAG_COMPLETE, TORRENT_FLAG_DOWNLOADING,
     TORRENT_FLAG_DOWNLOADING_WAIT, TORRENT_FLAG_PAUSED, TORRENT_FLAG_SEEDING,
@@ -95,7 +95,7 @@ pub fn torrent_tree_view_new(client: &Client, model: &impl IsA<gio::ListModel>) 
     tv.setup_columns();
     tv.restore_sort();
 
-    set_style(&tv, client, prefs.get_int(prefs::KEY_STYLE, prefs::GLOBAL));
+    set_style(&tv, client, prefs.get_int(prefs::KEY_STYLE, Scope::Global));
 
     let weak = tv.downgrade();
     let c = client.downgrade();
@@ -103,7 +103,7 @@ pub fn torrent_tree_view_new(client: &Client, model: &impl IsA<gio::ListModel>) 
         if key == Some(prefs::KEY_STYLE)
             && let (Some(tv), Some(client)) = (weak.upgrade(), c.upgrade())
         {
-            set_style(&tv, &client, prefs.get_int(prefs::KEY_STYLE, prefs::GLOBAL));
+            set_style(&tv, &client, prefs.get_int(prefs::KEY_STYLE, Scope::Global));
         }
     });
 

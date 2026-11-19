@@ -3,7 +3,7 @@
 //!
 //! The values are looked up in one of the profiles (a JSON object in the
 //! "profiles" array), the connection (the profile connected with), or the
-//! root object, depending on the flags, and then in the defaults. Setting a
+//! root object, depending on the Scope, and then in the defaults. Setting a
 //! value emits "pref-changed" with its key.
 
 use std::cell::RefCell;
@@ -74,10 +74,17 @@ pub const KEY_LAST_MOVE_DESTINATION: &str = "last-move-destination";
 pub const KEY_LAST_ADD_DESTINATION: &str = "last-add-destination";
 pub const KEY_DESTINATIONS_SUBKEY_DIR: &str = "dir";
 
-pub const NOFLAGS: u32 = 1 << 0;
-pub const GLOBAL: u32 = 1 << 1;
-pub const PROFILE: u32 = 1 << 2;
-pub const CONNECTION: u32 = 1 << 3;
+/// Which preferences a value is one of
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Scope {
+    /// The application's (the root object)
+    Global,
+    /// The current profile's: the one being edited, which Connect connects
+    /// to (the root object if there's none)
+    Profile,
+    /// The profile connected to (the root object if not connected)
+    Connection,
+}
 
 pub const STYLE_TR: i64 = 0;
 pub const STYLE_CLASSIC: i64 = 1;
@@ -85,7 +92,7 @@ pub const STYLE_TR_COMPACT: i64 = 2;
 
 /// Where a value is looked up (before the defaults)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Scope {
+enum Location {
     Root,
     Profile(usize),
 }
@@ -145,40 +152,39 @@ impl State {
         self.user.as_object_mut().unwrap()
     }
 
-    fn scope(&self, flags: u32) -> Scope {
-        if let (Some(p), true) = (self.profile, flags & PROFILE != 0) {
-            Scope::Profile(p)
-        } else if let (Some(c), true) = (self.connection, flags & CONNECTION != 0) {
-            Scope::Profile(c)
-        } else {
-            Scope::Root
+    fn location(&self, scope: Scope) -> Location {
+        let profile = match scope {
+            Scope::Global => None,
+            Scope::Profile => self.profile,
+            Scope::Connection => self.connection,
+        };
+        profile.map_or(Location::Root, Location::Profile)
+    }
+
+    fn object(&self, location: Location) -> Option<&Map<String, Value>> {
+        match location {
+            Location::Root => self.user.as_object(),
+            Location::Profile(i) => self.profiles().get(i).and_then(Value::as_object),
         }
     }
 
-    fn object(&self, scope: Scope) -> Option<&Map<String, Value>> {
-        match scope {
-            Scope::Root => self.user.as_object(),
-            Scope::Profile(i) => self.profiles().get(i).and_then(Value::as_object),
+    fn object_mut(&mut self, location: Location) -> Option<&mut Map<String, Value>> {
+        match location {
+            Location::Root => Some(self.root_mut()),
+            Location::Profile(i) => self.profiles_mut().get_mut(i).and_then(Value::as_object_mut),
         }
     }
 
-    fn object_mut(&mut self, scope: Scope) -> Option<&mut Map<String, Value>> {
-        match scope {
-            Scope::Root => Some(self.root_mut()),
-            Scope::Profile(i) => self.profiles_mut().get_mut(i).and_then(Value::as_object_mut),
-        }
-    }
-
-    fn get(&self, key: &str, flags: u32) -> Option<Value> {
-        if let Some(v) = self.object(self.scope(flags)).and_then(|o| o.get(key)) {
+    fn get(&self, key: &str, scope: Scope) -> Option<Value> {
+        if let Some(v) = self.object(self.location(scope)).and_then(|o| o.get(key)) {
             return Some(v.clone());
         }
         self.defaults.get(key).cloned()
     }
 
-    fn set(&mut self, key: &str, value: Value, flags: u32) {
-        let scope = self.scope(flags);
-        if let Some(obj) = self.object_mut(scope) {
+    fn set(&mut self, key: &str, value: Value, scope: Scope) {
+        let location = self.location(scope);
+        if let Some(obj) = self.object_mut(location) {
             obj.insert(key.to_string(), value);
         }
     }
@@ -294,61 +300,61 @@ impl Prefs {
         })
     }
 
-    pub fn get_value(&self, key: &str, flags: u32) -> Option<Value> {
-        self.state().get(key, flags)
+    pub fn get_value(&self, key: &str, scope: Scope) -> Option<Value> {
+        self.state().get(key, scope)
     }
 
-    pub fn get_string(&self, key: &str, flags: u32) -> Option<String> {
-        self.get_value(key, flags).and_then(|v| v.as_str().map(str::to_string))
+    pub fn get_string(&self, key: &str, scope: Scope) -> Option<String> {
+        self.get_value(key, scope).and_then(|v| v.as_str().map(str::to_string))
     }
 
-    pub fn get_int(&self, key: &str, flags: u32) -> i64 {
-        self.get_value(key, flags).map(|v| value_as_i64(&v)).unwrap_or(0)
+    pub fn get_int(&self, key: &str, scope: Scope) -> i64 {
+        self.get_value(key, scope).map(|v| value_as_i64(&v)).unwrap_or(0)
     }
 
-    pub fn get_double(&self, key: &str, flags: u32) -> f64 {
-        self.get_value(key, flags).map(|v| value_as_f64(&v)).unwrap_or(0.0)
+    pub fn get_double(&self, key: &str, scope: Scope) -> f64 {
+        self.get_value(key, scope).map(|v| value_as_f64(&v)).unwrap_or(0.0)
     }
 
-    pub fn get_bool(&self, key: &str, flags: u32) -> bool {
-        self.get_value(key, flags).map(|v| value_as_bool(&v)).unwrap_or(false)
+    pub fn get_bool(&self, key: &str, scope: Scope) -> bool {
+        self.get_value(key, scope).map(|v| value_as_bool(&v)).unwrap_or(false)
     }
 
-    pub fn get_array(&self, key: &str, flags: u32) -> Option<Vec<Value>> {
-        self.get_value(key, flags).and_then(|v| v.as_array().cloned())
+    pub fn get_array(&self, key: &str, scope: Scope) -> Option<Vec<Value>> {
+        self.get_value(key, scope).and_then(|v| v.as_array().cloned())
     }
 
     /// Sets a value without emitting "pref-changed"
-    pub fn set_value_quiet(&self, key: &str, value: Value, flags: u32) {
-        self.state_mut().set(key, value, flags);
+    pub fn set_value_quiet(&self, key: &str, value: Value, scope: Scope) {
+        self.state_mut().set(key, value, scope);
     }
 
-    pub fn set_value(&self, key: &str, value: Value, flags: u32) {
-        self.set_value_quiet(key, value, flags);
+    pub fn set_value(&self, key: &str, value: Value, scope: Scope) {
+        self.set_value_quiet(key, value, scope);
         self.emit_changed(Some(key));
     }
 
-    pub fn set_int(&self, key: &str, value: i64, flags: u32) {
-        self.set_value(key, json!(value), flags);
+    pub fn set_int(&self, key: &str, value: i64, scope: Scope) {
+        self.set_value(key, json!(value), scope);
     }
 
-    pub fn set_string(&self, key: &str, value: &str, flags: u32) {
-        self.set_value(key, json!(value), flags);
+    pub fn set_string(&self, key: &str, value: &str, scope: Scope) {
+        self.set_value(key, json!(value), scope);
     }
 
-    pub fn set_double(&self, key: &str, value: f64, flags: u32) {
-        self.set_value(key, json!(value), flags);
+    pub fn set_double(&self, key: &str, value: f64, scope: Scope) {
+        self.set_value(key, json!(value), scope);
     }
 
-    pub fn set_bool(&self, key: &str, value: bool, flags: u32) {
-        self.set_value(key, json!(value), flags);
+    pub fn set_bool(&self, key: &str, value: bool, scope: Scope) {
+        self.set_value(key, json!(value), scope);
     }
 
-    /// Removes a value from the scope of flags
-    pub fn remove(&self, key: &str, flags: u32) {
+    /// Removes a value from a scope
+    pub fn remove(&self, key: &str, scope: Scope) {
         let mut st = self.state_mut();
-        let scope = st.scope(flags);
-        if let Some(obj) = st.object_mut(scope) {
+        let location = st.location(scope);
+        if let Some(obj) = st.object_mut(location) {
             obj.remove(key);
         }
     }
@@ -521,10 +527,10 @@ impl Prefs {
     /// The flags for adding torrents, from the preferences
     pub fn add_flags(&self) -> u32 {
         let mut flags = 0;
-        if self.get_bool(KEY_START_PAUSED, GLOBAL) {
+        if self.get_bool(KEY_START_PAUSED, Scope::Global) {
             flags |= crate::protocol::TORRENT_ADD_FLAG_PAUSED;
         }
-        if self.get_bool(KEY_DELETE_LOCAL_TORRENT, GLOBAL) {
+        if self.get_bool(KEY_DELETE_LOCAL_TORRENT, Scope::Global) {
             flags |= crate::protocol::TORRENT_ADD_FLAG_DELETE;
         }
         flags

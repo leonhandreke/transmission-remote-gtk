@@ -19,7 +19,7 @@ use gtk::glib::prelude::*;
 use gtk::glib::subclass::prelude::*;
 use serde_json::json;
 
-use crate::prefs::{self, Prefs};
+use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self, Obj, Request};
 use crate::rpc::{self, Config, Transport};
 use crate::torrent_model::{TorrentItem, TorrentItemExt, TorrentModel};
@@ -267,15 +267,15 @@ impl Client {
         let transport = &self.imp().transport;
         transport.configure(None);
 
-        let port = prefs.get_int(prefs::KEY_PORT, prefs::CONNECTION);
-        let host = prefs.get_string(prefs::KEY_HOSTNAME, prefs::CONNECTION).unwrap_or_default();
-        let path = prefs.get_string(prefs::KEY_RPC_URL_PATH, prefs::CONNECTION).unwrap_or_default();
+        let port = prefs.get_int(prefs::KEY_PORT, Scope::Connection);
+        let host = prefs.get_string(prefs::KEY_HOSTNAME, Scope::Connection).unwrap_or_default();
+        let path = prefs.get_string(prefs::KEY_RPC_URL_PATH, Scope::Connection).unwrap_or_default();
 
         if host.is_empty() {
             return Err("Bad hostname.".into());
         }
 
-        let ssl = prefs.get_bool(prefs::KEY_SSL, prefs::CONNECTION);
+        let ssl = prefs.get_bool(prefs::KEY_SSL, Scope::Connection);
         self.imp().ssl.set(ssl);
 
         let url = format!("{}://{host}:{port}{path}", if ssl { "https" } else { "http" });
@@ -284,7 +284,7 @@ impl Client {
         }
 
         let mut headers = Vec::new();
-        if let Some(custom) = prefs.get_array(prefs::KEY_CUSTOM_HEADERS, prefs::CONNECTION) {
+        if let Some(custom) = prefs.get_array(prefs::KEY_CUSTOM_HEADERS, Scope::Connection) {
             for h in protocol::objects(&custom) {
                 if let (Some(k), Some(v)) = (
                     protocol::get_str(h, prefs::KEY_CUSTOM_HEADER_NAME),
@@ -297,10 +297,10 @@ impl Client {
 
         transport.configure(Some(Config {
             url,
-            username: prefs.get_string(prefs::KEY_USERNAME, prefs::CONNECTION),
-            password: prefs.get_string(prefs::KEY_PASSWORD, prefs::CONNECTION),
+            username: prefs.get_string(prefs::KEY_USERNAME, Scope::Connection),
+            password: prefs.get_string(prefs::KEY_PASSWORD, Scope::Connection),
             headers,
-            ssl_validate: prefs.get_bool(prefs::KEY_SSL_VALIDATE, prefs::CONNECTION),
+            ssl_validate: prefs.get_bool(prefs::KEY_SSL_VALIDATE, Scope::Connection),
         }));
         Ok(())
     }

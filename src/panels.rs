@@ -12,7 +12,7 @@ use crate::dialog;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
 use crate::main_window::MainWindow;
-use crate::prefs::{self, value_as_i64};
+use crate::prefs::{self, Scope, value_as_i64};
 use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
 use crate::torrent_model::{self as tm, Stats};
 use crate::util;
@@ -402,7 +402,7 @@ impl StatusBar {
     fn set_connected_label(&self, session: &Obj, client: &Client) {
         let profile_name = client
             .prefs()
-            .get_string(prefs::KEY_PROFILE_NAME, prefs::CONNECTION)
+            .get_string(prefs::KEY_PROFILE_NAME, Scope::Connection)
             .unwrap_or_default();
         self.push_connection_msg(&sprintf(
             &tr("Connected: %s :: %s"),

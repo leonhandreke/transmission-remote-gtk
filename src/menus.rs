@@ -17,7 +17,7 @@ use gtk::{CompositeTemplate, gio, glib};
 
 use crate::i18n::{sprintf, tr};
 use crate::main_window::MainWindow;
-use crate::prefs::{self, Prefs};
+use crate::prefs::{self, Prefs, Scope};
 use crate::tree_view::TreeView;
 use crate::util;
 
@@ -196,7 +196,7 @@ fn append_items(menu: &gio::Menu, items: &gio::MenuModel) {
 }
 
 fn style_state(prefs: &Prefs) -> glib::Variant {
-    let mut style = prefs.get_int(prefs::KEY_STYLE, prefs::GLOBAL);
+    let mut style = prefs.get_int(prefs::KEY_STYLE, Scope::Global);
     if style < 0 || style as usize >= STYLE_NICKS.len() {
         style = prefs::STYLE_TR;
     }
@@ -374,7 +374,7 @@ impl MenuBar {
             let Some(nick) = value.and_then(|v| v.str().map(str::to_string)) else { return };
             if let Some(i) = STYLE_NICKS.iter().position(|n| *n == nick) {
                 action.set_state(value.unwrap());
-                p.set_int(prefs::KEY_STYLE, i as i64, prefs::GLOBAL);
+                p.set_int(prefs::KEY_STYLE, i as i64, Scope::Global);
             }
         });
         let weak = action.downgrade();
@@ -399,7 +399,7 @@ impl MenuBar {
         let action = gio::SimpleAction::new_stateful(
             name,
             None,
-            &prefs.get_bool(key, prefs::GLOBAL).to_variant(),
+            &prefs.get_bool(key, Scope::Global).to_variant(),
         );
         win.add_action(&action);
 
@@ -411,7 +411,7 @@ impl MenuBar {
         action.connect_change_state(move |action, value| {
             let Some(value) = value else { return };
             action.set_state(value);
-            p.set_bool(key, value.get::<bool>().unwrap_or(false), prefs::GLOBAL);
+            p.set_bool(key, value.get::<bool>().unwrap_or(false), Scope::Global);
         });
 
         // Preferences can also be changed from the local preferences dialog
@@ -421,7 +421,7 @@ impl MenuBar {
             if updated != Some(key) {
                 return;
             }
-            let value = prefs.get_bool(key, prefs::GLOBAL);
+            let value = prefs.get_bool(key, Scope::Global);
             if action.state().and_then(|s| s.get::<bool>()) != Some(value) {
                 action.set_state(&value.to_variant());
             }

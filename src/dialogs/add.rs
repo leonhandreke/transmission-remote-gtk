@@ -16,7 +16,7 @@ use crate::files::{self, FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
 use crate::item;
 use crate::main_window::MainWindow;
-use crate::prefs::{self, Prefs};
+use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_NORMAL};
 use crate::upload::{self, Upload};
 use crate::util;
@@ -93,7 +93,7 @@ fn generic_dialog(prefs: &Prefs) -> gtk::FileDialog {
         .modal(true)
         .build();
 
-    if let Some(dir) = prefs.get_string(prefs::KEY_LAST_TORRENT_DIR, prefs::GLOBAL) {
+    if let Some(dir) = prefs.get_string(prefs::KEY_LAST_TORRENT_DIR, Scope::Global) {
         dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
     }
 
@@ -124,7 +124,7 @@ fn save_dir(files: &gio::ListModel, prefs: &Prefs) {
     let dir =
         files.item(0).and_downcast::<gio::File>().and_then(|f| f.parent()).and_then(|p| p.path());
     if let Some(dir) = dir {
-        prefs.set_string(prefs::KEY_LAST_TORRENT_DIR, &dir.to_string_lossy(), prefs::GLOBAL);
+        prefs.set_string(prefs::KEY_LAST_TORRENT_DIR, &dir.to_string_lossy(), Scope::Global);
     }
 }
 
@@ -142,7 +142,7 @@ pub fn add_dialog(win: &MainWindow, client: &Client) {
         let prefs = client.prefs();
         // A GtkFileDialog can't have extra options, so whether the options
         // dialog is shown follows the preference ("Options dialog on add").
-        let show_options = prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, prefs::GLOBAL);
+        let show_options = prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, Scope::Global);
         let list = filenames(&files);
         save_dir(&files, prefs);
 
@@ -215,8 +215,8 @@ impl TorrentAddDialog {
             .sync_create()
             .build();
 
-        imp.paused_check.set_active(prefs.get_bool(prefs::KEY_START_PAUSED, prefs::GLOBAL));
-        imp.delete_check.set_active(prefs.get_bool(prefs::KEY_DELETE_LOCAL_TORRENT, prefs::GLOBAL));
+        imp.paused_check.set_active(prefs.get_bool(prefs::KEY_START_PAUSED, Scope::Global));
+        imp.delete_check.set_active(prefs.get_bool(prefs::KEY_DELETE_LOCAL_TORRENT, Scope::Global));
 
         // the server's default for added torrents
         match client.session().and_then(|s| s.get(p::SGET_SEQUENTIAL_DOWNLOAD).cloned()) {

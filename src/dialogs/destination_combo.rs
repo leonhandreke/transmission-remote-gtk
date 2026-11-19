@@ -11,7 +11,7 @@ use gtk::{CompositeTemplate, gio, glib};
 
 use crate::client::Client;
 use crate::dialog;
-use crate::prefs;
+use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, get_str};
 use crate::util;
 
@@ -113,7 +113,7 @@ impl DestinationCombo {
 
         // Restore any previous selection, or the default dir (the first item)
         let last = last_selection_key
-            .and_then(|k| client.prefs().get_string(k, prefs::CONNECTION))
+            .and_then(|k| client.prefs().get_string(k, Scope::Connection))
             .filter(|s| !s.is_empty());
         match last {
             Some(dir) => imp.entry.set_text(&dir),
@@ -160,7 +160,7 @@ impl DestinationCombo {
         self.insert(None, &default_dir, DestType::Default);
 
         // the saved dirs
-        if let Some(saved) = prefs.get_array(prefs::KEY_DESTINATIONS, prefs::CONNECTION) {
+        if let Some(saved) = prefs.get_array(prefs::KEY_DESTINATIONS, Scope::Connection) {
             for obj in p::objects(&saved) {
                 self.insert(
                     get_str(obj, prefs::SUBKEY_LABEL),
@@ -192,7 +192,7 @@ impl DestinationCombo {
             (imp.last_selection.borrow().as_ref(), imp.client.borrow().as_ref())
             && self.has_text()
         {
-            client.prefs().set_string(key, &self.dir(), prefs::CONNECTION);
+            client.prefs().set_string(key, &self.dir(), Scope::Connection);
         }
     }
 }

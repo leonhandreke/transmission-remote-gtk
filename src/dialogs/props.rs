@@ -23,7 +23,7 @@ use crate::i18n::{sprintf, tr};
 use crate::item::Item;
 use crate::main_window::MainWindow;
 use crate::peers::{self, PeersModel};
-use crate::prefs;
+use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
 use crate::torrent_model as tm;
 use crate::torrent_model::UpdateMode;
@@ -184,7 +184,7 @@ impl TorrentPropsDialog {
 
         let row_count = tv.count_selected();
         let prefs = client.prefs().clone();
-        let show_details = prefs.get_int(prefs::KEY_STYLE, prefs::GLOBAL) != prefs::STYLE_CLASSIC
+        let show_details = prefs.get_int(prefs::KEY_STYLE, Scope::Global) != prefs::STYLE_CLASSIC
             && row_count == 1;
         imp.show_details.set(show_details);
 
@@ -267,8 +267,8 @@ impl TorrentPropsDialog {
         d.limits_page_load(&json);
 
         let (width, height) = if show_details {
-            let w = prefs.get_int(prefs::KEY_PROPS_DIALOG_WIDTH, prefs::GLOBAL);
-            let h = prefs.get_int(prefs::KEY_PROPS_DIALOG_HEIGHT, prefs::GLOBAL);
+            let w = prefs.get_int(prefs::KEY_PROPS_DIALOG_WIDTH, Scope::Global);
+            let h = prefs.get_int(prefs::KEY_PROPS_DIALOG_HEIGHT, Scope::Global);
             if w <= 0 || h <= 0 { (700, 600) } else { (w, h) }
         } else {
             (500, 500)
@@ -288,8 +288,8 @@ impl TorrentPropsDialog {
         if imp.show_details.get() {
             let prefs = self.client().prefs().clone();
             let (w, h) = self.default_size();
-            prefs.set_int(prefs::KEY_PROPS_DIALOG_WIDTH, w as i64, prefs::GLOBAL);
-            prefs.set_int(prefs::KEY_PROPS_DIALOG_HEIGHT, h as i64, prefs::GLOBAL);
+            prefs.set_int(prefs::KEY_PROPS_DIALOG_WIDTH, w as i64, Scope::Global);
+            prefs.set_int(prefs::KEY_PROPS_DIALOG_HEIGHT, h as i64, Scope::Global);
             let details = imp.details.borrow();
             let flags = PERSIST_SORT | PERSIST_LAYOUT;
             if let Some(tv) = &details.peers_tv {

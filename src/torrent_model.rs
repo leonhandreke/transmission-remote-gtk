@@ -26,7 +26,7 @@ use serde_json::Value;
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
-use crate::prefs;
+use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, Obj, get_i64, get_str};
 use crate::util::{self, HostRegex};
 
@@ -218,7 +218,7 @@ impl Default for TorrentModel {
 /// part below that.
 pub fn shorten_download_dir(client: &Client, download_dir: &str) -> String {
     let prefs = client.prefs();
-    if let Some(labels) = prefs.get_array(prefs::KEY_DESTINATIONS, prefs::CONNECTION) {
+    if let Some(labels) = prefs.get_array(prefs::KEY_DESTINATIONS, Scope::Connection) {
         for label in p::objects(&labels) {
             if get_str(label, prefs::KEY_DESTINATIONS_SUBKEY_DIR) == Some(download_dir)
                 && let Some(l) = get_str(label, prefs::SUBKEY_LABEL)

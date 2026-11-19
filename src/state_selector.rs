@@ -11,7 +11,7 @@ use gtk::{gdk, gio, glib};
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
-use crate::prefs::{self, Prefs};
+use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self as p, get_str};
 use crate::torrent_model::{self as tm, Stats, TorrentItemExt, TorrentModel};
 use crate::util::{self, HostRegex};
@@ -225,7 +225,7 @@ impl StateSelector {
         self.prefs().set_int(
             prefs::STATE_SELECTOR_LAST,
             item.uint(COL_INDEX) as i64,
-            prefs::GLOBAL,
+            Scope::Global,
         );
         self.emit_by_name::<()>("torrent-state-changed", &[&imp.flag.get()]);
     }
@@ -592,9 +592,9 @@ impl StateSelector {
         let imp = self.imp();
         let prefs = self.prefs();
 
-        imp.show_dirs.set(prefs.get_bool(prefs::KEY_FILTER_DIRS, prefs::GLOBAL));
-        imp.show_trackers.set(prefs.get_bool(prefs::KEY_FILTER_TRACKERS, prefs::GLOBAL));
-        imp.dirs_first.set(prefs.get_bool(prefs::KEY_DIRECTORIES_FIRST, prefs::GLOBAL));
+        imp.show_dirs.set(prefs.get_bool(prefs::KEY_FILTER_DIRS, Scope::Global));
+        imp.show_trackers.set(prefs.get_bool(prefs::KEY_FILTER_TRACKERS, Scope::Global));
+        imp.dirs_first.set(prefs.get_bool(prefs::KEY_DIRECTORIES_FIRST, Scope::Global));
 
         // The states, directories and trackers are sections of the list. The
         // store is in their order already, so the sort keeps it.
@@ -673,7 +673,7 @@ impl StateSelector {
             }
         });
 
-        let mut index = prefs.get_int(prefs::STATE_SELECTOR_LAST, prefs::GLOBAL);
+        let mut index = prefs.get_int(prefs::STATE_SELECTOR_LAST, Scope::Global);
         if index < 0 || index >= imp.n_categories.get() as i64 {
             index = 0;
         }
