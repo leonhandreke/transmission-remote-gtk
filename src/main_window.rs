@@ -1,7 +1,7 @@
 //! The rather large main window, which glues everything together
 //! (trg-main-window.c).
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 
 use gtk::prelude::*;
@@ -31,21 +31,31 @@ use crate::trackers::{TrackersModel, TrackersView};
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
 use crate::util;
 
-#[derive(Default)]
+/// The parts of the window that aren't in its template, made by construct()
 pub struct Parts {
-    pub client: Option<Client>,
-    pub torrent_model: Option<TorrentModel>,
-    pub torrent_tv: Option<TreeView>,
-    pub torrent_filter: Option<gtk::CustomFilter>,
-    pub toolbar: Option<Toolbar>,
-    pub menu_bar: Option<Rc<MenuBar>>,
-    pub state_selector: Option<StateSelector>,
-    pub trackers_model: Option<Rc<TrackersModel>>,
-    pub trackers_view: Option<Rc<TrackersView>>,
-    pub files_model: Option<Rc<FilesModel>>,
-    pub files_view: Option<Rc<FilesView>>,
-    pub peers_model: Option<Rc<PeersModel>>,
-    pub peers_tv: Option<TreeView>,
+    torrent_model: TorrentModel,
+    torrent_tv: TreeView,
+    torrent_filter: gtk::CustomFilter,
+    toolbar: Toolbar,
+    menu_bar: MenuBar,
+    state_selector: StateSelector,
+    details: Details,
+}
+
+/// The lists of the torrent details, the pages of the notebook after General
+struct Details {
+    trackers_model: Rc<TrackersModel>,
+    trackers_view: Rc<TrackersView>,
+    files_model: Rc<FilesModel>,
+    files_view: Rc<FilesView>,
+    peers_model: Rc<PeersModel>,
+    peers_tv: TreeView,
+}
+
+impl Details {
+    fn views(&self) -> [&TreeView; 3] {
+        [&self.trackers_view.tv, &self.files_view.tv, &self.peers_tv]
+    }
 }
 
 mod imp {
@@ -87,7 +97,8 @@ mod imp {
         #[template_child]
         pub status_bar: TemplateChild<StatusBar>,
 
-        pub parts: RefCell<Parts>,
+        pub client: OnceCell<Client>,
+        pub parts: OnceCell<Parts>,
         pub selected_torrent_id: Cell<i64>,
 
         // what the torrent filter shows, from the state selector and the entry
@@ -188,17 +199,21 @@ impl MainWindow {
 impl MainWindow {
     pub fn new(app: &gtk::Application, client: &Client) -> Self {
         let win: Self = glib::Object::builder().property("application", app).build();
-        win.imp().parts.borrow_mut().client = Some(client.clone());
+        win.imp().client.set(client.clone()).expect("a new window has no client");
         win.construct();
         win
     }
 
     pub fn client(&self) -> Client {
-        self.imp().parts.borrow().client.clone().unwrap()
+        self.imp().client.get().expect("the client is set by new()").clone()
+    }
+
+    fn parts(&self) -> &Parts {
+        self.imp().parts.get().expect("the parts are made by construct()")
     }
 
     fn torrent_tv(&self) -> TreeView {
-        self.imp().parts.borrow().torrent_tv.clone().unwrap()
+        self.parts().torrent_tv.clone()
     }
 
     /// The window's own keys, before the focus widget and the app's
@@ -237,7 +252,7 @@ impl MainWindow {
     /// torrent matches it
     fn update_no_results(&self) {
         let imp = self.imp();
-        let Some(tv) = imp.parts.borrow().torrent_tv.clone() else { return };
+        let Some(tv) = imp.parts.get().map(|p| &p.torrent_tv) else { return };
         let none = !imp.filter_entry.text().is_empty()
             && tv.selection().n_items() == 0
             && self.client().is_connected();
@@ -287,19 +302,19 @@ impl MainWindow {
     }
 
     fn torrent_model(&self) -> TorrentModel {
-        self.imp().parts.borrow().torrent_model.clone().unwrap()
+        self.parts().torrent_model.clone()
     }
 
-    fn toolbar(&self) -> Toolbar {
-        self.imp().parts.borrow().toolbar.clone().unwrap()
+    fn toolbar(&self) -> &Toolbar {
+        &self.parts().toolbar
     }
 
-    fn menu_bar(&self) -> Rc<MenuBar> {
-        self.imp().parts.borrow().menu_bar.clone().unwrap()
+    fn menu_bar(&self) -> &MenuBar {
+        &self.parts().menu_bar
     }
 
     pub fn state_selector(&self) -> StateSelector {
-        self.imp().parts.borrow().state_selector.clone().unwrap()
+        self.parts().state_selector.clone()
     }
 
     pub fn status_bar(&self) -> StatusBar {
@@ -325,17 +340,12 @@ impl MainWindow {
 
         match data {
             Some((t, item)) => {
-                let parts = self.imp().parts.borrow();
+                let details = &self.parts().details;
                 self.menu_bar().torrent_actions_sensitive(true);
                 self.imp().gen_details.update(&t, &item);
-                parts.trackers_model.as_ref().unwrap().update(serial, &t, mode);
-                parts.files_model.as_ref().unwrap().update(&t, mode);
-                parts.peers_model.as_ref().unwrap().update(
-                    parts.peers_tv.as_ref().unwrap(),
-                    serial,
-                    &t,
-                    mode,
-                );
+                details.trackers_model.update(serial, &t, mode);
+                details.files_model.update(&t, mode);
+                details.peers_model.update(&details.peers_tv, serial, &t, mode);
             }
             None => self.torrent_scrub(),
         }
@@ -383,13 +393,9 @@ impl MainWindow {
         let states_pos = if dragged { pos } else { 0 };
         prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, Scope::Global);
 
-        {
-            let parts = imp.parts.borrow();
-            let flags = PERSIST_SORT | PERSIST_LAYOUT;
-            parts.peers_tv.as_ref().unwrap().persist(flags);
-            parts.files_view.as_ref().unwrap().tv.persist(flags);
-            parts.torrent_tv.as_ref().unwrap().persist(flags);
-            parts.trackers_view.as_ref().unwrap().tv.persist(flags);
+        let parts = self.parts();
+        for tv in parts.details.views().into_iter().chain([&parts.torrent_tv]) {
+            tv.persist(PERSIST_SORT | PERSIST_LAYOUT);
         }
         prefs.save();
 
@@ -637,29 +643,27 @@ impl MainWindow {
         });
     }
 
-    fn notebook_fill(&self) {
+    /// The lists of the torrent details, in the notebook
+    fn details_new(&self) -> Details {
         let client = self.client();
         let notebook = &self.imp().notebook;
+        let page = |child: &TreeView, title: &str| {
+            notebook.append_page(child, Some(&gtk::Label::new(Some(title))));
+        };
 
         let trackers_model = TrackersModel::new();
         let trackers_view = TrackersView::new(&trackers_model, &client, self, None);
-        notebook.append_page(&trackers_view.tv, Some(&gtk::Label::new(Some(&tr("Trackers")))));
+        page(&trackers_view.tv, &tr("Trackers"));
 
         let files_model = FilesModel::new();
         let files_view = FilesView::new(&files_model, self, &client, None);
-        notebook.append_page(&files_view.tv, Some(&gtk::Label::new(Some(&tr("Files")))));
+        page(&files_view.tv, &tr("Files"));
 
         let peers_model = PeersModel::new();
         let peers_tv = peers::peers_tree_view_new(client.prefs(), &peers_model, None);
-        notebook.append_page(&peers_tv, Some(&gtk::Label::new(Some(&tr("Peers")))));
+        page(&peers_tv, &tr("Peers"));
 
-        let mut parts = self.imp().parts.borrow_mut();
-        parts.trackers_model = Some(trackers_model);
-        parts.trackers_view = Some(trackers_view);
-        parts.files_model = Some(files_model);
-        parts.files_view = Some(files_view);
-        parts.peers_model = Some(peers_model);
-        parts.peers_tv = Some(peers_tv);
+        Details { trackers_model, trackers_view, files_model, files_view, peers_model, peers_tv }
     }
 
     fn start_session_timer(&self) {
@@ -797,10 +801,8 @@ impl MainWindow {
 
         // The filter and sorter don't watch the items, so the values they
         // look at may have changed.
-        if (imp.filter_criteria.get() != 0 || imp.filter_text.borrow().is_some())
-            && let Some(f) = imp.parts.borrow().torrent_filter.as_ref()
-        {
-            f.changed(gtk::FilterChange::Different);
+        if imp.filter_criteria.get() != 0 || imp.filter_text.borrow().is_some() {
+            self.parts().torrent_filter.changed(gtk::FilterChange::Different);
         }
         self.torrent_tv().resort();
 
@@ -864,7 +866,8 @@ impl MainWindow {
     /// The state selector or filter entry changed
     fn refilter(&self) {
         let imp = self.imp();
-        let Some(selector) = imp.parts.borrow().state_selector.clone() else { return };
+        let Some(parts) = imp.parts.get() else { return };
+        let selector = &parts.state_selector;
         let text = imp.filter_entry.text();
 
         imp.filter_criteria.set(selector.flag());
@@ -877,9 +880,7 @@ impl MainWindow {
         *imp.filter_text.borrow_mut() =
             (!text.is_empty()).then(|| glib::casefold(&text).to_string());
 
-        if let Some(f) = imp.parts.borrow().torrent_filter.as_ref() {
-            f.changed(gtk::FilterChange::Different);
-        }
+        parts.torrent_filter.changed(gtk::FilterChange::Different);
         self.update_no_results();
     }
 
@@ -911,14 +912,11 @@ impl MainWindow {
 
     fn torrent_scrub(&self) {
         let imp = self.imp();
-        {
-            let parts = imp.parts.borrow();
-            parts.files_model.as_ref().unwrap().clear();
-            let trackers = parts.trackers_model.as_ref().unwrap();
-            trackers.clear();
-            parts.peers_model.as_ref().unwrap().clear();
-            trackers.set_no_selection();
-        }
+        let details = &self.parts().details;
+        details.files_model.clear();
+        details.trackers_model.clear();
+        details.peers_model.clear();
+        details.trackers_model.set_no_selection();
         imp.gen_details.clear();
         self.menu_bar().torrent_actions_sensitive(false);
     }
@@ -930,12 +928,9 @@ impl MainWindow {
         // connecting succeeded, or was stopped
         imp.connecting.set(false);
 
-        {
-            let parts = imp.parts.borrow();
-            parts.torrent_tv.as_ref().unwrap().set_sensitive(connected);
-            parts.peers_tv.as_ref().unwrap().set_sensitive(connected);
-            parts.files_view.as_ref().unwrap().tv.set_sensitive(connected);
-            parts.trackers_view.as_ref().unwrap().tv.set_sensitive(connected);
+        let parts = self.parts();
+        for tv in parts.details.views().into_iter().chain([&parts.torrent_tv]) {
+            tv.set_sensitive(connected);
         }
         imp.gen_details.set_sensitive(connected);
 
@@ -1073,13 +1068,8 @@ impl MainWindow {
         });
     }
 
-    fn menu_bar_new(&self) -> Rc<MenuBar> {
-        // Everything the menus and toolbar can do is a "win." action.
-        self.add_actions();
-
-        // This also adds the stateful view actions (check/radio items).
-        let mb = Rc::new(MenuBar::new(self, self.client().prefs(), &self.torrent_tv()));
-
+    /// The view actions (made by the menu bar) show and hide the parts
+    fn connect_view_actions(&self) {
         self.action_notify("view-notebook", |w, _, active| w.imp().notebook.set_visible(active));
         self.action_notify("filter-dirs", |w, enabled, active| {
             if enabled {
@@ -1097,8 +1087,6 @@ impl MainWindow {
             }
         });
         self.action_notify("view-states", |w, _, active| w.state_selector().set_visible(active));
-
-        mb
     }
 
     fn set_limit(
@@ -1347,12 +1335,28 @@ impl MainWindow {
         let filtered = gtk::FilterListModel::new(Some(model.store()), Some(filter.clone()));
 
         let tv = torrent_view::torrent_tree_view_new(&client, &filtered);
-        {
-            let mut parts = imp.parts.borrow_mut();
-            parts.torrent_model = Some(model.clone());
-            parts.torrent_filter = Some(filter);
-            parts.torrent_tv = Some(tv.clone());
+        let selector = StateSelector::new(&client, &model);
+        let details = self.details_new();
+
+        // Everything the menus and toolbar can do is a "win." action. The menu
+        // bar adds the stateful view actions (check and radio items).
+        self.add_actions();
+        let menu_bar = MenuBar::new(self, &prefs, &tv);
+        let toolbar = Toolbar::new(&prefs);
+
+        let parts = Parts {
+            torrent_model: model.clone(),
+            torrent_tv: tv.clone(),
+            torrent_filter: filter,
+            toolbar: toolbar.clone(),
+            menu_bar,
+            state_selector: selector.clone(),
+            details,
+        };
+        if imp.parts.set(parts).is_err() {
+            unreachable!("a window is constructed once");
         }
+        self.connect_view_actions();
 
         let selection = tv.selection();
         let weak = self.downgrade();
@@ -1387,25 +1391,16 @@ impl MainWindow {
             }
         });
 
-        // The parts the menu bar's actions need
-        let selector = StateSelector::new(&client, &model);
-        imp.parts.borrow_mut().state_selector = Some(selector.clone());
-        self.notebook_fill();
-
         // The menu is a GMenuModel, shown here with a GtkPopoverMenuBar, or in
         // the macOS menu bar (see app.rs).
-        let mb = self.menu_bar_new();
         if util::is_macos() {
             imp.menu_bar.set_visible(false);
         } else {
-            imp.menu_bar.set_menu_model(Some(&mb.model()));
+            imp.menu_bar.set_menu_model(Some(&self.menu_bar().model()));
         }
-        imp.parts.borrow_mut().menu_bar = Some(mb);
 
-        let toolbar = Toolbar::new(&prefs);
         toolbar.set_hexpand(true);
         imp.toolbar_box.prepend(&toolbar);
-        imp.parts.borrow_mut().toolbar = Some(toolbar);
 
         imp.hpaned.set_start_child(Some(&selector));
         imp.torrent_overlay.set_child(Some(&tv));
@@ -1450,12 +1445,8 @@ impl MainWindow {
         self.refilter();
 
         // the lists are enabled once connected (conn_changed)
-        {
-            let parts = imp.parts.borrow();
+        for tv in self.parts().details.views().into_iter().chain([&tv]) {
             tv.set_sensitive(false);
-            parts.peers_tv.as_ref().unwrap().set_sensitive(false);
-            parts.files_view.as_ref().unwrap().tv.set_sensitive(false);
-            parts.trackers_view.as_ref().unwrap().tv.set_sensitive(false);
         }
 
         imp.status_bar.set_client(self, &client);
