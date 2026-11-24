@@ -44,9 +44,10 @@ is left to do, in the recommended order. Work happens on the
   signals the window follows (`connection-changed`, `torrents-updated`,
   `request-failed`, `status-message`).
 - `src/rpc/` — JSON-RPC 2.0 over libsoup. `src/protocol/` — method names,
-  request keys and builders (`mod.rs`), the typed torrent (`torrent.rs`).
-- `src/json.rs` — the lenient `get_i64()`-style getters, still used for the
-  session, the preferences and a few small results.
+  request keys, builders and small results (`mod.rs`), the typed torrent
+  (`torrent.rs`) and session (`session.rs`).
+- `src/json.rs` — the lenient `get_i64()`-style getters, for the preferences
+  file and `JsonWidgets`.
 - `src/item.rs` — the untyped column `Item`. `src/torrent_model.rs`,
   `src/files.rs`, `src/peers.rs`, `src/trackers.rs`, `src/state_selector.rs`
   — models of Items with `COL_*` constants.
@@ -66,44 +67,18 @@ tree in `FilesModel` (building, directories combining wanted/priority,
 renames), `AddOptions::request` and `shorten_download_dir` have no tests.
 They're nearly pure functions over data and would protect steps 3 and 4.
 
-### 2. Typed protocol data instead of JSON lookups — in progress
+### 2. Typed protocol data instead of JSON lookups — done
 
-Done: `Torrent` (with `PeersFrom`, `Peer`, `File`, `TrackerStat`) in
-`src/protocol/torrent.rs`; the torrent_get fields are derived from the
-struct (`torrent_fields()`); `AddedTorrent` for torrent_add results.
-
-Remaining:
-
-a. **Small results** — `session_stats` (`current_stats`,
-   `cumulative_stats`: `uploaded_bytes`, `downloaded_bytes`, `files_added`,
-   `session_count`, `seconds_active`; read in `src/dialogs/stats.rs`),
-   `port_test` (`port_is_open`, in `remote_prefs.rs`), `free_space`
-   (`size_bytes`, in `client/mod.rs`) and `blocklist_update`
-   (`blocklist_size`). Small `#[derive(Deserialize)] #[serde(default)]`
-   structs next to their request builders in `protocol/mod.rs`; drop the
-   `STATS_*` and similar key constants that become unused.
-
-b. **Session** — `Client::session` is a JSON object read with `get_*` in
-   `client/mod.rs`, `status_bar.rs`, `main_window.rs`,
-   `torrent_model.rs::shorten_download_dir`, `dialogs/destination_combo.rs`,
-   `dialogs/add.rs`, `dialogs/add_url.rs`, `torrent_view.rs` (seed ratio
-   limit) and `dialogs/remote_prefs.rs`. Make a `Session` struct whose fields
-   are the keys asked for (derive the session_get field list from it like
-   `torrent_fields()`, replacing `SESSION_GET_FIELDS` and most `SGET_*`
-   constants). Notes:
-   - `download_dir_free_space` isn't asked for; the client fills it in from
-     `free_space` (see `Client::set_session` and `update_session_after`).
-     Make it a client-side field (e.g. `Option<i64>` on the client or a
-     `#[serde(skip)]` field) rather than inserting into JSON.
-   - Optional fields decide what the remote preferences dialog shows
-     (queues, `cache_size_mib`, `blocklist_url`, `preferred_transports`,
-     `sequential_download`): use `Option<…>`.
-   - `remote_prefs.rs` loads its widgets by key with `JsonWidgets` and saves
-     them into the session_set params by the same keys. Keep that binding,
-     loading from `session.to_obj()` as `props.rs` does with
-     `Torrent::to_obj()`, or replace `JsonWidgets` with explicit typed
-     load/save if that reads better.
-   - Do the wire check against a real daemon before committing.
+`Torrent` (with `PeersFrom`, `Peer`, `File`, `TrackerStat`) in
+`src/protocol/torrent.rs` and `Session` in `src/protocol/session.rs`; the
+fields of torrent_get and session_get are derived from the structs
+(`torrent_fields()`, `session_fields()`). The small results are
+`SessionStats`, `PortTest`, `BlocklistUpdate`, `AddedTorrent` and a private
+`FreeSpace`, parsed with `protocol::parse()`. Each was wire-checked against
+Transmission 4.1.4. What's left in `src/json.rs` serves the preferences file
+(profiles, destinations, custom headers) and `JsonWidgets`, which binds
+dialog widgets to request keys (loaded from `Torrent::to_obj()` and
+`Session::to_obj()`).
 
 ### 3. Typed list items instead of the column store — the biggest gain
 
@@ -195,9 +170,11 @@ can stay in the window.
 
 These commits were not clicked through (the check was stopped early):
 the connection refactor (`client/connection.rs`), the First Tracker column
-and torrent row status fixes, `DetailLists`, and the typed `Torrent`. Worth
+and torrent row status fixes, `DetailLists`, and the typed `Torrent`,
+`Session` and small results. Worth
 a subagent UI pass: connect/disconnect/reconnect, failures while connected
 (stop the daemon) and while connecting (bad port), periodic updates, the
-torrent context menu's limits and priority, remote preferences, removing
+torrent context menu's limits and priority, remote preferences (every
+field loads and saves; the free space and the statistics show), removing
 and adding torrents, the details pages and the properties dialog, the
 First Tracker column and the sidebar's tracker filter.
