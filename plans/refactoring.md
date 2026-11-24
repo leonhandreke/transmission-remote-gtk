@@ -48,13 +48,13 @@ is left to do, in the recommended order. Work happens on the
   (`torrent.rs`) and session (`session.rs`).
 - `src/json.rs` — the lenient `get_i64()`-style getters, for the preferences
   file and `JsonWidgets`.
-- `src/item.rs` — the untyped column `Item`, still used by
-  `src/torrent_model.rs` (with `COL_*` constants) and the preferences' lists
-  (`PersistentTreeView` in `dialogs/preferences.rs`). The other models are
-  GObjects with properties: `StateRow` (`state_selector.rs`), `PeerObject`
-  (`peers.rs`), `TrackerObject` (`trackers.rs`), `FileObject` (`files.rs`).
+- The list models hold GObjects with properties: `TorrentObject`
+  (`torrent_object.rs`, in the `TorrentModel` of `torrent_model.rs`),
+  `StateRow` (`state_selector.rs`), `PeerObject` (`peers.rs`),
+  `TrackerObject` (`trackers.rs`), `FileObject` (`files.rs`) and
+  `PersistentRow` (the preferences' lists, `dialogs/preferences.rs`).
 - `src/tree_view.rs` — a GtkTreeView-like widget on GtkColumnView; its
-  columns read an Item column or an object property (`Source`).
+  columns show a property of the row objects.
 - `src/util.rs` — also the list helpers for any object type:
   `objects::<T>(model)`, `remove_where::<T>(store, stale)`, and
   `set_changed(obj, property, value)`.
@@ -86,88 +86,74 @@ Transmission 4.1.4. What's left in `src/json.rs` serves the preferences file
 dialog widgets to request keys (loaded from `Torrent::to_obj()` and
 `Session::to_obj()`).
 
-### 3. Typed list items instead of the column store — the biggest gain
+### 3. Typed list items instead of the column store — done
 
-`Item` copies GTK 3's GtkListStore: a `Vec<Val>` of any types, `COL_*`
-index constants (45 for a torrent), `item.int64(COL_X)` reads, a
-`column-changed::cN` signal per column, and `TreeView` columns registered
-by model column index (`reg_column(ColType, COL_X as i32, …)`), with sorting
-by column index (`Item::compare`) and type-ahead by column.
-
-Replace it with GObjects with properties (`#[derive(glib::Properties)]`):
-`TorrentObject` (holding `Rc<Torrent>` plus the derived values: flags,
-status text, icon, shortened directory, first tracker host, peer sources,
-update serial), `PeerObject`, `TrackerObject`, `FileObject` (with children
-and parent for the tree), and the state selector's row. Then:
-
-- views bind cells to properties (or `notify::<prop>`) instead of
-  `connect_column_changed(COL_X)`;
-- `TreeView` columns are registered with a property name (or a getter
-  closure) and a sort key, instead of a model column index;
-- `Val`, `new_*_item()`, `RowValues` in `torrent_view.rs`, `TorrentItemExt`
-  and most `COL_*` constants go away.
-
-Do it one model at a time, smallest first: state selector rows, peers,
-trackers, files, and the torrents last.
-
-**Progress:** done: the state selector's rows (`StateRow`), `TreeView`
-reading columns from properties, the peers (`PeerObject`), the trackers
-(`TrackerObject`, with the editable announce URL) and the files tree
-(`FileObject`, also in the add dialog and the rename dialog). Left: the
-torrents (below), and the preferences' lists (`PersistentTreeView`: two
-editable string columns of Items, whose keys come from the dialog; small,
-could be a GObject with two string properties or stay on Items until the
-torrents are done, then `Item` goes).
+`Item` (`src/item.rs`) copied GTK 3's GtkListStore: a `Vec<Val>` of any
+types, `COL_*` index constants (45 for a torrent), `item.int64(COL_X)`
+reads, a `column-changed::cN` signal per column, and `TreeView` columns
+registered by model column index. It's gone; every list model holds
+GObjects with properties (see "Where things are"), and `TreeView` columns
+show a property.
 
 How `TreeView` works now (`src/tree_view.rs`):
 
-- A column's value and its extra (icon name, file ID) come from a
-  `Source`: `Column(usize)` of an `Item` or `Property(&'static str)` of the
-  row object, read as a `Val` (`Val::from_value()` converts strings, i64,
-  i32, u32, f64 and bools). The cells watch `column-changed::cN` or
-  `notify::<name>`. `reg_column()` registers an Item column,
-  `reg_property(ctype, key, property, header, id, flags)` a property one;
-  `set_extra()` and `set_search_column()` take either (a `usize` or a
-  `&'static str`).
+- `reg_property(ctype, key, property, header, id, flags)` registers a
+  column showing a property of the row objects; `set_extra()` (the icon
+  name, the file ID) and `set_search_column()` take property names too.
+  The cells read the property (as a private `Val`: strings, i64, i32, u32,
+  f64, bools) and watch `notify::<name>`.
 - Each column has a numeric `key`, which is what the sort column is saved
-  as (`KEY_TV_SORT_COL`) and the target of the sort menu's actions. For
-  property columns it's the model column index they had as Items (written
-  as numbers at the `reg_property()` calls, see "the keys are the model
-  columns…"), so saved sort settings keep their meaning. A saved key that
-  isn't registered sorts by that column of Items, as before.
+  as (`KEY_TV_SORT_COL`) and the target of the sort menu's actions. It's the
+  model column index the column had as Items (written as numbers at the
+  `reg_property()` calls), so saved sort settings keep their meaning. A
+  saved key that isn't registered doesn't sort (with Items it sorted by
+  that model column, but no menu offered such a key).
+- Sorting compares the two rows' property values, unless the column has a
+  typed compare function (`ColumnDesc::set_compare::<T>()`), which the
+  torrent columns have (see below). `SortKey` compares i64, u32, f64 and
+  strings (by collation) like the cells' values.
 - Rows are `glib::Object`s in the API: `selected_items::<T>()`,
   `first_selected::<T>()`, `select_item()`, `item_at()`, `start_editing()`;
   `set_activate()` and `set_edit()` take closures over `&T`.
-  `tree_view::row_object()` unwraps a `GtkTreeListRow`.
-- The cell to start editing once it's shown is kept in the view
-  (`imp::TreeView::start_edit`: a weak row object and column), not in the
-  row.
-- `is_column_showing()` takes the column's string ID.
+  `tree_view::row_object()` unwraps a `GtkTreeListRow`. The cell to start
+  editing once it's shown is kept in the view (`imp::TreeView::start_edit`).
 
 Setting a GObject property notifies even if the value doesn't change
 (`Item::set` didn't), so the models set values with `util::set_changed()`,
 which compares first; otherwise every update would refresh every bound
 cell. Bookkeeping properties nobody shows (`serial`) use the plain setters.
 
-**Next: the torrents.** `TorrentObject`, holding the `Rc<Torrent>` plus the
-derived values (flags, status text, icon, shortened directory, first
-tracker host, peer sources, update serial) as properties. Then
-`torrent_view.rs`'s `reg_column()` calls become `reg_property()` with the
-`COL_*` values as keys, `TorrentRow` binds to the properties and
-`RowValues` goes, and the other users of `tm::COL_*` (about 75 places: the
-window's filter and `first_selected`, the properties dialog, the general
-panel, the state selector's counting, `TorrentItemExt`) read properties.
-Then `Item`, `Val::Torrent`, `Source::Column`, `reg_column()` and the Item
-fallback in `TreeView::sort_func` go (`Val` itself can stay as the cell
-value, or become a smaller enum). Sorting a property column reads both
-values with `property_value()` for each comparison (a string copy for text
-columns); fine for the details lists, but measure with a few thousand
-torrents, and give `ColumnDesc` a typed compare closure if it's slow.
+**The torrents** (`src/torrent_object.rs`): a `TorrentObject` holds the
+`Rc<Torrent>` of its last update and a `TorrentValues`, a plain struct of
+the values the views show (flags, status text, icon, percent done, ratio,
+seeders/leechers/downloads, peer sources, first tracker host, download
+directory and its short form, and the torrent fields the columns show).
+The `torrent_values!` macro defines the struct and makes each field a
+read-only property, so a value is listed once. `set_values()` notifies the
+properties that changed; the update sets the `serial` property last, which
+always notifies, and which `TorrentRow` (the Transmission styles) watches.
+Code that goes through all the torrents reads `obj.values()` and
+`obj.torrent()` directly, not the properties: the filter
+(`MainWindow::visible_func`), sorting, the stats, the sidebar's counting.
+`Client::find_torrent(id)` replaced `torrent_data()`.
 
-### 4. Split `tree_view.rs` (1,700 lines)
+Why typed sorting (measured in a throwaway test, release build, 5000
+objects, a full sort of about 65,000 comparisons): reading two properties
+per comparison took 17 ms for an i64 column and 39 ms for a string column,
+against 0.3 ms and 12 ms with Items; the typed compare functions take
+0.8 ms for an i64 column and 23 ms for a string one (the collation,
+`g_utf8_collate`, dominates; it did with Items too). Debug builds are 10
+to 20 times slower. The window resorts after every update, but the list
+is then mostly sorted, which GTK's sort (a timsort) handles in about n
+comparisons.
+`set_values()` for 5000 torrents takes about 3 ms (release). If sorting by
+name is ever too slow, compare collation keys (`g_utf8_collate_key`)
+cached in the values.
 
-After (or along with) step 3: separate the cell widgets (factories,
-editable labels, the wanted check box, the priority cell), the persistence
+### 4. Split `tree_view.rs` (1,800 lines) — next
+
+Separate the cell widgets (factories, editable labels, the wanted check
+box, the priority cell, with `Val` and its formatting), the persistence
 of column layout and sorting to the preferences, and type-to-search. The
 type-to-search is duplicated almost verbatim in `state_selector.rs`
 (`key_pressed`), as is presenting popovers in `size_allocate` (both
@@ -234,11 +220,34 @@ menu's limits and priority, the properties, remote preferences and
 statistics dialogs, adding (with "Apply to all") and removing torrents, the
 torrent rows' status and the First Tracker column.
 
-Not covered: the preferences' lists (destinations, custom headers: adding
-starts editing, Enter edits, up/down, delete), the peers list with real
-peers (type-ahead, host lookups), and a saved sort of the torrent and
-trackers lists. Check these after changing them, and after the torrents
-move off `Item`.
+Not covered: the peers list with real peers (type-ahead, host lookups).
+
+After the torrents and the preferences' lists moved off `Item` (commits
+2e1022d, 6362aaa, ff4eb7c), not clicked through yet; check:
+
+- the torrent list in the classic style: every column's values and
+  formats (sizes, speeds, ETA, ratio, dates, priority, queue position,
+  the hidden peer columns from the column menus), the Name column's status
+  icon, sorting by every column from the headers and the View > Sort menu,
+  ascending and descending, and that values updating re-sort the list;
+- a saved sort, column order and widths of the torrent list (from a build
+  before these commits too) surviving a restart;
+- the Transmission and compact styles: the status and progress texts for
+  downloading, seeding (with and without a ratio goal), paused, queued,
+  checking, errors (red) and metadata downloading; paused and queued rows
+  dimmed; the progress bars;
+- the sidebar: the state counts, the tracker and directory filters (and
+  their counts after adding/removing torrents, moving one, changing the
+  destinations' labels), and the search text, alone and combined;
+- the selection: the general panel (seeders, leechers, status), the
+  details lists, the properties dialog (its info page: status, ETA, last
+  activity, sizes, error), the move dialog's title, the remove dialogs'
+  name, the context menu's radio items, copying the magnet link;
+- the "torrent added" and "torrent completed" notifications;
+- the preferences' lists (destinations, custom headers): adding starts
+  editing the first column, Enter or a double click edits, editing both
+  columns, up/down, delete, and that OK saves them (also while a cell is
+  still being edited) and reopening shows them.
 
 Open observations from that pass, not investigated:
 
