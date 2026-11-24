@@ -1,6 +1,7 @@
-//! The files of a torrent as a tree. A directory (ID -1) has its children in a
-//! list store; its columns sum up (size, bytes completed, progress) or combine
-//! (wanted, priority: TR_PRI_MIXED if its files differ) those of its children.
+//! The files of a torrent as a tree of FileObjects. A directory (ID -1) has its
+//! children in a list store; its properties sum up (size, bytes completed,
+//! progress) or combine (wanted, priority: TR_PRI_MIXED if its files differ)
+//! those of its children.
 //!
 //! The view is used for the files of the selected torrent, and (locally) for
 //! the files of a torrent to add.
@@ -10,39 +11,92 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use gtk::prelude::*;
+use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 
 use crate::client::Client;
 use crate::i18n::tr;
-use crate::item::{self, Item, Val};
 use crate::main_window::MainWindow;
 use crate::prefs::Prefs;
 use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL, Torrent};
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{ColType, TreeView};
-use crate::util;
-
-pub const COL_NAME: usize = 0;
-pub const COL_SIZE: usize = 1;
-pub const COL_PROGRESS: usize = 2;
-pub const COL_ID: usize = 3;
-pub const COL_WANTED: usize = 4;
-pub const COL_PRIORITY: usize = 5;
-pub const COL_BYTESCOMPLETED: usize = 6;
+use crate::util::{self, set_changed};
 
 /// Build the tree in a thread for torrents with more files
 const CREATE_THREAD_IF_GT: usize = 600;
 
-fn new_file_item() -> Item {
-    Item::new(vec![
-        Val::Str(None),
-        Val::I64(0),
-        Val::F64(0.0),
-        Val::I64(0),
-        Val::I64(0),
-        Val::I64(0),
-        Val::I64(0),
-    ])
+/* A file or directory of the tree */
+
+mod imp {
+    use super::*;
+
+    #[derive(glib::Properties, Default)]
+    #[properties(wrapper_type = super::FileObject)]
+    pub struct FileObject {
+        /// The name, without the directories
+        #[property(get, set)]
+        pub name: RefCell<String>,
+        /// The index of the file, -1 for a directory
+        #[property(get, construct_only)]
+        pub id: Cell<i64>,
+        #[property(get, set)]
+        pub size: Cell<i64>,
+        #[property(get, set)]
+        pub bytes_completed: Cell<i64>,
+        /// In percent
+        #[property(get, set)]
+        pub progress: Cell<f64>,
+        /// 1 or 0, or TR_PRI_MIXED for a directory of both
+        #[property(get, set)]
+        pub wanted: Cell<i64>,
+        /// TR_PRI_*, TR_PRI_MIXED for a directory of several
+        #[property(get, set)]
+        pub priority: Cell<i64>,
+        /// The children of a directory
+        pub children: RefCell<Option<gio::ListStore>>,
+        /// The directory it's in (not a reference, the parent owns its
+        /// children)
+        pub parent: glib::WeakRef<super::FileObject>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for FileObject {
+        const NAME: &'static str = "TrgFileObject";
+        type Type = super::FileObject;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for FileObject {}
+}
+
+glib::wrapper! {
+    pub struct FileObject(ObjectSubclass<imp::FileObject>);
+}
+
+impl FileObject {
+    pub fn children(&self) -> Option<gio::ListStore> {
+        self.imp().children.borrow().clone()
+    }
+
+    fn child_objects(&self) -> Vec<FileObject> {
+        self.children().map(|c| util::objects(&c).collect()).unwrap_or_default()
+    }
+
+    pub fn parent(&self) -> Option<FileObject> {
+        self.imp().parent.upgrade()
+    }
+
+    /// The path, from the top
+    pub fn path(&self) -> String {
+        let mut path = self.name();
+        let mut parent = self.parent();
+        while let Some(p) = parent {
+            path = format!("{}/{path}", p.name());
+            parent = p.parent();
+        }
+        path
+    }
 }
 
 /// A node of a tree of files, built with simple data structures, which is
@@ -130,28 +184,18 @@ impl FileNode {
     }
 }
 
-/// The path of a file item, from the top
-pub fn file_item_path(item: &Item) -> String {
-    let mut path = item.string(COL_NAME).unwrap_or_default();
-    let mut parent = item.parent_item();
-    while let Some(p) = parent {
-        path = format!("{}/{path}", p.string(COL_NAME).unwrap_or_default());
-        parent = p.parent_item();
+/// Sums up or combines the properties of a directory's children
+fn update_dir(dir: &FileObject) {
+    if dir.children().is_none() {
+        return;
     }
-    path
-}
-
-/// Sums up or combines the columns of a directory's children
-fn update_dir(dir: &Item) {
-    let Some(children) = dir.children() else { return };
     let (mut size, mut completed) = (0, 0);
     let (mut wanted, mut priority) = (1, TR_PRI_NORMAL);
 
-    for (i, child) in item::items(&children).enumerate() {
-        let cw = child.int64(COL_WANTED);
-        let cp = child.int64(COL_PRIORITY);
-        size += child.int64(COL_SIZE);
-        completed += child.int64(COL_BYTESCOMPLETED);
+    for (i, child) in dir.child_objects().iter().enumerate() {
+        let (cw, cp) = (child.wanted(), child.priority());
+        size += child.size();
+        completed += child.bytes_completed();
         if i == 0 {
             wanted = cw;
             priority = cp;
@@ -165,54 +209,58 @@ fn update_dir(dir: &Item) {
         }
     }
 
-    dir.set(COL_SIZE, size);
-    dir.set(COL_BYTESCOMPLETED, completed);
-    dir.set(COL_PROGRESS, p::file_progress(size, completed));
-    dir.set(COL_WANTED, wanted);
-    dir.set(COL_PRIORITY, priority);
+    set_changed(dir, "size", size);
+    set_changed(dir, "bytes-completed", completed);
+    set_changed(dir, "progress", p::file_progress(size, completed));
+    set_changed(dir, "wanted", wanted);
+    set_changed(dir, "priority", priority);
 }
 
 /// Updates the directories of a subtree, the deepest first
-fn update_tree(item: &Item) {
-    let Some(children) = item.children() else { return };
-    for child in item::items(&children) {
+fn update_tree(file: &FileObject) {
+    if file.children().is_none() {
+        return;
+    }
+    for child in file.child_objects() {
         update_tree(&child);
     }
-    update_dir(item);
+    update_dir(file);
 }
 
-fn set_subtree(item: &Item, column: usize, value: i64) {
-    if let Some(children) = item.children() {
-        for child in item::items(&children) {
-            set_subtree(&child, column, value);
+/// Sets a property of a file, or of all of a directory, and updates the
+/// directories above
+fn set_property(file: &FileObject, name: &str, value: i64) {
+    fn set_subtree(file: &FileObject, name: &str, value: i64) {
+        for child in file.child_objects() {
+            set_subtree(&child, name, value);
         }
+        set_changed(file, name, value);
     }
-    item.set(column, value);
-}
-
-fn set_column(item: &Item, column: usize, value: i64) {
-    set_subtree(item, column, value);
-    let mut parent = item.parent_item();
+    set_subtree(file, name, value);
+    let mut parent = file.parent();
     while let Some(p) = parent {
         update_dir(&p);
-        parent = p.parent_item();
+        parent = p.parent();
     }
 }
 
-pub fn set_wanted(item: &Item, wanted: i64) {
-    set_column(item, COL_WANTED, wanted);
+/// What sets a property of files, set_wanted or set_priority
+pub type FileSetter = fn(&FileObject, i64);
+
+pub fn set_wanted(file: &FileObject, wanted: i64) {
+    set_property(file, "wanted", wanted);
 }
 
-pub fn set_priority(item: &Item, priority: i64) {
-    set_column(item, COL_PRIORITY, priority);
+pub fn set_priority(file: &FileObject, priority: i64) {
+    set_property(file, "priority", priority);
 }
 
 pub struct FilesModel {
     pub store: gio::ListStore,
     torrent_id: Cell<i64>,
     accept: Cell<bool>,
-    /// the file items by file index
-    files: RefCell<Vec<Option<glib::WeakRef<Item>>>>,
+    /// the files by their index
+    files: RefCell<Vec<Option<glib::WeakRef<FileObject>>>>,
     tree_model: RefCell<Option<gtk::TreeListModel>>,
     /// a tree being built in a thread
     build_id: Cell<u32>,
@@ -223,7 +271,7 @@ pub struct FilesModel {
 impl FilesModel {
     pub fn new() -> Rc<Self> {
         Rc::new(Self {
-            store: gio::ListStore::new::<Item>(),
+            store: gio::ListStore::new::<FileObject>(),
             torrent_id: Cell::new(-1),
             accept: Cell::new(true),
             files: Default::default(),
@@ -238,39 +286,41 @@ impl FilesModel {
         self.rebuilt.borrow_mut().push(Box::new(f));
     }
 
-    fn item_new(&self, parent: Option<&Item>, node: &FileNode, defaults: bool) -> Item {
-        let item = new_file_item();
-        item.set_parent_item(parent);
-        item.set(COL_NAME, node.name.clone());
-        item.set(COL_ID, if node.children.is_empty() { node.index } else { -1 });
-
-        if !node.children.is_empty() {
-            let children: Vec<Item> =
-                node.children.iter().map(|c| self.item_new(Some(&item), c, defaults)).collect();
-            let store = gio::ListStore::new::<Item>();
-            store.splice(0, 0, &children);
-            item.set_children(Some(store));
-        } else {
-            item.set(COL_SIZE, node.length);
-            if defaults {
-                item.set(COL_WANTED, 1i64);
-                item.set(COL_PRIORITY, TR_PRI_NORMAL);
+    fn file_new(&self, parent: Option<&FileObject>, node: &FileNode, defaults: bool) -> FileObject {
+        let is_dir = !node.children.is_empty();
+        let mut builder = glib::Object::builder::<FileObject>()
+            .property("name", node.name.clone().unwrap_or_default())
+            .property("id", if is_dir { -1 } else { node.index });
+        if !is_dir {
+            builder = builder.property("size", node.length);
+            builder = if defaults {
+                builder.property("wanted", 1i64).property("priority", TR_PRI_NORMAL)
             } else {
-                item.set(COL_BYTESCOMPLETED, node.bytes_completed);
-                item.set(COL_PROGRESS, p::file_progress(node.length, node.bytes_completed));
-                item.set(COL_WANTED, node.enabled);
-                item.set(COL_PRIORITY, node.priority);
-            }
-            if node.index >= 0 {
-                let mut files = self.files.borrow_mut();
-                let index = node.index as usize;
-                if index >= files.len() {
-                    files.resize(index + 1, None);
-                }
-                files[index] = Some(item.downgrade());
-            }
+                builder
+                    .property("bytes-completed", node.bytes_completed)
+                    .property("progress", p::file_progress(node.length, node.bytes_completed))
+                    .property("wanted", node.enabled)
+                    .property("priority", node.priority)
+            };
         }
-        item
+        let file = builder.build();
+        file.imp().parent.set(parent);
+
+        if is_dir {
+            let children: Vec<FileObject> =
+                node.children.iter().map(|c| self.file_new(Some(&file), c, defaults)).collect();
+            let store = gio::ListStore::new::<FileObject>();
+            store.splice(0, 0, &children);
+            *file.imp().children.borrow_mut() = Some(store);
+        } else if node.index >= 0 {
+            let mut files = self.files.borrow_mut();
+            let index = node.index as usize;
+            if index >= files.len() {
+                files.resize(index + 1, None);
+            }
+            files[index] = Some(file.downgrade());
+        }
+        file
     }
 
     fn remove_all(&self) {
@@ -289,16 +339,16 @@ impl FilesModel {
     /// single file)
     fn set_nodes(&self, top: &FileNode, defaults: bool) {
         self.remove_all();
-        let items: Vec<Item> = if top.name.is_some() {
-            vec![self.item_new(None, top, defaults)]
+        let files: Vec<FileObject> = if top.name.is_some() {
+            vec![self.file_new(None, top, defaults)]
         } else {
-            top.children.iter().map(|c| self.item_new(None, c, defaults)).collect()
+            top.children.iter().map(|c| self.file_new(None, c, defaults)).collect()
         };
-        for item in &items {
-            update_tree(item);
+        for file in &files {
+            update_tree(file);
         }
         // the top level in one go
-        self.store.splice(0, 0, &items);
+        self.store.splice(0, 0, &files);
         for f in self.rebuilt.borrow().iter() {
             f();
         }
@@ -320,7 +370,7 @@ impl FilesModel {
         self.files.borrow().len()
     }
 
-    pub fn file(&self, index: usize) -> Option<Item> {
+    pub fn file(&self, index: usize) -> Option<FileObject> {
         self.files.borrow().get(index).and_then(|f| f.as_ref()).and_then(|w| w.upgrade())
     }
 
@@ -333,37 +383,39 @@ impl FilesModel {
             .borrow_mut()
             .get_or_insert_with(|| {
                 gtk::TreeListModel::new(self.store.clone(), false, false, |obj| {
-                    obj.downcast_ref::<Item>().and_then(Item::children).map(|c| c.upcast())
+                    obj.downcast_ref::<FileObject>()
+                        .and_then(FileObject::children)
+                        .map(|c| c.upcast())
                 })
             })
             .clone()
     }
 
-    fn item_update(
+    fn file_update(
         &self,
-        item: &Item,
+        obj: &FileObject,
         file: &p::File,
         wanted: &[bool],
         priorities: &[i64],
         id: usize,
     ) {
         let (length, completed) = (file.length, file.bytes_completed);
-        item.set(COL_SIZE, length);
-        item.set(COL_PROGRESS, p::file_progress(length, completed));
-        item.set(COL_BYTESCOMPLETED, completed);
+        set_changed(obj, "size", length);
+        set_changed(obj, "progress", p::file_progress(length, completed));
+        set_changed(obj, "bytes-completed", completed);
 
         if self.accept.get() {
-            item.set(COL_WANTED, wanted.get(id).copied().unwrap_or(false) as i64);
-            item.set(COL_PRIORITY, priorities.get(id).copied().unwrap_or(0));
+            set_changed(obj, "wanted", wanted.get(id).copied().unwrap_or(false) as i64);
+            set_changed(obj, "priority", priorities.get(id).copied().unwrap_or(0));
 
             // the names (of the file and its directories) change on a rename
             let mut path: Vec<&str> = file.name.split('/').collect();
             if let Some(last) = path.pop() {
-                item.set(COL_NAME, last);
-                let mut parent = item.parent_item();
+                set_changed(obj, "name", last.to_string());
+                let mut parent = obj.parent();
                 while let (Some(p), Some(n)) = (parent.clone(), path.pop()) {
-                    p.set(COL_NAME, n);
-                    parent = p.parent_item();
+                    set_changed(&p, "name", n.to_string());
+                    parent = p.parent();
                 }
             }
         }
@@ -416,12 +468,12 @@ impl FilesModel {
             }
         } else {
             for (i, file) in files.iter().enumerate() {
-                if let Some(item) = self.file(i) {
-                    self.item_update(&item, file, wanted, priorities, i);
+                if let Some(obj) = self.file(i) {
+                    self.file_update(&obj, file, wanted, priorities, i);
                 }
             }
-            for item in item::items(&self.store) {
-                update_tree(&item);
+            for obj in util::objects(&self.store) {
+                update_tree(&obj);
             }
         }
     }
@@ -449,16 +501,15 @@ impl FilesView {
     ) -> Rc<Self> {
         let tv = TreeView::new(prefs, config_id);
 
-        tv.reg_column(ColType::FileIconText, COL_NAME as i32, &tr("Name"), "name", 0)
-            .set_extra(COL_ID);
-        tv.reg_column(ColType::Size, COL_SIZE as i32, &tr("Size"), "size", 0);
+        // the keys are the model columns the files had as Items
+        let reg = |t, key, p, h: &str, id: &str| tv.reg_property(t, key, p, h, id, 0);
+        reg(ColType::FileIconText, 0, "name", &tr("Name"), "name").set_extra("id");
+        reg(ColType::Size, 1, "size", &tr("Size"), "size");
         if progress {
-            tv.reg_column(ColType::Prog, COL_PROGRESS as i32, &tr("Progress"), "progress", 0);
+            reg(ColType::Prog, 2, "progress", &tr("Progress"), "progress");
         }
-        let wanted =
-            tv.reg_column(ColType::Wanted, COL_WANTED as i32, &tr("Download"), "wanted", 0);
-        let priority =
-            tv.reg_column(ColType::Prio, COL_PRIORITY as i32, &tr("Priority"), "priority", 0);
+        let wanted = reg(ColType::Wanted, 4, "wanted", &tr("Download"), "wanted");
+        let priority = reg(ColType::Prio, 5, "priority", &tr("Priority"), "priority");
 
         let view = Rc::new(Self {
             tv: tv.clone(),
@@ -469,9 +520,9 @@ impl FilesView {
 
         // A click on the Download check box toggles it
         let weak = Rc::downgrade(&view);
-        wanted.set_activate(move |_, item: &Item| {
+        wanted.set_activate(move |_, file: &FileObject| {
             // a mixed directory is skipped
-            set_wanted(item, (item.int64(COL_WANTED) == 0) as i64);
+            set_wanted(file, (file.wanted() == 0) as i64);
             if let Some(v) = weak.upgrade() {
                 v.files_changed();
             }
@@ -479,19 +530,19 @@ impl FilesView {
 
         // A click on the priority goes from normal to high to low
         let weak = Rc::downgrade(&view);
-        priority.set_activate(move |_, item: &Item| {
-            let next = match item.int64(COL_PRIORITY) {
+        priority.set_activate(move |_, file: &FileObject| {
+            let next = match file.priority() {
                 TR_PRI_NORMAL => TR_PRI_HIGH,
                 TR_PRI_HIGH => TR_PRI_LOW,
                 _ => TR_PRI_NORMAL,
             };
-            set_priority(item, next);
+            set_priority(file, next);
             if let Some(v) = weak.upgrade() {
                 v.files_changed();
             }
         });
 
-        tv.set_search_column(COL_NAME);
+        tv.set_search_column("name");
         tv.set_model(&model.tree_model());
         tv.setup_columns();
         tv.restore_sort();
@@ -562,14 +613,14 @@ impl FilesView {
         let mut req = p::torrent_set(&[model.torrent_id()]);
 
         for i in 0..model.n_files() {
-            let Some(item) = model.file(i) else { continue };
+            let Some(file) = model.file(i) else { continue };
             let i = i as i64;
-            if item.int64(COL_WANTED) != 0 {
+            if file.wanted() != 0 {
                 p::add_file_id_to_array(&mut req, p::FIELD_FILES_WANTED, i);
             } else {
                 p::add_file_id_to_array(&mut req, p::FIELD_FILES_UNWANTED, i);
             }
-            let key = match item.int64(COL_PRIORITY) {
+            let key = match file.priority() {
                 TR_PRI_LOW => p::FIELD_FILES_PRIORITY_LOW,
                 TR_PRI_HIGH => p::FIELD_FILES_PRIORITY_HIGH,
                 _ => p::FIELD_FILES_PRIORITY_NORMAL,
@@ -585,13 +636,11 @@ impl FilesView {
         self.send_updated_file_prefs();
     }
 
-    fn set_selected(self: &Rc<Self>, column: usize, value: i64) {
-        for item in self.tv.selected_items::<Item>() {
-            if column == COL_WANTED {
-                set_wanted(&item, value);
-            } else {
-                set_priority(&item, value);
-            }
+    /// Sets the wanted state or priority (with set_wanted or set_priority)
+    /// of the selected files
+    fn set_selected(self: &Rc<Self>, set: FileSetter, value: i64) {
+        for file in self.tv.selected_items::<FileObject>() {
+            set(&file, value);
         }
         self.files_changed();
     }
@@ -625,11 +674,11 @@ impl FilesView {
             n_selected == 1,
         );
         let sel = n_selected > 0;
-        add("priority-high", Box::new(|v| v.set_selected(COL_PRIORITY, TR_PRI_HIGH)), sel);
-        add("priority-normal", Box::new(|v| v.set_selected(COL_PRIORITY, TR_PRI_NORMAL)), sel);
-        add("priority-low", Box::new(|v| v.set_selected(COL_PRIORITY, TR_PRI_LOW)), sel);
-        add("wanted", Box::new(|v| v.set_selected(COL_WANTED, 1)), sel);
-        add("unwanted", Box::new(|v| v.set_selected(COL_WANTED, 0)), sel);
+        add("priority-high", Box::new(|v| v.set_selected(set_priority, TR_PRI_HIGH)), sel);
+        add("priority-normal", Box::new(|v| v.set_selected(set_priority, TR_PRI_NORMAL)), sel);
+        add("priority-low", Box::new(|v| v.set_selected(set_priority, TR_PRI_LOW)), sel);
+        add("wanted", Box::new(|v| v.set_selected(set_wanted, 1)), sel);
+        add("unwanted", Box::new(|v| v.set_selected(set_wanted, 0)), sel);
         add("expand-all", Box::new(|v| v.tv.expand_all()), true);
         add("collapse-all", Box::new(|v| v.tv.collapse_all()), true);
 

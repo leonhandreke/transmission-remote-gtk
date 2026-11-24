@@ -13,9 +13,8 @@ use crate::bencode;
 use crate::client::Client;
 use crate::dialogs::destination_combo::DestinationCombo;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
-use crate::files::{self, FilesModel, FilesView};
+use crate::files::{self, FileObject, FileSetter, FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
-use crate::item;
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_NORMAL};
@@ -155,12 +154,12 @@ pub fn add_dialog(win: &MainWindow, client: &Client) {
 }
 
 /// The choices of "Apply to all", the targets of the items of its menu
-const APPLY_ALL_CHOICES: &[(&str, usize, i64)] = &[
-    ("high", files::COL_PRIORITY, TR_PRI_HIGH),
-    ("normal", files::COL_PRIORITY, TR_PRI_NORMAL),
-    ("low", files::COL_PRIORITY, TR_PRI_LOW),
-    ("download", files::COL_WANTED, 1),
-    ("skip", files::COL_WANTED, 0),
+const APPLY_ALL_CHOICES: &[(&str, FileSetter, i64)] = &[
+    ("high", files::set_priority, TR_PRI_HIGH),
+    ("normal", files::set_priority, TR_PRI_NORMAL),
+    ("low", files::set_priority, TR_PRI_LOW),
+    ("download", files::set_wanted, 1),
+    ("skip", files::set_wanted, 0),
 ];
 
 #[gtk::template_callbacks]
@@ -258,15 +257,11 @@ impl TorrentAddDialog {
     }
 
     fn apply_all(&self, name: &str) {
-        let Some(&(_, column, value)) = APPLY_ALL_CHOICES.iter().find(|c| c.0 == name) else {
+        let Some(&(_, set, value)) = APPLY_ALL_CHOICES.iter().find(|c| c.0 == name) else {
             return;
         };
-        for item in item::items(&self.files_model().store) {
-            if column == files::COL_WANTED {
-                files::set_wanted(&item, value);
-            } else {
-                files::set_priority(&item, value);
-            }
+        for file in util::objects(&self.files_model().store) {
+            set(&file, value);
         }
         self.file_list().tv.resort();
     }
@@ -338,10 +333,8 @@ impl TorrentAddDialog {
             // The wanted state and priority of each file of the torrent
             let model = self.files_model();
             let files: Vec<_> = (0..model.n_files()).map(|i| model.file(i)).collect();
-            let wanted =
-                files.iter().map(|f| f.as_ref().is_some_and(|f| f.int64(files::COL_WANTED) != 0));
-            let priorities =
-                files.iter().map(|f| f.as_ref().map_or(0, |f| f.int64(files::COL_PRIORITY)));
+            let wanted = files.iter().map(|f| f.as_ref().is_some_and(|f| f.wanted() != 0));
+            let priorities = files.iter().map(|f| f.as_ref().map_or(0, FileObject::priority));
 
             let options = AddOptions {
                 paused: imp.paused_check.is_active(),
