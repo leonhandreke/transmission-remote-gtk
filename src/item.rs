@@ -1,19 +1,18 @@
-//! The items (rows) of the list models, like TrgItem in the C version: an
-//! item has a fixed number of columns, each holding a value of one type.
-//! Setting a column to a different value emits "column-changed" with the
-//! detail "cN" (N being the column), which the cells of the views watch.
+//! The items (rows) of the torrents model and the preferences' lists, like
+//! TrgItem in the C version: an item has a fixed number of columns, each
+//! holding a value of one type. Setting a column to a different value emits
+//! "column-changed" with the detail "cN" (N being the column), which the cells
+//! of the views watch. The other models have GObjects with properties.
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::rc::Rc;
 
-use gtk::gio;
 use gtk::glib;
 use gtk::glib::subclass::prelude::*;
 use gtk::prelude::*;
 
 use crate::protocol::Torrent;
-use crate::util;
 
 /// A value of a column
 #[derive(Clone, Debug, Default)]
@@ -189,11 +188,6 @@ mod imp {
     #[derive(Default)]
     pub struct Item {
         pub values: RefCell<Vec<Val>>,
-        /// The children of a row of a tree (a directory of the files)
-        pub children: RefCell<Option<gio::ListStore>>,
-        /// The parent of a row of a tree (not a reference, the parent owns
-        /// its children)
-        pub parent: glib::WeakRef<super::Item>,
     }
 
     #[glib::object_subclass]
@@ -227,10 +221,6 @@ impl Item {
         let item: Self = glib::Object::new();
         *item.imp().values.borrow_mut() = values;
         item
-    }
-
-    pub fn n_columns(&self) -> usize {
-        self.imp().values.borrow().len()
     }
 
     pub fn get(&self, column: usize) -> Val {
@@ -296,25 +286,4 @@ impl Item {
             None
         })
     }
-
-    pub fn children(&self) -> Option<gio::ListStore> {
-        self.imp().children.borrow().clone()
-    }
-
-    pub fn set_children(&self, children: Option<gio::ListStore>) {
-        *self.imp().children.borrow_mut() = children;
-    }
-
-    pub fn parent_item(&self) -> Option<Item> {
-        self.imp().parent.upgrade()
-    }
-
-    pub fn set_parent_item(&self, parent: Option<&Item>) {
-        self.imp().parent.set(parent);
-    }
-}
-
-/// The items of a list model
-pub fn items(model: &impl IsA<gio::ListModel>) -> impl Iterator<Item = Item> + '_ {
-    util::objects(model)
 }

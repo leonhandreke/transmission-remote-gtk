@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
-use crate::item::{self, Item, Val};
+use crate::item::{Item, Val};
 use crate::json::{get_str, objects};
 use crate::macos;
 use crate::main_window::MainWindow;
@@ -267,7 +267,7 @@ impl PersistentTreeView {
         // keep an entry that is still being edited, like when OK is clicked
         self.tv.stop_editing();
         let columns = self.columns.borrow();
-        let entries: Vec<Value> = item::items(&self.store)
+        let entries: Vec<Value> = util::objects::<Item>(&self.store)
             .map(|item| {
                 let mut obj = serde_json::Map::new();
                 for c in columns.iter() {

@@ -10,7 +10,7 @@ use gtk::{gdk, gio, glib};
 
 use crate::client::Client;
 use crate::i18n::tr;
-use crate::item;
+use crate::item::Item;
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol as p;
 use crate::torrent_model::{self as tm, Stats, TorrentItemExt, TorrentModel};
@@ -75,11 +75,6 @@ impl StateRow {
     fn is_dynamic(&self) -> bool {
         matches!(self.filter(), FILTER_FLAG_DIR | FILTER_FLAG_TRACKER)
     }
-}
-
-/// The rows of a list model
-fn rows(model: &impl IsA<gio::ListModel>) -> impl Iterator<Item = StateRow> + '_ {
-    (0..model.n_items()).filter_map(move |i| model.item(i).and_downcast::<StateRow>())
 }
 
 #[derive(Default)]
@@ -335,7 +330,7 @@ impl StateSelector {
         let model = client.torrent_model();
         let n_cat = imp.n_categories.get() as usize;
 
-        for torrent in item::items(&model.store()) {
+        for torrent in util::objects::<Item>(&model.store()) {
             let Some(t) = torrent.torrent() else { continue };
 
             if update_trackers {
@@ -571,8 +566,8 @@ impl StateSelector {
         imp.search.borrow_mut().push(c);
         let needle = glib::casefold(imp.search.borrow().as_str()).to_string();
 
-        let found =
-            rows(&imp.selection).position(|r| glib::casefold(r.name()).starts_with(&needle));
+        let found = util::objects::<StateRow>(&imp.selection)
+            .position(|r| glib::casefold(r.name()).starts_with(&needle));
         if let Some(i) = found {
             self.select(i as u32);
         }

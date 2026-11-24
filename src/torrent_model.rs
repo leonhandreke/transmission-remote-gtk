@@ -24,7 +24,7 @@ use gtk::prelude::*;
 
 use crate::client::Client;
 use crate::i18n::tr;
-use crate::item::{self, Item, Val};
+use crate::item::{Item, Val};
 use crate::json::{Obj, get_str, objects};
 use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, Torrent};
@@ -296,7 +296,7 @@ impl TorrentModel {
     }
 
     pub fn reload_dir_aliases(&self, client: &Client) {
-        for item in item::items(&self.imp().store) {
+        for item in util::objects::<Item>(&self.imp().store) {
             let dir = item.string(COL_DOWNLOADDIR).unwrap_or_default();
             item.set(COL_DOWNLOADDIR_SHORT, shorten_download_dir(client, &dir));
         }
@@ -308,7 +308,7 @@ impl TorrentModel {
         let (down_rate, up_rate) = (stats.down_rate_total, stats.up_rate_total);
         *stats = Stats { down_rate_total: down_rate, up_rate_total: up_rate, ..Default::default() };
 
-        for item in item::items(&self.imp().store) {
+        for item in util::objects::<Item>(&self.imp().store) {
             let flags = item.uint(COL_FLAGS);
             if flags & p::TORRENT_FLAG_SEEDING != 0 {
                 stats.seeding += 1;
