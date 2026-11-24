@@ -214,6 +214,52 @@ pub fn scrolled_window(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
         .build()
 }
 
+/// The items (of type T) of a list model
+pub fn objects<T: IsA<glib::Object>>(
+    model: &impl IsA<gio::ListModel>,
+) -> impl Iterator<Item = T> + '_ {
+    (0..model.n_items()).filter_map(move |i| model.item(i).and_downcast::<T>())
+}
+
+/// Removes the items (of type T) for which stale is true, in runs from the
+/// end, so it's linear in the number of items. Returns how many were removed.
+pub fn remove_where<T: IsA<glib::Object>>(
+    store: &gio::ListStore,
+    mut stale: impl FnMut(&T) -> bool,
+) -> u32 {
+    let mut removed = 0;
+    let mut i = store.n_items();
+    while i > 0 {
+        let end = i;
+        while i > 0 {
+            let item = store.item(i - 1).and_downcast::<T>().unwrap();
+            if !stale(&item) {
+                break;
+            }
+            i -= 1;
+        }
+        if i < end {
+            store.splice(i, end - i, &[] as &[glib::Object]);
+            removed += end - i;
+        } else {
+            i -= 1;
+        }
+    }
+    removed
+}
+
+/// Sets a property of obj, notifying only if its value changes (setting a
+/// property notifies even if it doesn't), so the cells showing it don't
+/// refresh for nothing
+pub fn set_changed<V>(obj: &impl IsA<glib::Object>, name: &str, value: V)
+where
+    V: Into<glib::Value> + PartialEq + for<'a> glib::value::FromValue<'a> + 'static,
+{
+    if obj.property::<V>(name) != value {
+        obj.set_property(name, value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

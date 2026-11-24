@@ -13,6 +13,7 @@ use gtk::glib::subclass::prelude::*;
 use gtk::prelude::*;
 
 use crate::protocol::Torrent;
+use crate::util;
 
 /// A value of a column
 #[derive(Clone, Debug, Default)]
@@ -315,37 +316,13 @@ impl Item {
 
 /// The items of a list model
 pub fn items(model: &impl IsA<gio::ListModel>) -> impl Iterator<Item = Item> + '_ {
-    let n = model.n_items();
-    (0..n).filter_map(move |i| model.item(i).and_downcast::<Item>())
+    util::objects(model)
 }
 
-/// Removes the items whose serial column isn't current_serial, in runs, so
-/// it's linear in the number of items. Returns how many were removed.
+/// Removes the items whose serial column isn't current_serial. Returns how
+/// many were removed.
 pub fn remove_removed(store: &gio::ListStore, serial_column: usize, current_serial: i64) -> u32 {
-    remove_where(store, |item| item.int64(serial_column) != current_serial)
-}
-
-/// Removes the items for which stale is true, in runs from the end
-pub fn remove_where(store: &gio::ListStore, mut stale: impl FnMut(&Item) -> bool) -> u32 {
-    let mut removed = 0;
-    let mut i = store.n_items();
-    while i > 0 {
-        let end = i;
-        while i > 0 {
-            let item = store.item(i - 1).and_downcast::<Item>().unwrap();
-            if !stale(&item) {
-                break;
-            }
-            i -= 1;
-        }
-        if i < end {
-            store.splice(i, end - i, &[] as &[glib::Object]);
-            removed += end - i;
-        } else {
-            i -= 1;
-        }
-    }
-    removed
+    util::remove_where(store, |item: &Item| item.int64(serial_column) != current_serial)
 }
 
 /// The first item whose (integer) column is id, and its position

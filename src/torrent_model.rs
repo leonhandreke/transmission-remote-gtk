@@ -470,7 +470,7 @@ impl TorrentModel {
     /// and if serial isn't -1, those which weren't updated with it.
     fn remove_stale(&self, serial: i64) -> bool {
         let ht = &self.imp().ht;
-        item::remove_where(&self.imp().store, |item| {
+        util::remove_where(&self.imp().store, |item: &Item| {
             let s = item.int64(COL_UPDATESERIAL);
             let stale = !(s != -1 && (serial == -1 || s == serial));
             if stale {

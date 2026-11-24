@@ -1,53 +1,85 @@
 //! The peers of the selected torrent, updated by IP. The host names are looked
 //! up asynchronously if the column is showing.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use gtk::gio;
 use gtk::prelude::*;
+use gtk::subclass::prelude::*;
+use gtk::{gio, glib};
 
 use crate::i18n::tr;
-use crate::item::{self, Item, Val};
 use crate::prefs::Prefs;
 use crate::protocol::Torrent;
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{ColType, TreeView};
+use crate::util::{self, set_changed};
 
-pub const COL_ICON: usize = 0;
-pub const COL_IP: usize = 1;
-pub const COL_HOST: usize = 2;
-pub const COL_FLAGS: usize = 3;
-pub const COL_PROGRESS: usize = 4;
-pub const COL_DOWNSPEED: usize = 5;
-pub const COL_UPSPEED: usize = 6;
-pub const COL_CLIENT: usize = 7;
-pub const COL_UPDATESERIAL: usize = 8;
+/* A peer, by its IP */
 
-fn new_peer_item() -> Item {
-    Item::new(vec![
-        Val::Str(None),
-        Val::Str(None),
-        Val::Str(None),
-        Val::Str(None),
-        Val::F64(0.0),
-        Val::I64(0),
-        Val::I64(0),
-        Val::Str(None),
-        Val::I64(0),
-    ])
+mod imp {
+    use super::*;
+
+    #[derive(glib::Properties, Default)]
+    #[properties(wrapper_type = super::PeerObject)]
+    pub struct PeerObject {
+        #[property(get, construct_only)]
+        pub icon: RefCell<String>,
+        #[property(get, construct_only)]
+        pub ip: RefCell<String>,
+        /// Its host name, once it's looked up
+        #[property(get, set)]
+        pub host: RefCell<String>,
+        #[property(get, set)]
+        pub flags: RefCell<String>,
+        /// In percent
+        #[property(get, set)]
+        pub progress: Cell<f64>,
+        #[property(get, set)]
+        pub down_speed: Cell<i64>,
+        #[property(get, set)]
+        pub up_speed: Cell<i64>,
+        #[property(get, construct_only)]
+        pub client: RefCell<String>,
+        /// The serial of the update it was last in
+        #[property(get, set)]
+        pub serial: Cell<i64>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for PeerObject {
+        const NAME: &'static str = "TrgPeerObject";
+        type Type = super::PeerObject;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for PeerObject {}
+}
+
+glib::wrapper! {
+    pub struct PeerObject(ObjectSubclass<imp::PeerObject>);
+}
+
+impl PeerObject {
+    fn new(ip: &str, client: &str) -> Self {
+        glib::Object::builder()
+            .property("icon", "network-workgroup")
+            .property("ip", ip)
+            .property("client", client)
+            .build()
+    }
 }
 
 pub struct PeersModel {
     pub store: gio::ListStore,
-    /// IP -> item
-    peers: RefCell<HashMap<String, Item>>,
+    /// IP -> peer
+    peers: RefCell<HashMap<String, PeerObject>>,
 }
 
 impl PeersModel {
     pub fn new() -> Rc<Self> {
-        Rc::new(Self { store: gio::ListStore::new::<Item>(), peers: Default::default() })
+        Rc::new(Self { store: gio::ListStore::new::<PeerObject>(), peers: Default::default() })
     }
 
     pub fn clear(&self) {
@@ -66,37 +98,34 @@ impl PeersModel {
         for peer in &t.peers {
             let address = peer.address.clone();
             let existing = self.peers.borrow().get(&address).cloned();
-            let item = match existing {
-                Some(item) => item,
+            let obj = match existing {
+                Some(obj) => obj,
                 None => {
-                    let item = new_peer_item();
-                    item.set(COL_ICON, "network-workgroup");
-                    item.set(COL_IP, address.as_str());
-                    item.set(COL_CLIENT, peer.client_name.as_str());
-                    self.peers.borrow_mut().insert(address.clone(), item.clone());
-                    added.push(item.clone());
+                    let obj = PeerObject::new(&address, &peer.client_name);
+                    self.peers.borrow_mut().insert(address.clone(), obj.clone());
+                    added.push(obj.clone());
 
                     if do_host_lookup && let Some(addr) = gio::InetAddress::from_string(&address) {
-                        let weak = item.downgrade();
+                        let weak = obj.downgrade();
                         gio::Resolver::default().lookup_by_address_async(
                             &addr,
                             gio::Cancellable::NONE,
                             move |res| {
-                                if let (Ok(name), Some(item)) = (res, weak.upgrade()) {
-                                    item.set(COL_HOST, name.as_str());
+                                if let (Ok(name), Some(obj)) = (res, weak.upgrade()) {
+                                    set_changed(&obj, "host", name.to_string());
                                 }
                             },
                         );
                     }
-                    item
+                    obj
                 }
             };
 
-            item.set(COL_FLAGS, peer.flag_str.as_str());
-            item.set(COL_PROGRESS, peer.progress * 100.0);
-            item.set(COL_DOWNSPEED, peer.rate_to_client);
-            item.set(COL_UPSPEED, peer.rate_to_peer);
-            item.set(COL_UPDATESERIAL, serial);
+            set_changed(&obj, "flags", peer.flag_str.clone());
+            set_changed(&obj, "progress", peer.progress * 100.0);
+            set_changed(&obj, "down-speed", peer.rate_to_client);
+            set_changed(&obj, "up-speed", peer.rate_to_peer);
+            obj.set_serial(serial);
         }
 
         if !added.is_empty() {
@@ -105,32 +134,31 @@ impl PeersModel {
 
         if mode != UpdateMode::First {
             let mut peers = self.peers.borrow_mut();
-            for item in item::items(&self.store) {
-                if item.int64(COL_UPDATESERIAL) != serial
-                    && let Some(ip) = item.string(COL_IP)
-                {
-                    peers.remove(&ip);
+            util::remove_where(&self.store, |obj: &PeerObject| {
+                let stale = obj.serial() != serial;
+                if stale {
+                    peers.remove(&obj.ip());
                 }
-            }
-            drop(peers);
-            item::remove_removed(&self.store, COL_UPDATESERIAL, serial);
+                stale
+            });
         }
     }
 }
 
 pub fn peers_tree_view_new(prefs: &Prefs, model: &PeersModel, config_id: Option<&str>) -> TreeView {
     let tv = TreeView::new(Some(prefs), config_id.unwrap_or("TrgPeersTreeView"));
-    let reg = |t, c: usize, h: &str, id: &str| tv.reg_column(t, c as i32, h, id, 0);
+    // the keys are the model columns the peers had as Items
+    let reg = |t, key, p, h: &str, id: &str| tv.reg_property(t, key, p, h, id, 0);
 
-    reg(ColType::IconText, COL_IP, &tr("IP"), "ip").set_extra(COL_ICON);
-    reg(ColType::Text, COL_HOST, &tr("Host"), "host");
-    reg(ColType::Speed, COL_DOWNSPEED, &tr("Down Speed"), "down-speed");
-    reg(ColType::Speed, COL_UPSPEED, &tr("Up Speed"), "up-speed");
-    reg(ColType::Prog, COL_PROGRESS, &tr("Progress"), "progress");
-    reg(ColType::Text, COL_FLAGS, &tr("Flags"), "flags");
-    reg(ColType::Text, COL_CLIENT, &tr("Client"), "client");
+    reg(ColType::IconText, 1, "ip", &tr("IP"), "ip").set_extra("icon");
+    reg(ColType::Text, 2, "host", &tr("Host"), "host");
+    reg(ColType::Speed, 5, "down-speed", &tr("Down Speed"), "down-speed");
+    reg(ColType::Speed, 6, "up-speed", &tr("Up Speed"), "up-speed");
+    reg(ColType::Prog, 4, "progress", &tr("Progress"), "progress");
+    reg(ColType::Text, 3, "flags", &tr("Flags"), "flags");
+    reg(ColType::Text, 7, "client", &tr("Client"), "client");
 
-    tv.set_search_column(COL_HOST);
+    tv.set_search_column("host");
     tv.set_model(&model.store);
     tv.setup_columns();
     tv.restore_sort();
