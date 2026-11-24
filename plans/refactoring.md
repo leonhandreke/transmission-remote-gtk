@@ -73,7 +73,15 @@ is left to do, in the recommended order. Work happens on the
   `set_changed(obj, property, value)`; context menus
   (`add_context_menu`, `popover_menu_popup`, and `present_popovers` for the
   `size_allocate` of widgets that parent them).
+- `src/state_selector.rs` — the sidebar; each `StateRow` has a `Filter`
+  (`All`, `State(flags)`, `Tracker(host)`, `Directory(dir)`), and
+  `StateSelector::filter()` is the selected row's.
 - `src/main_window.rs` — the window: layout, wiring, filter, actions.
+- The view settings (sidebar, its directory/tracker filters and order, the
+  details, the style) live in the preferences: the menu's stateful actions
+  (`menu_bar.rs`) and the preferences dialog only set them, and the widgets
+  follow `Prefs::connect_changed` (`MainWindow::follow_view_prefs`, the
+  state selector's `build()`, `torrent_view.rs` for the style).
 - `src/details.rs` — the trackers/files/peers lists of a torrent, shared by
   the window and the properties dialog.
 - `src/dialogs/` — dialogs; `dialog.rs` is a GtkDialog-like base class.
@@ -198,32 +206,59 @@ popover positioning for the keyboard (`util::popover_menu_popup` asks
 `TreeView::focus_rect()`, the state selector does its own), and the two
 `list.scroll-to-item` helpers.
 
-### 5. The torrent filter as an enum — next
+### 5. The torrent filter as an enum — done
 
-`state_selector.rs` packs its tracker and directory filters into the same
-`u32` as the torrent status flags (`FILTER_FLAG_TRACKER = 1 << 14`,
-`FILTER_FLAG_DIR = 1 << 15`), and the window decodes that plus a "selected
-text" (`MainWindow::refilter`, `visible_func`, fields `filter_criteria`,
-`filter_selected_text`). Use
-`enum Filter { All, State(u32), Tracker(String), Directory(String) }`,
-returned by the selector. Optionally turn `TORRENT_FLAG_*`
-(`protocol/torrent.rs`) into a `bitflags` type.
+The sidebar packed its tracker and directory filters into the same `u32`
+as the torrent status flags (`FILTER_FLAG_TRACKER = 1 << 14`,
+`FILTER_FLAG_DIR = 1 << 15`), and the window decoded that plus the
+selected row's name. Now each `StateRow` holds a `Filter` (a plain field,
+not a property; set once by `StateRow::new`), `StateSelector::filter()`
+returns the selected row's (`All` if none), the signal is `filter-changed`
+(no arguments), and `MainWindow::visible_func` matches on the window's
+`filter` field. `Torrent::has_tracker` takes a `&str`. The selected row's
+saved index (`STATE_SELECTOR_LAST`, `StateRow::index`) is unchanged.
 
-### 6. The preferences as the single source of truth for view settings
+`TORRENT_FLAG_*` stayed plain `u32` constants: `flags` is a GObject
+property of `TorrentObject` (the `torrent_values!` macro) and sorts through
+`SortKey`, so a `bitflags` type would need a ParamSpec and a `SortKey`
+impl, plus rewriting about 50 `& FLAG != 0` tests, for little gain.
 
-The view toggles (sidebar, directory filters, tracker filters, directories
-first, torrent details) take two routes: the preferences dialog's
-check boxes call the state selector and the window directly
-(`dialogs/preferences.rs`: `view_states_toggled_cb` and friends, through
-`win.state_selector()` and `win.notebook_set_visible()`), while the menu's
-stateful actions write the preference and the window follows the actions'
-state (`MainWindow::connect_view_actions`, `menu_bar.rs::view_item_new`).
-Make the widgets follow preference changes only (`Prefs::connect_changed`),
-so the preferences dialog no longer needs the window.
+### 6. The preferences as the single source of truth for view settings — done
 
-### 7. A `TorrentList` widget
+Before, the preferences dialog's check boxes called the sidebar and the
+window directly (a preview, saved on OK), while the menu's stateful
+actions wrote the preference and the window followed the actions' state.
+Now:
 
-`MainWindow` (about 1,080 lines) is mostly wiring now. The last cohesive
+- The menu's view actions (`view_item_new`, and the style action) only set
+  the preference in `change_state`; their state follows the preference.
+  `filter-dirs`, `filter-trackers` and `directories-first` are enabled
+  while `KEY_SHOW_STATE_SELECTOR` is true (following the preference, no
+  longer the `view-states` action).
+- The window shows the sidebar and the details as the preferences say
+  (`follow_view_prefs`); the state selector follows its three options
+  itself, and its setters (`set_show_dirs`, `set_show_trackers`,
+  `set_directories_first`) are private and do nothing if the value is
+  unchanged (they used to rebuild the rows every time). The window used to
+  apply the sidebar's options only while their actions were enabled; the
+  selector now always follows them (only the dialog could change them
+  while the sidebar was hidden, and it applied them directly).
+- The preferences dialog's five view check boxes set the preference as
+  they're toggled (the preview) and follow it while the dialog is open (a
+  menu item or shortcut used meanwhile shows there, and OK no longer
+  undoes it). It no longer knows the main window (`new()` takes any parent
+  window; `notebook_set_visible()` is gone, `state_selector()` private).
+- **Behaviour change:** closing the dialog without OK (Close, Escape, the
+  window's close button) restores the values the view settings had when it
+  opened. Before, the preview stayed applied but unsaved, out of step with
+  the menu's check items (the next shortcut seemed to do nothing) and gone
+  after a restart. Keeping that would now leave the preview in the
+  preferences, which the main window saves on quit. For the same reason
+  `save_window_state()` closes an open preferences dialog first.
+
+### 7. A `TorrentList` widget — next
+
+`MainWindow` (about 1,060 lines) is mostly wiring now. The last cohesive
 chunk in it is the torrent list: the tree view, its `CustomFilter` and
 `visible_func`, the search entry handling (`filter_*_cb`, `key_pressed`),
 the "No Results"/"Not Connected" overlay (`update_no_results`,
@@ -313,6 +348,32 @@ After the torrents and the preferences' lists moved off `Item` (commits
   editing the first column, Enter or a double click edits, editing both
   columns, up/down, delete, and that OK saves them (also while a cell is
   still being edited) and reopening shows them.
+
+After steps 5 and 6 (commits 41e121f to d740b0b), not clicked through yet;
+check:
+
+- the sidebar's filters: each state (and Error, Queue Down/Up when the
+  server has queues), a tracker, a directory, combined with the search
+  text; that the selected row is restored after a restart (a state, and a
+  tracker or directory falling back to All); that a selected tracker or
+  directory row going away (its last torrent removed or moved, the filter
+  switched off) shows all torrents;
+- the View menu's Sidebar, Directory Filters, Tracker Filters, Directories
+  First and Torrent Details items and their shortcuts (F9 or Ctrl+Cmd+S on
+  macOS, F3, F4, F5): the widgets change and the check marks follow; the
+  three sidebar options are disabled while the sidebar is hidden; the style
+  radio items (Transmission, classic, compact) still switch and stay
+  checked;
+- the preferences dialog's View check boxes: each toggles the window
+  straight away and the menu's check marks follow; the sidebar options are
+  insensitive while Sidebar is unchecked; OK keeps them (also after a
+  restart); Close, Escape and the window's close button restore what they
+  were when it opened; toggling a View menu item (or its shortcut) while
+  the dialog is open updates its check box, and OK keeps it; switching
+  profiles in the dialog, then Close, restores them too;
+- closing the main window (or Ctrl+Q / Cmd+Q while it has the focus; from
+  the dialog, that closes the dialog) while the dialog is open with an
+  unconfirmed change: after a restart the old value shows.
 
 Open observations from that pass, not investigated:
 
