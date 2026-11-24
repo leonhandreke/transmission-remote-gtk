@@ -16,15 +16,27 @@
 //! numeric key, which is what the sort column is saved as in the preferences:
 //! the model column it had when the rows were a column store (like the
 //! GtkListStores of the C version), so saved settings keep their meaning.
+//!
+//! This file has the widget, its model and selection, and showing the rows
+//! in a GtkListView instead (set_list_factory). The other parts:
 
+/// The cells' widgets, bound to the row objects
 mod cell;
+/// Registering, showing and hiding columns, and the header menus
 mod column;
+/// Editing the cells of editable columns
 mod editing;
+/// Expanding and collapsing the rows of a tree
 mod expand;
+/// Saving and restoring the columns and the sorting
 mod persist;
+/// Finding rows by widget, point and focus, for context menus
 mod rows;
+/// Type-ahead search
 mod search;
+/// Sorting, the sort indicator and the sort menu
 mod sort;
+/// The values of the properties, and their formatting
 mod value;
 
 use std::cell::{Cell, OnceCell, RefCell};
