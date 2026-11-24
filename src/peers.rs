@@ -56,7 +56,7 @@ impl PeersModel {
     }
 
     pub fn update(&self, tv: &TreeView, serial: i64, t: &Torrent, mode: UpdateMode) {
-        let do_host_lookup = tv.is_column_showing(COL_HOST as i32);
+        let do_host_lookup = tv.is_column_showing("host");
         let mut added = Vec::new();
 
         if mode == UpdateMode::First {
@@ -122,7 +122,7 @@ pub fn peers_tree_view_new(prefs: &Prefs, model: &PeersModel, config_id: Option<
     let tv = TreeView::new(Some(prefs), config_id.unwrap_or("TrgPeersTreeView"));
     let reg = |t, c: usize, h: &str, id: &str| tv.reg_column(t, c as i32, h, id, 0);
 
-    reg(ColType::IconText, COL_IP, &tr("IP"), "ip").set_extra(COL_ICON as i32);
+    reg(ColType::IconText, COL_IP, &tr("IP"), "ip").set_extra(COL_ICON);
     reg(ColType::Text, COL_HOST, &tr("Host"), "host");
     reg(ColType::Speed, COL_DOWNSPEED, &tr("Down Speed"), "down-speed");
     reg(ColType::Speed, COL_UPSPEED, &tr("Up Speed"), "up-speed");
@@ -130,7 +130,7 @@ pub fn peers_tree_view_new(prefs: &Prefs, model: &PeersModel, config_id: Option<
     reg(ColType::Text, COL_FLAGS, &tr("Flags"), "flags");
     reg(ColType::Text, COL_CLIENT, &tr("Client"), "client");
 
-    tv.set_search_column(COL_HOST as i32);
+    tv.set_search_column(COL_HOST);
     tv.set_model(&model.store);
     tv.setup_columns();
     tv.restore_sort();

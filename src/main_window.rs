@@ -448,7 +448,10 @@ impl MainWindow {
         let count = tv.count_selected();
 
         let markup = if count == 1 {
-            let name = tv.first_selected().and_then(|i| i.string(tm::COL_NAME)).unwrap_or_default();
+            let name = tv
+                .first_selected::<Item>()
+                .and_then(|i| i.string(tm::COL_NAME))
+                .unwrap_or_default();
             sprintf(
                 &tr("<big><b>%s \"%s\"?</b></big>"),
                 &[&glib::markup_escape_text(action_name), &glib::markup_escape_text(&name)],
@@ -575,7 +578,7 @@ impl MainWindow {
     }
 
     fn first_selected_id(&self) -> i64 {
-        self.torrent_tv().first_selected().map(|i| i.torrent_id()).unwrap_or(-1)
+        self.torrent_tv().first_selected::<Item>().map(|i| i.torrent_id()).unwrap_or(-1)
     }
 
     fn torrent_scrub(&self) {

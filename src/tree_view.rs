@@ -1,4 +1,4 @@
-//! A GtkColumnView (in a scrolled window) of Items, which allows the user to
+//! A GtkColumnView (in a scrolled window) of rows, which allows the user to
 //! change column visibility with the menu of each column header: uncheck the
 //! column to hide it, or choose a hidden column to show it after.
 //!
@@ -6,16 +6,21 @@
 //! when it's set up. Column order, widths and the sort column are also saved
 //! and restored.
 //!
-//! All the columns must be registered first, so it knows what model column,
-//! cell widgets etc to use if it should be created, and what columns are
-//! available.
+//! All the columns must be registered first, so it knows where its values come
+//! from (a column of an Item, or a property of the row object), what cell
+//! widgets etc to use if it should be created, and what columns are available.
 //!
-//! Sorting is by a model column, which needn't be a shown column, so the view
-//! has its own sorter for the GtkSortListModel and keeps the sort indicator of
-//! the column view's headers in sync with it.
+//! Sorting is by a registered column, which needn't be a shown column, so the
+//! view has its own sorter for the GtkSortListModel and keeps the sort
+//! indicator of the column view's headers in sync with it. A column has a
+//! numeric key, which is what the sort column is saved as in the preferences:
+//! for the columns of Items, the model column; for property columns, the
+//! model column they had before they were properties, so saved settings keep
+//! their meaning.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cmp::Ordering;
+use std::rc::{Rc, Weak};
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -24,7 +29,7 @@ use serde_json::{Value, json};
 
 use crate::format;
 use crate::i18n::tr;
-use crate::item::{self, Item, Val};
+use crate::item::{Item, Val};
 use crate::json::value_as_i64;
 use crate::prefs::{self, Prefs};
 use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL};
@@ -61,16 +66,80 @@ pub const SORT_COLUMN_ACTION: &str = "sort-column";
 const DATA_CELL: &str = "trg-cell";
 const DATA_LIST_ITEM: &str = "trg-list-item";
 
+/// Where a value of a column (or its extra: an icon name, a file ID) comes
+/// from: a column of an Item, or a property of the row object
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Source {
+    Column(usize),
+    Property(&'static str),
+}
+
+impl From<usize> for Source {
+    fn from(column: usize) -> Self {
+        Source::Column(column)
+    }
+}
+
+impl From<&'static str> for Source {
+    fn from(property: &'static str) -> Self {
+        Source::Property(property)
+    }
+}
+
+impl Source {
+    /// The value of a row object
+    fn value(self, obj: &glib::Object) -> Val {
+        match self {
+            Source::Column(c) => obj.downcast_ref::<Item>().map(|i| i.get(c)).unwrap_or_default(),
+            Source::Property(name) => Val::from_value(&obj.property_value(name)),
+        }
+    }
+
+    /// Compares the values of two row objects
+    fn compare(self, a: &glib::Object, b: &glib::Object) -> Ordering {
+        match (self, a.downcast_ref::<Item>(), b.downcast_ref::<Item>()) {
+            // without copying the values
+            (Source::Column(c), Some(a), Some(b)) => a.with(c, |va| b.with(c, |vb| va.compare(vb))),
+            _ => self.value(a).compare(&self.value(b)),
+        }
+    }
+
+    /// Calls f when the value of the row object changes
+    fn connect_changed(
+        self,
+        obj: &glib::Object,
+        f: impl Fn() + 'static,
+    ) -> Option<glib::SignalHandlerId> {
+        match self {
+            Source::Column(c) => {
+                obj.downcast_ref::<Item>().map(|i| i.connect_column_changed(c, move |_| f()))
+            }
+            Source::Property(name) => Some(obj.connect_notify_local(Some(name), move |_, _| f())),
+        }
+    }
+}
+
+/// The object of a row of the view's model: the row itself, or the item of a
+/// GtkTreeListRow
+pub fn row_object(row: glib::Object) -> Option<glib::Object> {
+    match row.downcast::<gtk::TreeListRow>() {
+        Ok(r) => r.item(),
+        Err(row) => Some(row),
+    }
+}
+
 /// Called when the user toggles a "wanted" cell or clicks a priority cell
-pub type ActivateFn = Rc<dyn Fn(&TreeView, &Item)>;
+pub type ActivateFn = Rc<dyn Fn(&TreeView, &glib::Object)>;
 /// Called when the user starts editing an editable text cell (done is false,
 /// new_text None), and when they finish (done is true, new_text is None if
 /// the text wasn't changed).
-pub type EditFn = Rc<dyn Fn(&TreeView, &Item, bool, Option<&str>)>;
+pub type EditFn = Rc<dyn Fn(&TreeView, &glib::Object, bool, Option<&str>)>;
 
 pub struct ColumnDesc {
-    pub model_column: i32,
-    pub model_column_extra: Cell<i32>,
+    /// What sorting by the column is saved as (see the top)
+    pub key: i32,
+    pub value: Source,
+    pub extra: Cell<Option<Source>>,
     pub header: String,
     pub id: String,
     pub flags: Cell<u32>,
@@ -82,16 +151,30 @@ pub struct ColumnDesc {
 }
 
 impl ColumnDesc {
-    pub fn set_extra(&self, column: i32) {
-        self.model_column_extra.set(column);
+    /// The icon name of an IconText column, the file ID of a FileIconText one
+    pub fn set_extra(&self, source: impl Into<Source>) {
+        self.extra.set(Some(source.into()));
     }
 
-    pub fn set_activate(&self, f: impl Fn(&TreeView, &Item) + 'static) {
-        *self.activate.borrow_mut() = Some(Rc::new(f));
+    /// Sets the activate function, for rows of type T
+    pub fn set_activate<T: IsA<glib::Object>>(&self, f: impl Fn(&TreeView, &T) + 'static) {
+        *self.activate.borrow_mut() = Some(Rc::new(move |tv, obj| {
+            if let Some(obj) = obj.downcast_ref::<T>() {
+                f(tv, obj);
+            }
+        }));
     }
 
-    pub fn set_edit(&self, f: impl Fn(&TreeView, &Item, bool, Option<&str>) + 'static) {
-        *self.edit.borrow_mut() = Some(Rc::new(f));
+    /// Sets the edit function, for rows of type T
+    pub fn set_edit<T: IsA<glib::Object>>(
+        &self,
+        f: impl Fn(&TreeView, &T, bool, Option<&str>) + 'static,
+    ) {
+        *self.edit.borrow_mut() = Some(Rc::new(move |tv, obj, done, new_text| {
+            if let Some(obj) = obj.downcast_ref::<T>() {
+                f(tv, obj, done, new_text);
+            }
+        }));
     }
 
     pub fn set_editable(&self, editable: bool) {
@@ -111,7 +194,8 @@ struct CellState {
     expander: Option<gtk::TreeExpander>,
     image: Option<gtk::Image>,
     widget: gtk::Widget,
-    item: RefCell<Option<Item>>,
+    /// The row object
+    item: RefCell<Option<glib::Object>>,
     handlers: RefCell<Vec<glib::SignalHandlerId>>,
     updating: Cell<bool>,
     edit_original: RefCell<Option<String>>,
@@ -202,7 +286,8 @@ impl CellState {
             return;
         };
         let desc = &self.desc;
-        let value = item.get(desc.model_column as usize);
+        let value = desc.value.value(&item);
+        let extra = desc.extra.get().map(|s| s.value(&item));
         self.updating.set(true);
 
         match desc.ctype {
@@ -225,12 +310,10 @@ impl CellState {
                     .unwrap()
                     .set_text(text.as_deref().unwrap_or(""));
                 let image = self.image.as_ref().unwrap();
-                let extra = desc.model_column_extra.get();
                 if desc.ctype == ColType::IconText {
-                    let icon = (extra >= 0).then(|| item.string(extra as usize)).flatten();
-                    image.set_icon_name(icon.as_deref());
+                    image.set_icon_name(extra.as_ref().and_then(Val::as_str));
                 } else {
-                    let file_id = if extra >= 0 { item.int64(extra as usize) } else { 0 };
+                    let file_id = extra.as_ref().map_or(0, Val::as_i64);
                     if file_id == -2 {
                         image.clear();
                     } else {
@@ -312,12 +395,16 @@ mod imp {
         pub column_menus: Cell<bool>,
         pub updating_sort: Cell<bool>,
 
-        pub search_column: Cell<i32>,
+        pub search_column: Cell<Option<Source>>,
         pub search: RefCell<String>,
         pub search_time: Cell<i64>,
 
         pub actions: gio::SimpleActionGroup,
         pub sorter_handler: RefCell<Option<glib::SignalHandlerId>>,
+
+        /// The cell (a row object and a column) to start editing once it's
+        /// shown
+        pub start_edit: RefCell<Option<(glib::WeakRef<glib::Object>, Weak<ColumnDesc>)>>,
     }
 
     impl Default for TreeView {
@@ -339,11 +426,12 @@ mod imp {
                 sortable: Cell::new(true),
                 column_menus: Cell::new(true),
                 updating_sort: Cell::new(false),
-                search_column: Cell::new(-1),
+                search_column: Cell::new(None),
                 search: Default::default(),
                 search_time: Cell::new(0),
                 actions: gio::SimpleActionGroup::new(),
                 sorter_handler: Default::default(),
+                start_edit: Default::default(),
             }
         }
     }
@@ -527,6 +615,7 @@ impl TreeView {
         })
     }
 
+    /// Registers a column of Items, by its model column
     pub fn reg_column(
         &self,
         ctype: ColType,
@@ -535,9 +624,36 @@ impl TreeView {
         id: &str,
         flags: u32,
     ) -> Rc<ColumnDesc> {
+        self.reg(ctype, model_column, Source::Column(model_column as usize), header, id, flags)
+    }
+
+    /// Registers a column of a property of the row objects. The key is what
+    /// sorting by it is saved as.
+    pub fn reg_property(
+        &self,
+        ctype: ColType,
+        key: i32,
+        property: &'static str,
+        header: &str,
+        id: &str,
+        flags: u32,
+    ) -> Rc<ColumnDesc> {
+        self.reg(ctype, key, Source::Property(property), header, id, flags)
+    }
+
+    fn reg(
+        &self,
+        ctype: ColType,
+        key: i32,
+        value: Source,
+        header: &str,
+        id: &str,
+        flags: u32,
+    ) -> Rc<ColumnDesc> {
         let desc = Rc::new(ColumnDesc {
-            model_column,
-            model_column_extra: Cell::new(-1),
+            key,
+            value,
+            extra: Cell::new(None),
             header: header.to_string(),
             id: id.to_string(),
             flags: Cell::new(flags),
@@ -555,12 +671,13 @@ impl TreeView {
         self.imp().columns.borrow().iter().find(|d| d.id == id).cloned()
     }
 
-    fn find_model_column(&self, column: i32) -> Option<Rc<ColumnDesc>> {
-        self.imp().columns.borrow().iter().find(|d| d.model_column == column).cloned()
+    fn find_key(&self, key: i32) -> Option<Rc<ColumnDesc>> {
+        self.imp().columns.borrow().iter().find(|d| d.key == key).cloned()
     }
 
-    pub fn is_column_showing(&self, index: i32) -> bool {
-        self.find_model_column(index).is_some_and(|d| d.showing())
+    /// Whether the column with the (string) ID is showing
+    pub fn is_column_showing(&self, id: &str) -> bool {
+        self.find_column(id).is_some_and(|d| d.showing())
     }
 
     /* Cells */
@@ -711,35 +828,46 @@ impl TreeView {
             e.set_list_row(row.downcast_ref::<gtk::TreeListRow>());
         }
 
-        let Some(item) = item::row_item(&row) else { return };
+        let Some(item) = row_object(row) else { return };
         *cell.item.borrow_mut() = Some(item.clone());
 
-        let mut handlers = Vec::new();
-        let weak = Rc::downgrade(&cell);
-        handlers.push(item.connect_column_changed(cell.desc.model_column as usize, move |_| {
-            if let Some(c) = weak.upgrade() {
-                c.refresh();
-            }
-        }));
-        let extra = cell.desc.model_column_extra.get();
-        if matches!(cell.desc.ctype, ColType::IconText | ColType::FileIconText) && extra >= 0 {
-            let weak = Rc::downgrade(&cell);
-            handlers.push(item.connect_column_changed(extra as usize, move |_| {
-                if let Some(c) = weak.upgrade() {
-                    c.refresh();
-                }
-            }));
+        let mut sources = vec![cell.desc.value];
+        if matches!(cell.desc.ctype, ColType::IconText | ColType::FileIconText) {
+            sources.extend(cell.desc.extra.get());
         }
+        let handlers = sources
+            .into_iter()
+            .filter_map(|source| {
+                let weak = Rc::downgrade(&cell);
+                source.connect_changed(&item, move || {
+                    if let Some(c) = weak.upgrade() {
+                        c.refresh();
+                    }
+                })
+            })
+            .collect();
         *cell.handlers.borrow_mut() = handlers;
 
         cell.refresh();
 
         if let Some(label) = cell.widget.downcast_ref::<gtk::EditableLabel>()
-            && item.start_edit_column() == cell.desc.model_column
+            && self.take_start_edit(&item, &cell.desc)
         {
-            item.set_start_edit_column(-1);
             queue_start_editing(label);
         }
+    }
+
+    /// Whether the cell of item in the column desc should start editing now
+    /// that it's shown (it then shouldn't any more)
+    fn take_start_edit(&self, item: &glib::Object, desc: &Rc<ColumnDesc>) -> bool {
+        let mut start_edit = self.imp().start_edit.borrow_mut();
+        let matches = start_edit.as_ref().is_some_and(|(i, d)| {
+            i.upgrade().as_ref() == Some(item) && d.as_ptr() == Rc::as_ptr(desc)
+        });
+        if matches {
+            start_edit.take();
+        }
+        matches
     }
 
     fn cell_unbind(&self, list_item: &gtk::ListItem) {
@@ -754,10 +882,9 @@ impl TreeView {
         }
     }
 
-    fn find_position(&self, item: &Item) -> Option<u32> {
+    fn find_position(&self, item: &glib::Object) -> Option<u32> {
         let model = &self.imp().selection;
-        (0..model.n_items())
-            .find(|&i| model.item(i).and_then(|r| item::row_item(&r)).as_ref() == Some(item))
+        (0..model.n_items()).find(|&i| model.item(i).and_then(row_object).as_ref() == Some(item))
     }
 
     fn list_base(&self) -> Option<gtk::Widget> {
@@ -792,7 +919,7 @@ impl TreeView {
 
     fn find_edit_cell(
         widget: &gtk::Widget,
-        item: &Item,
+        item: &glib::Object,
         desc: &Rc<ColumnDesc>,
     ) -> Option<gtk::EditableLabel> {
         if let Some(label) = widget.downcast_ref::<gtk::EditableLabel>() {
@@ -813,11 +940,12 @@ impl TreeView {
 
     /// Starts editing the cell of item in the editable column desc, now if
     /// it's shown, or once it's shown.
-    pub fn start_editing(&self, item: &Item, desc: &Rc<ColumnDesc>) {
+    pub fn start_editing(&self, item: &impl IsA<glib::Object>, desc: &Rc<ColumnDesc>) {
+        let item = item.upcast_ref();
         match Self::find_edit_cell(self.imp().column_view.upcast_ref(), item, desc) {
             Some(label) => queue_start_editing(&label),
             None => {
-                item.set_start_edit_column(desc.model_column);
+                *self.imp().start_edit.borrow_mut() = Some((item.downgrade(), Rc::downgrade(desc)));
                 self.scroll_to(self.find_position(item));
             }
         }
@@ -847,14 +975,14 @@ impl TreeView {
 
     fn sort_func(&self, a: &glib::Object, b: &glib::Object) -> gtk::Ordering {
         let imp = self.imp();
-        let column = imp.sort_column.get();
-        let (Some(a), Some(b)) = (a.downcast_ref::<Item>(), b.downcast_ref::<Item>()) else {
-            return gtk::Ordering::Equal;
-        };
-        if column < 0 || column as usize >= a.n_columns() {
+        let key = imp.sort_column.get();
+        if key < 0 {
             return gtk::Ordering::Equal;
         }
-        let mut result = a.compare(b, column as usize);
+        // a key that isn't registered (from older settings) is a column of
+        // Items, as it was
+        let source = self.find_key(key).map_or(Source::Column(key as usize), |d| d.value);
+        let mut result = source.compare(a, b);
         if imp.sort_order.get() == gtk::SortType::Descending {
             result = result.reverse();
         }
@@ -864,14 +992,14 @@ impl TreeView {
     /// Shows the sort column in the column headers
     fn sync_sort_indicator(&self) {
         let imp = self.imp();
-        let desc = self.find_model_column(imp.sort_column.get());
+        let desc = self.find_key(imp.sort_column.get());
         let column = desc.and_then(|d| d.column.borrow().clone());
         imp.updating_sort.set(true);
         imp.column_view.sort_by_column(column.as_ref(), imp.sort_order.get());
         imp.updating_sort.set(false);
     }
 
-    /// Sorting by a model column, -1 for the model's order
+    /// Sorting by the column with key, -1 for the model's order
     pub fn set_sort(&self, column: i32, order: gtk::SortType) {
         let imp = self.imp();
         let column = column.max(-1);
@@ -915,7 +1043,7 @@ impl TreeView {
                 .cloned()
         });
         match desc {
-            Some(d) => self.set_sort(d.model_column, cvs.primary_sort_order()),
+            Some(d) => self.set_sort(d.key, cvs.primary_sort_order()),
             None => self.set_sort(-1, gtk::SortType::Ascending),
         }
     }
@@ -987,7 +1115,7 @@ impl TreeView {
                 let item = gio::MenuItem::new(Some(&desc.header), None);
                 item.set_action_and_target_value(
                     Some(&format!("win.{SORT_COLUMN_ACTION}")),
-                    Some(&desc.model_column.to_variant()),
+                    Some(&desc.key.to_variant()),
                 );
                 section.append_item(&item);
             }
@@ -1220,7 +1348,8 @@ impl TreeView {
 
     /* Model and selection */
 
-    /// The model is a list model of Items, or a GtkTreeListModel of them.
+    /// The model is a list model of row objects, or a GtkTreeListModel of
+    /// them.
     pub fn set_model(&self, model: &impl IsA<gio::ListModel>) {
         let imp = self.imp();
         let model = model.as_ref().clone();
@@ -1256,12 +1385,12 @@ impl TreeView {
         positions
     }
 
-    /// The selected items, in the view's order
-    pub fn selected_items(&self) -> Vec<Item> {
+    /// The selected row objects (of type T), in the view's order
+    pub fn selected_items<T: IsA<glib::Object>>(&self) -> Vec<T> {
         let sel = &self.imp().selection;
         self.selected_positions()
             .into_iter()
-            .filter_map(|p| sel.item(p).and_then(|r| item::row_item(&r)))
+            .filter_map(|p| sel.item(p).and_then(row_object).and_downcast::<T>())
             .collect()
     }
 
@@ -1269,16 +1398,16 @@ impl TreeView {
         self.imp().selection.selection().size() as u32
     }
 
-    pub fn first_selected(&self) -> Option<Item> {
+    pub fn first_selected<T: IsA<glib::Object>>(&self) -> Option<T> {
         let bitset = self.imp().selection.selection();
         if bitset.is_empty() {
             return None;
         }
-        self.imp().selection.item(bitset.minimum()).and_then(|r| item::row_item(&r))
+        self.imp().selection.item(bitset.minimum()).and_then(row_object).and_downcast::<T>()
     }
 
-    pub fn select_item(&self, item: &Item) {
-        if let Some(position) = self.find_position(item) {
+    pub fn select_item(&self, item: &impl IsA<glib::Object>) {
+        if let Some(position) = self.find_position(item.upcast_ref()) {
             self.imp().selection.select_item(position, true);
             self.scroll_to(Some(position));
         }
@@ -1333,14 +1462,14 @@ impl TreeView {
         false
     }
 
-    /// The item of the row at x, y (in the view's coordinates), and its
-    /// position
-    pub fn item_at(&self, x: f64, y: f64) -> Option<(Item, u32)> {
+    /// The row object of the row at x, y (in the view's coordinates), and
+    /// its position
+    pub fn item_at(&self, x: f64, y: f64) -> Option<(glib::Object, u32)> {
         // cells may not be targetable, like a text cell that can't be edited
         let widget = self.pick(x, y, gtk::PickFlags::INSENSITIVE | gtk::PickFlags::NON_TARGETABLE);
         let li = Self::list_item_for(widget, self.upcast_ref())?;
         let row = li.item()?;
-        Some((item::row_item(&row)?, li.position()))
+        Some((row_object(row)?, li.position()))
     }
 
     /// Whether a context menu asked for at x, y (-1 from the keyboard) is
@@ -1406,21 +1535,21 @@ impl TreeView {
     /* Type ahead search, like GtkTreeView's: typing selects the first row
      * whose search column starts with (or else contains) the typed text. */
 
-    pub fn set_search_column(&self, column: i32) {
-        self.imp().search_column.set(column);
+    pub fn set_search_column(&self, source: impl Into<Source>) {
+        self.imp().search_column.set(Some(source.into()));
     }
 
     fn search(&self, key: &str) -> bool {
         let imp = self.imp();
         let model = &imp.selection;
         let needle = glib::casefold(key).to_string();
-        let column = imp.search_column.get() as usize;
+        let Some(source) = imp.search_column.get() else { return false };
         let texts: Vec<Option<String>> = (0..model.n_items())
             .map(|i| {
                 model
                     .item(i)
-                    .and_then(|r| item::row_item(&r))
-                    .and_then(|it| it.with(column, Val::to_text))
+                    .and_then(row_object)
+                    .and_then(|obj| source.value(&obj).to_text())
                     .map(|t| glib::casefold(&t).to_string())
             })
             .collect();
@@ -1522,7 +1651,7 @@ impl TreeView {
     fn key_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
         let imp = self.imp();
         let Some(c) = keyval.to_unicode() else { return false };
-        if imp.search_column.get() < 0 || c.is_control() || Self::other_modifiers(state) {
+        if imp.search_column.get().is_none() || c.is_control() || Self::other_modifiers(state) {
             return false;
         }
         let now = glib::monotonic_time();

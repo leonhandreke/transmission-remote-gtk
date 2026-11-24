@@ -64,6 +64,43 @@ impl Val {
         }
     }
 
+    /// The value of a property, for the types the views show
+    pub fn from_value(value: &glib::Value) -> Self {
+        let t = value.type_();
+        if t == glib::Type::STRING {
+            Val::Str(value.get::<Option<String>>().ok().flatten())
+        } else if t == glib::Type::I64 {
+            Val::I64(value.get().unwrap_or_default())
+        } else if t == glib::Type::I32 {
+            Val::I64(value.get::<i32>().unwrap_or_default().into())
+        } else if t == glib::Type::U32 {
+            Val::U32(value.get().unwrap_or_default())
+        } else if t == glib::Type::F64 {
+            Val::F64(value.get().unwrap_or_default())
+        } else if t == glib::Type::BOOL {
+            Val::Bool(value.get().unwrap_or_default())
+        } else {
+            Val::Empty
+        }
+    }
+
+    /// Compares values of the same type, strings by their collation
+    pub fn compare(&self, other: &Val) -> Ordering {
+        match (self, other) {
+            (Val::Str(sa), Val::Str(sb)) => match (sa, sb) {
+                (Some(sa), Some(sb)) => utf8_collate(sa, sb),
+                (Some(_), None) => Ordering::Greater,
+                (None, Some(_)) => Ordering::Less,
+                (None, None) => Ordering::Equal,
+            },
+            (Val::I64(x), Val::I64(y)) => x.cmp(y),
+            (Val::U32(x), Val::U32(y)) => x.cmp(y),
+            (Val::F64(x), Val::F64(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
+            (Val::Bool(x), Val::Bool(y)) => x.cmp(y),
+            _ => Ordering::Equal,
+        }
+    }
+
     fn same(&self, other: &Val) -> bool {
         match (self, other) {
             (Val::Str(a), Val::Str(b)) => a == b,
@@ -156,8 +193,6 @@ mod imp {
         /// The parent of a row of a tree (not a reference, the parent owns
         /// its children)
         pub parent: glib::WeakRef<super::Item>,
-        /// The column whose cell should start editing once it's shown
-        pub start_edit: std::cell::Cell<i32>,
     }
 
     #[glib::object_subclass]
@@ -190,7 +225,6 @@ impl Item {
     pub fn new(values: Vec<Val>) -> Self {
         let item: Self = glib::Object::new();
         *item.imp().values.borrow_mut() = values;
-        item.imp().start_edit.set(-1);
         item
     }
 
@@ -277,36 +311,6 @@ impl Item {
     pub fn set_parent_item(&self, parent: Option<&Item>) {
         self.imp().parent.set(parent);
     }
-
-    pub fn start_edit_column(&self) -> i32 {
-        self.imp().start_edit.get()
-    }
-
-    pub fn set_start_edit_column(&self, column: i32) {
-        self.imp().start_edit.set(column);
-    }
-
-    /// Compares the values of a column, strings by their collation
-    pub fn compare(&self, other: &Item, column: usize) -> Ordering {
-        let a = self.imp().values.borrow();
-        let b = other.imp().values.borrow();
-        let (Some(va), Some(vb)) = (a.get(column), b.get(column)) else {
-            return Ordering::Equal;
-        };
-        match (va, vb) {
-            (Val::Str(sa), Val::Str(sb)) => match (sa, sb) {
-                (Some(sa), Some(sb)) => utf8_collate(sa, sb),
-                (Some(_), None) => Ordering::Greater,
-                (None, Some(_)) => Ordering::Less,
-                (None, None) => Ordering::Equal,
-            },
-            (Val::I64(x), Val::I64(y)) => x.cmp(y),
-            (Val::U32(x), Val::U32(y)) => x.cmp(y),
-            (Val::F64(x), Val::F64(y)) => x.partial_cmp(y).unwrap_or(Ordering::Equal),
-            (Val::Bool(x), Val::Bool(y)) => x.cmp(y),
-            _ => Ordering::Equal,
-        }
-    }
 }
 
 /// The items of a list model
@@ -351,13 +355,4 @@ pub fn find_item(model: &impl IsA<gio::ListModel>, column: usize, id: i64) -> Op
         let item = model.item(i).and_downcast::<Item>()?;
         (item.int64(column) == id).then_some((item, i))
     })
-}
-
-/// The item of a row: the row itself, or the item of a tree list row
-pub fn row_item(row: &glib::Object) -> Option<Item> {
-    if let Some(r) = row.downcast_ref::<gtk::TreeListRow>() {
-        r.item().and_downcast::<Item>()
-    } else {
-        row.clone().downcast::<Item>().ok()
-    }
 }

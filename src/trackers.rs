@@ -156,7 +156,7 @@ impl TrackersView {
             "tier",
             COLUMN_UNREMOVABLE,
         );
-        desc.set_extra(COL_ICON as i32);
+        desc.set_extra(COL_ICON);
 
         let announce = tv.reg_column(
             ColType::Text,
@@ -206,7 +206,7 @@ impl TrackersView {
         });
 
         let weak = Rc::downgrade(&view);
-        announce.set_edit(move |_, item, done, new_text| {
+        announce.set_edit(move |_, item: &Item, done, new_text| {
             if let Some(view) = weak.upgrade() {
                 view.announce_edit(item, done, new_text);
             }
@@ -260,7 +260,7 @@ impl TrackersView {
     }
 
     fn delete_tracker(self: &Rc<Self>) {
-        for item in self.tv.selected_items() {
+        for item in self.tv.selected_items::<Item>() {
             if let Some(pos) = self.model.store.find(&item) {
                 self.model.store.remove(pos);
             }

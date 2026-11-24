@@ -20,7 +20,9 @@ use crate::json::{get_str, objects};
 use crate::macos;
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs, Scope};
-use crate::tree_view::{COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView};
+use crate::tree_view::{
+    COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView, row_object,
+};
 use crate::util;
 
 /* The items of the profile drop down: a GObject with a "name" property,
@@ -145,7 +147,9 @@ impl PersistentTreeView {
         let weak = Rc::downgrade(&ptv);
         tv.connect_row_activated(move |tv, position| {
             let Some(p) = weak.upgrade() else { return };
-            if let Some(item) = tv.selection().item(position).and_then(|r| item::row_item(&r)) {
+            if let Some(item) =
+                tv.selection().item(position).and_then(row_object).and_downcast::<Item>()
+            {
                 p.edit_item(&item);
             }
         });
@@ -161,7 +165,7 @@ impl PersistentTreeView {
         let weak = Rc::downgrade(&ptv);
         del_button.connect_clicked(move |_| {
             if let Some(p) = weak.upgrade() {
-                for item in p.tv.selected_items() {
+                for item in p.tv.selected_items::<Item>() {
                     if let Some(pos) = p.store.find(&item) {
                         p.store.remove(pos);
                     }
@@ -189,7 +193,7 @@ impl PersistentTreeView {
         if self.tv.count_selected() != 1 {
             return None;
         }
-        self.tv.first_selected().and_then(|i| self.store.find(&i))
+        self.tv.first_selected::<Item>().and_then(|i| self.store.find(&i))
     }
 
     fn update_buttons(&self) {
@@ -208,7 +212,7 @@ impl PersistentTreeView {
             key,
             COLUMN_UNREMOVABLE | COLUMN_EDITABLE,
         );
-        desc.set_edit(move |_, item, done, new_text| {
+        desc.set_edit(move |_, item: &Item, done, new_text| {
             if let (true, Some(text)) = (done, new_text) {
                 item.set(index, text);
             }

@@ -11,6 +11,7 @@ use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::files::{COL_NAME, FilesView, file_item_path};
 use crate::i18n::{sprintf, tr};
+use crate::item::Item;
 use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::util;
@@ -71,7 +72,7 @@ impl FileRenameDialog {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         let tv = &view.tv;
-        let item = tv.first_selected();
+        let item = tv.first_selected::<Item>();
         let count = tv.count_selected();
 
         let (orig_filename, orig_path) = match &item {

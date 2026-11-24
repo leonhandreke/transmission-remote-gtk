@@ -48,7 +48,7 @@ pub fn torrent_tree_view_new(client: &Client, model: &impl IsA<gio::ListModel>) 
 
     let reg = |t, c: usize, h: &str, id: &str, f| tv.reg_column(t, c as i32, h, id, f);
     let desc = reg(ColType::IconText, COL_NAME, &tr("Name"), "name", 0);
-    desc.set_extra(COL_ICON as i32);
+    desc.set_extra(COL_ICON);
     reg(ColType::Size, COL_SIZEWHENDONE, &tr("Size"), "size", 0);
     reg(ColType::Prog, COL_PERCENTDONE, &tr("Done"), "done", 0);
     reg(ColType::Text, COL_STATUS, &tr("Status"), "status", 0);
@@ -116,7 +116,7 @@ pub fn torrent_tree_view_new(client: &Client, model: &impl IsA<gio::ListModel>) 
 
 /// The IDs of the selected torrents
 pub fn selected_ids(tv: &TreeView) -> Vec<i64> {
-    tv.selected_items().iter().map(TorrentItemExt::torrent_id).collect()
+    tv.selected_items::<Item>().iter().map(TorrentItemExt::torrent_id).collect()
 }
 
 /// The columns, or the rows of the (compact) Transmission style

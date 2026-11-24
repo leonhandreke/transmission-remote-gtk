@@ -450,7 +450,7 @@ impl FilesView {
         let tv = TreeView::new(prefs, config_id);
 
         tv.reg_column(ColType::FileIconText, COL_NAME as i32, &tr("Name"), "name", 0)
-            .set_extra(COL_ID as i32);
+            .set_extra(COL_ID);
         tv.reg_column(ColType::Size, COL_SIZE as i32, &tr("Size"), "size", 0);
         if progress {
             tv.reg_column(ColType::Prog, COL_PROGRESS as i32, &tr("Progress"), "progress", 0);
@@ -469,7 +469,7 @@ impl FilesView {
 
         // A click on the Download check box toggles it
         let weak = Rc::downgrade(&view);
-        wanted.set_activate(move |_, item| {
+        wanted.set_activate(move |_, item: &Item| {
             // a mixed directory is skipped
             set_wanted(item, (item.int64(COL_WANTED) == 0) as i64);
             if let Some(v) = weak.upgrade() {
@@ -479,7 +479,7 @@ impl FilesView {
 
         // A click on the priority goes from normal to high to low
         let weak = Rc::downgrade(&view);
-        priority.set_activate(move |_, item| {
+        priority.set_activate(move |_, item: &Item| {
             let next = match item.int64(COL_PRIORITY) {
                 TR_PRI_NORMAL => TR_PRI_HIGH,
                 TR_PRI_HIGH => TR_PRI_LOW,
@@ -491,7 +491,7 @@ impl FilesView {
             }
         });
 
-        tv.set_search_column(COL_NAME as i32);
+        tv.set_search_column(COL_NAME);
         tv.set_model(&model.tree_model());
         tv.setup_columns();
         tv.restore_sort();
@@ -586,7 +586,7 @@ impl FilesView {
     }
 
     fn set_selected(self: &Rc<Self>, column: usize, value: i64) {
-        for item in self.tv.selected_items() {
+        for item in self.tv.selected_items::<Item>() {
             if column == COL_WANTED {
                 set_wanted(&item, value);
             } else {
