@@ -6,17 +6,16 @@
 //! when it's set up. Column order, widths and the sort column are also saved
 //! and restored.
 //!
-//! All the columns must be registered first, so it knows where its values come
-//! from (a column of an Item, or a property of the row object), what cell
-//! widgets etc to use if it should be created, and what columns are available.
+//! All the columns must be registered first, so it knows which property of the
+//! row objects they show, what cell widgets etc to use if it should be
+//! created, and what columns are available.
 //!
 //! Sorting is by a registered column, which needn't be a shown column, so the
 //! view has its own sorter for the GtkSortListModel and keeps the sort
 //! indicator of the column view's headers in sync with it. A column has a
 //! numeric key, which is what the sort column is saved as in the preferences:
-//! for the columns of Items, the model column; for property columns, the
-//! model column they had before they were properties, so saved settings keep
-//! their meaning.
+//! the model column it had when the rows were a column store (like the
+//! GtkListStores of the C version), so saved settings keep their meaning.
 
 use std::cell::{Cell, RefCell};
 use std::cmp::Ordering;
@@ -29,7 +28,6 @@ use serde_json::{Value, json};
 
 use crate::format;
 use crate::i18n::tr;
-use crate::item::{Item, Val, utf8_collate};
 use crate::json::value_as_i64;
 use crate::prefs::{self, Prefs};
 use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL};
@@ -66,57 +64,98 @@ pub const SORT_COLUMN_ACTION: &str = "sort-column";
 const DATA_CELL: &str = "trg-cell";
 const DATA_LIST_ITEM: &str = "trg-list-item";
 
-/// Where a value of a column (or its extra: an icon name, a file ID) comes
-/// from: a column of an Item, or a property of the row object
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Source {
-    Column(usize),
-    Property(&'static str),
+/// A value of a cell: a property of the row object, of the types the views
+/// show
+#[derive(Clone, Debug)]
+enum Val {
+    Empty,
+    Str(Option<String>),
+    I64(i64),
+    U32(u32),
+    F64(f64),
+    Bool(bool),
 }
 
-impl From<usize> for Source {
-    fn from(column: usize) -> Self {
-        Source::Column(column)
+impl Val {
+    /// The value of the property of a row object
+    fn of(obj: &glib::Object, property: &str) -> Self {
+        let value = obj.property_value(property);
+        let t = value.type_();
+        if t == glib::Type::STRING {
+            Val::Str(value.get::<Option<String>>().ok().flatten())
+        } else if t == glib::Type::I64 {
+            Val::I64(value.get().unwrap_or_default())
+        } else if t == glib::Type::I32 {
+            Val::I64(value.get::<i32>().unwrap_or_default().into())
+        } else if t == glib::Type::U32 {
+            Val::U32(value.get().unwrap_or_default())
+        } else if t == glib::Type::F64 {
+            Val::F64(value.get().unwrap_or_default())
+        } else if t == glib::Type::BOOL {
+            Val::Bool(value.get().unwrap_or_default())
+        } else {
+            Val::Empty
+        }
     }
-}
 
-impl From<&'static str> for Source {
-    fn from(property: &'static str) -> Self {
-        Source::Property(property)
-    }
-}
-
-impl Source {
-    /// The value of a row object
-    fn value(self, obj: &glib::Object) -> Val {
+    fn as_i64(&self) -> i64 {
         match self {
-            Source::Column(c) => obj.downcast_ref::<Item>().map(|i| i.get(c)).unwrap_or_default(),
-            Source::Property(name) => Val::from_value(&obj.property_value(name)),
+            Val::I64(v) => *v,
+            Val::U32(v) => *v as i64,
+            Val::F64(v) => *v as i64,
+            Val::Bool(v) => *v as i64,
+            _ => 0,
         }
     }
 
-    /// Compares the values of two row objects
-    fn compare(self, a: &glib::Object, b: &glib::Object) -> Ordering {
-        match (self, a.downcast_ref::<Item>(), b.downcast_ref::<Item>()) {
-            // without copying the values
-            (Source::Column(c), Some(a), Some(b)) => a.with(c, |va| b.with(c, |vb| va.compare(vb))),
-            _ => self.value(a).compare(&self.value(b)),
-        }
-    }
-
-    /// Calls f when the value of the row object changes
-    fn connect_changed(
-        self,
-        obj: &glib::Object,
-        f: impl Fn() + 'static,
-    ) -> Option<glib::SignalHandlerId> {
+    fn as_f64(&self) -> f64 {
         match self {
-            Source::Column(c) => {
-                obj.downcast_ref::<Item>().map(|i| i.connect_column_changed(c, move |_| f()))
-            }
-            Source::Property(name) => Some(obj.connect_notify_local(Some(name), move |_, _| f())),
+            Val::F64(v) => *v,
+            other => other.as_i64() as f64,
         }
     }
+
+    fn as_str(&self) -> Option<&str> {
+        match self {
+            Val::Str(s) => s.as_deref(),
+            _ => None,
+        }
+    }
+
+    /// The value as text, like a GValue transformed to a string
+    fn to_text(&self) -> Option<String> {
+        match self {
+            Val::Str(s) => s.clone(),
+            Val::I64(v) => Some(v.to_string()),
+            Val::U32(v) => Some(v.to_string()),
+            Val::F64(v) => Some(format!("{v:.6}")),
+            Val::Bool(v) => Some(if *v { "TRUE" } else { "FALSE" }.into()),
+            Val::Empty => None,
+        }
+    }
+
+    /// Compares values of the same type, strings by their collation
+    fn compare(&self, other: &Val) -> Ordering {
+        match (self, other) {
+            (Val::Str(a), Val::Str(b)) => match (a, b) {
+                (Some(a), Some(b)) => a.compare(b),
+                (a, b) => a.is_some().cmp(&b.is_some()),
+            },
+            (Val::I64(a), Val::I64(b)) => a.cmp(b),
+            (Val::U32(a), Val::U32(b)) => a.cmp(b),
+            (Val::F64(a), Val::F64(b)) => a.compare(b),
+            (Val::Bool(a), Val::Bool(b)) => a.cmp(b),
+            _ => Ordering::Equal,
+        }
+    }
+}
+
+/// Collation of UTF-8 strings, like g_utf8_collate()
+fn utf8_collate(a: &str, b: &str) -> Ordering {
+    let a = glib::GString::from(a);
+    let b = glib::GString::from(b);
+    let r = unsafe { glib::ffi::g_utf8_collate(a.as_ptr(), b.as_ptr()) };
+    r.cmp(&0)
 }
 
 /// The object of a row of the view's model: the row itself, or the item of a
@@ -170,8 +209,11 @@ impl SortKey for String {
 pub struct ColumnDesc {
     /// What sorting by the column is saved as (see the top)
     pub key: i32,
-    pub value: Source,
-    pub extra: Cell<Option<Source>>,
+    /// The property of the row objects it shows
+    pub property: &'static str,
+    /// The property of the icon name of an IconText column, the file ID of a
+    /// FileIconText one
+    pub extra: Cell<Option<&'static str>>,
     pub header: String,
     pub id: String,
     pub flags: Cell<u32>,
@@ -185,9 +227,10 @@ pub struct ColumnDesc {
 }
 
 impl ColumnDesc {
-    /// The icon name of an IconText column, the file ID of a FileIconText one
-    pub fn set_extra(&self, source: impl Into<Source>) {
-        self.extra.set(Some(source.into()));
+    /// The property of the icon name of an IconText column, the file ID of a
+    /// FileIconText one
+    pub fn set_extra(&self, property: &'static str) {
+        self.extra.set(Some(property));
     }
 
     /// Sets the activate function, for rows of type T
@@ -330,8 +373,8 @@ impl CellState {
             return;
         };
         let desc = &self.desc;
-        let value = desc.value.value(&item);
-        let extra = desc.extra.get().map(|s| s.value(&item));
+        let value = Val::of(&item, desc.property);
+        let extra = desc.extra.get().map(|p| Val::of(&item, p));
         self.updating.set(true);
 
         match desc.ctype {
@@ -439,7 +482,8 @@ mod imp {
         pub column_menus: Cell<bool>,
         pub updating_sort: Cell<bool>,
 
-        pub search_column: Cell<Option<Source>>,
+        /// The property of the rows that typing searches
+        pub search_column: Cell<Option<&'static str>>,
         pub search: RefCell<String>,
         pub search_time: Cell<i64>,
 
@@ -659,18 +703,6 @@ impl TreeView {
         })
     }
 
-    /// Registers a column of Items, by its model column
-    pub fn reg_column(
-        &self,
-        ctype: ColType,
-        model_column: i32,
-        header: &str,
-        id: &str,
-        flags: u32,
-    ) -> Rc<ColumnDesc> {
-        self.reg(ctype, model_column, Source::Column(model_column as usize), header, id, flags)
-    }
-
     /// Registers a column of a property of the row objects. The key is what
     /// sorting by it is saved as.
     pub fn reg_property(
@@ -682,21 +714,9 @@ impl TreeView {
         id: &str,
         flags: u32,
     ) -> Rc<ColumnDesc> {
-        self.reg(ctype, key, Source::Property(property), header, id, flags)
-    }
-
-    fn reg(
-        &self,
-        ctype: ColType,
-        key: i32,
-        value: Source,
-        header: &str,
-        id: &str,
-        flags: u32,
-    ) -> Rc<ColumnDesc> {
         let desc = Rc::new(ColumnDesc {
             key,
-            value,
+            property,
             extra: Cell::new(None),
             header: header.to_string(),
             id: id.to_string(),
@@ -876,15 +896,15 @@ impl TreeView {
         let Some(item) = row_object(row) else { return };
         *cell.item.borrow_mut() = Some(item.clone());
 
-        let mut sources = vec![cell.desc.value];
+        let mut properties = vec![cell.desc.property];
         if matches!(cell.desc.ctype, ColType::IconText | ColType::FileIconText) {
-            sources.extend(cell.desc.extra.get());
+            properties.extend(cell.desc.extra.get());
         }
-        let handlers = sources
+        let handlers = properties
             .into_iter()
-            .filter_map(|source| {
+            .map(|property| {
                 let weak = Rc::downgrade(&cell);
-                source.connect_changed(&item, move || {
+                item.connect_notify_local(Some(property), move |_, _| {
                     if let Some(c) = weak.upgrade() {
                         c.refresh();
                     }
@@ -1024,14 +1044,15 @@ impl TreeView {
         if key < 0 {
             return gtk::Ordering::Equal;
         }
-        // a key that isn't registered (from older settings) is a column of
-        // Items, as it was
-        let mut result = match self.find_key(key) {
-            Some(desc) => match desc.compare.borrow().as_ref() {
-                Some(compare) => compare(a, b),
-                None => desc.value.compare(a, b),
-            },
-            None => Source::Column(key as usize).compare(a, b),
+        // (without cloning the column, this is called a lot)
+        let columns = imp.columns.borrow();
+        // a key that isn't registered (from older settings) doesn't sort
+        let Some(desc) = columns.iter().find(|d| d.key == key) else {
+            return gtk::Ordering::Equal;
+        };
+        let mut result = match desc.compare.borrow().as_ref() {
+            Some(compare) => compare(a, b),
+            None => Val::of(a, desc.property).compare(&Val::of(b, desc.property)),
         };
         if imp.sort_order.get() == gtk::SortType::Descending {
             result = result.reverse();
@@ -1585,21 +1606,21 @@ impl TreeView {
     /* Type ahead search, like GtkTreeView's: typing selects the first row
      * whose search column starts with (or else contains) the typed text. */
 
-    pub fn set_search_column(&self, source: impl Into<Source>) {
-        self.imp().search_column.set(Some(source.into()));
+    pub fn set_search_column(&self, property: &'static str) {
+        self.imp().search_column.set(Some(property));
     }
 
     fn search(&self, key: &str) -> bool {
         let imp = self.imp();
         let model = &imp.selection;
         let needle = glib::casefold(key).to_string();
-        let Some(source) = imp.search_column.get() else { return false };
+        let Some(property) = imp.search_column.get() else { return false };
         let texts: Vec<Option<String>> = (0..model.n_items())
             .map(|i| {
                 model
                     .item(i)
                     .and_then(row_object)
-                    .and_then(|obj| source.value(&obj).to_text())
+                    .and_then(|obj| Val::of(&obj, property).to_text())
                     .map(|t| glib::casefold(&t).to_string())
             })
             .collect();

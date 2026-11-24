@@ -23,7 +23,6 @@ mod files;
 mod format;
 mod general_panel;
 mod i18n;
-mod item;
 mod json;
 mod macos;
 mod main_window;
