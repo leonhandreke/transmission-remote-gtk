@@ -25,7 +25,7 @@ impl TreeView {
                 model
                     .item(i)
                     .and_then(row_object)
-                    .and_then(|obj| Val::of(&obj, property).to_text())
+                    .map(|obj| Val::of(&obj, property).to_text())
                     .map(|t| glib::casefold(&t).to_string())
             })
             .collect();

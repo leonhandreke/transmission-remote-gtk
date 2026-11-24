@@ -39,12 +39,12 @@ pub(super) fn cell_of(obj: &impl IsA<glib::Object>) -> Option<Rc<CellState>> {
 }
 
 /// The icon of a file (by its name), or of a directory (file id -1)
-fn file_icon_for(file_id: i64, name: Option<&str>) -> gio::Icon {
+fn file_icon_for(file_id: i64, name: &str) -> gio::Icon {
     if file_id == -1 {
         return gio::ThemedIcon::new("folder").upcast();
     }
     #[cfg(not(windows))]
-    if let Some(name) = name {
+    {
         let (mime, uncertain) = gio::content_type_guess(Some(name), None::<&[u8]>);
         if !uncertain {
             return gio::content_type_get_icon(&mime);
@@ -78,10 +78,7 @@ impl CellState {
             }
             ColType::IconText | ColType::FileIconText => {
                 let text = value.to_text();
-                self.widget
-                    .downcast_ref::<gtk::Label>()
-                    .unwrap()
-                    .set_text(text.as_deref().unwrap_or(""));
+                self.widget.downcast_ref::<gtk::Label>().unwrap().set_text(&text);
                 let image = self.image.as_ref().unwrap();
                 if desc.ctype == ColType::IconText {
                     image.set_icon_name(extra.as_ref().and_then(Val::as_str));
@@ -90,12 +87,12 @@ impl CellState {
                     if file_id == -2 {
                         image.clear();
                     } else {
-                        image.set_from_gicon(&file_icon_for(file_id, text.as_deref()));
+                        image.set_from_gicon(&file_icon_for(file_id, &text));
                     }
                 }
             }
             _ => {
-                let text = format_value(desc, &value);
+                let text = format_value(desc.ctype, &value);
                 if let Some(label) = self.widget.downcast_ref::<gtk::EditableLabel>() {
                     if !label.is_editing() {
                         label.set_text(text.as_deref().unwrap_or(""));

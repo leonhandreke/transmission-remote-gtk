@@ -7,22 +7,18 @@ use gtk::glib;
 use gtk::prelude::*;
 
 use super::ColType;
-use super::column::ColumnDesc;
 use super::sort::SortKey;
 use crate::format;
 use crate::i18n::tr;
 use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL};
 
-/// A value of a cell: a property of the row object, of the types the views
-/// show
+/// A value of a cell: a property of the row object, which the views have
+/// of these types
 #[derive(Clone, Debug)]
 pub(super) enum Val {
-    Empty,
-    Str(Option<String>),
+    Str(String),
     I64(i64),
-    U32(u32),
     F64(f64),
-    Bool(bool),
 }
 
 impl Val {
@@ -31,29 +27,21 @@ impl Val {
         let value = obj.property_value(property);
         let t = value.type_();
         if t == glib::Type::STRING {
-            Val::Str(value.get::<Option<String>>().ok().flatten())
+            Val::Str(value.get::<Option<String>>().ok().flatten().unwrap_or_default())
         } else if t == glib::Type::I64 {
             Val::I64(value.get().unwrap_or_default())
-        } else if t == glib::Type::I32 {
-            Val::I64(value.get::<i32>().unwrap_or_default().into())
-        } else if t == glib::Type::U32 {
-            Val::U32(value.get().unwrap_or_default())
         } else if t == glib::Type::F64 {
             Val::F64(value.get().unwrap_or_default())
-        } else if t == glib::Type::BOOL {
-            Val::Bool(value.get().unwrap_or_default())
         } else {
-            Val::Empty
+            panic!("a column of the property {property} of type {t}");
         }
     }
 
     pub(super) fn as_i64(&self) -> i64 {
         match self {
             Val::I64(v) => *v,
-            Val::U32(v) => *v as i64,
             Val::F64(v) => *v as i64,
-            Val::Bool(v) => *v as i64,
-            _ => 0,
+            Val::Str(_) => 0,
         }
     }
 
@@ -66,42 +54,35 @@ impl Val {
 
     pub(super) fn as_str(&self) -> Option<&str> {
         match self {
-            Val::Str(s) => s.as_deref(),
+            Val::Str(s) => Some(s),
             _ => None,
         }
     }
 
     /// The value as text, like a GValue transformed to a string
-    pub(super) fn to_text(&self) -> Option<String> {
+    pub(super) fn to_text(&self) -> String {
         match self {
             Val::Str(s) => s.clone(),
-            Val::I64(v) => Some(v.to_string()),
-            Val::U32(v) => Some(v.to_string()),
-            Val::F64(v) => Some(format!("{v:.6}")),
-            Val::Bool(v) => Some(if *v { "TRUE" } else { "FALSE" }.into()),
-            Val::Empty => None,
+            Val::I64(v) => v.to_string(),
+            Val::F64(v) => format!("{v:.6}"),
         }
     }
 
     /// Compares values of the same type, strings by their collation
     pub(super) fn compare(&self, other: &Val) -> Ordering {
         match (self, other) {
-            (Val::Str(a), Val::Str(b)) => match (a, b) {
-                (Some(a), Some(b)) => a.compare(b),
-                (a, b) => a.is_some().cmp(&b.is_some()),
-            },
+            (Val::Str(a), Val::Str(b)) => a.compare(b),
             (Val::I64(a), Val::I64(b)) => a.cmp(b),
-            (Val::U32(a), Val::U32(b)) => a.cmp(b),
             (Val::F64(a), Val::F64(b)) => a.compare(b),
-            (Val::Bool(a), Val::Bool(b)) => a.cmp(b),
             _ => Ordering::Equal,
         }
     }
 }
 
-/// Value formatting, like the cell renderers of the GtkTreeView did
-pub(super) fn format_value(desc: &ColumnDesc, value: &Val) -> Option<String> {
-    match desc.ctype {
+/// The text of a value in a column of type ctype, like the cell renderers
+/// of the GtkTreeView did; None when it's not shown (like a speed of 0)
+pub(super) fn format_value(ctype: ColType, value: &Val) -> Option<String> {
+    match ctype {
         ColType::Speed => {
             let speed = value.as_i64();
             (speed > 0).then(|| format::speed(speed))
@@ -137,9 +118,9 @@ pub(super) fn format_value(desc: &ColumnDesc, value: &Val) -> Option<String> {
         },
         ColType::NumGtZero | ColType::NumGtEqZero => {
             let v = value.as_i64();
-            let min = if desc.ctype == ColType::NumGtZero { 1 } else { 0 };
+            let min = if ctype == ColType::NumGtZero { 1 } else { 0 };
             (v >= min).then(|| v.to_string())
         }
-        _ => value.to_text(),
+        _ => Some(value.to_text()),
     }
 }
