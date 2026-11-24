@@ -18,7 +18,7 @@ use crate::dialogs::{
 use crate::general_panel::GeneralPanel;
 use crate::i18n::{sprintf, tr};
 use crate::menu_bar::MenuBar;
-use crate::prefs::{self, Scope};
+use crate::prefs::{self, Prefs, Scope};
 use crate::protocol as p;
 use crate::state_selector::{Filter, StateSelector};
 use crate::status_bar::StatusBar;
@@ -720,36 +720,25 @@ impl MainWindow {
         request("pause-all", connected, |_| p::torrent_pause(None));
     }
 
-    fn action_notify(&self, name: &str, f: fn(&MainWindow, bool, bool)) {
-        let Some(action) = self.lookup_action(name) else { return };
+    /// Shows the sidebar and the details as the preferences say, and
+    /// follows them: the menu's view items and the preferences dialog set
+    /// them. (The sidebar follows its own options, the torrent view the
+    /// style.)
+    fn follow_view_prefs(&self, prefs: &Prefs) {
+        let show = |win: &Self, prefs: &Prefs| {
+            let shown = |key| prefs.get_bool(key, Scope::Global);
+            win.state_selector().set_visible(shown(prefs::KEY_SHOW_STATE_SELECTOR));
+            win.imp().notebook.set_visible(shown(prefs::KEY_SHOW_NOTEBOOK));
+        };
+        show(self, prefs);
         let weak = self.downgrade();
-        action.connect_notify_local(Some("state"), move |a, _| {
-            let Some(win) = weak.upgrade() else { return };
-            let a = a.downcast_ref::<gio::Action>().unwrap();
-            let state = a.state().and_then(|s| s.get::<bool>()).unwrap_or(false);
-            f(&win, a.is_enabled(), state);
-        });
-    }
-
-    /// The view actions (made by the menu bar) show and hide the parts
-    fn connect_view_actions(&self) {
-        self.action_notify("view-notebook", |w, _, active| w.imp().notebook.set_visible(active));
-        self.action_notify("filter-dirs", |w, enabled, active| {
-            if enabled {
-                w.state_selector().set_show_dirs(active);
+        prefs.connect_changed(move |prefs, key| {
+            if let (Some(win), Some(prefs::KEY_SHOW_STATE_SELECTOR | prefs::KEY_SHOW_NOTEBOOK)) =
+                (weak.upgrade(), key)
+            {
+                show(&win, prefs);
             }
         });
-        self.action_notify("filter-trackers", |w, enabled, active| {
-            if enabled {
-                w.state_selector().set_show_trackers(active);
-            }
-        });
-        self.action_notify("directories-first", |w, enabled, active| {
-            if enabled {
-                w.state_selector().set_directories_first(active);
-            }
-        });
-        self.action_notify("view-states", |w, _, active| w.state_selector().set_visible(active));
     }
 
     fn torrent_tv_context_menu(&self, tv: &TreeView, x: f64, y: f64) -> bool {
@@ -852,7 +841,6 @@ impl MainWindow {
         if imp.parts.set(parts).is_err() {
             unreachable!("a window is constructed once");
         }
-        self.connect_view_actions();
 
         let selection = tv.selection();
         let weak = self.downgrade();
@@ -989,8 +977,7 @@ impl MainWindow {
             imp.vpaned.set_position(pos as i32);
         }
 
-        selector.set_visible(prefs.get_bool(prefs::KEY_SHOW_STATE_SELECTOR, Scope::Global));
-        imp.notebook.set_visible(prefs.get_bool(prefs::KEY_SHOW_NOTEBOOK, Scope::Global));
+        self.follow_view_prefs(&prefs);
 
         // A saved position wider than a third of the window is ignored, like
         // those saved when long directory names widened the sidebar.

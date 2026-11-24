@@ -234,11 +234,11 @@ impl MenuBar {
             Some(glib::VariantTy::STRING),
             &style_state(prefs),
         );
+        // Like the view items, it sets the preference, and its state follows
         let p = prefs.clone();
-        action.connect_change_state(move |action, value| {
-            let Some(nick) = value.and_then(|v| v.str().map(str::to_string)) else { return };
-            if let Some(i) = STYLE_NICKS.iter().position(|n| *n == nick) {
-                action.set_state(value.unwrap());
+        action.connect_change_state(move |_, value| {
+            let nick = value.and_then(|v| v.str());
+            if let Some(i) = STYLE_NICKS.iter().position(|n| Some(*n) == nick) {
                 p.set_int(prefs::KEY_STYLE, i as i64, Scope::Global);
             }
         });
@@ -253,14 +253,10 @@ impl MenuBar {
         win.add_action(&action);
     }
 
-    /// A boolean preference, as stateful "win.<name>" action
-    fn view_item_new(
-        win: &MainWindow,
-        prefs: &Prefs,
-        name: &str,
-        key: &'static str,
-        dependency: Option<&str>,
-    ) {
+    /// A boolean preference, as stateful "win.<name>" action. Changing its
+    /// state sets the preference, and its state follows the preference
+    /// (which the widgets follow too).
+    fn view_item_new(win: &MainWindow, prefs: &Prefs, name: &str, key: &'static str) {
         let action = gio::SimpleAction::new_stateful(
             name,
             None,
@@ -268,15 +264,11 @@ impl MenuBar {
         );
         win.add_action(&action);
 
-        if let Some(dep) = dependency.and_then(|d| win.lookup_action(d)) {
-            action.set_enabled(dep.state().and_then(|s| s.get::<bool>()).unwrap_or(false));
-        }
-
         let p = prefs.clone();
-        action.connect_change_state(move |action, value| {
-            let Some(value) = value else { return };
-            action.set_state(value);
-            p.set_bool(key, value.get::<bool>().unwrap_or(false), Scope::Global);
+        action.connect_change_state(move |_, value| {
+            if let Some(value) = value.and_then(|v| v.get::<bool>()) {
+                p.set_bool(key, value, Scope::Global);
+            }
         });
 
         // Preferences can also be changed from the local preferences dialog
@@ -305,37 +297,23 @@ impl MenuBar {
         let sort_menu = torrent_tv.sort_menu(win);
         view_section.insert_submenu(0, Some(&tr("Sort")), &sort_menu);
 
-        Self::view_item_new(win, prefs, "view-states", prefs::KEY_SHOW_STATE_SELECTOR, None);
-        Self::view_item_new(win, prefs, "filter-dirs", prefs::KEY_FILTER_DIRS, Some("view-states"));
-        Self::view_item_new(
-            win,
-            prefs,
-            "filter-trackers",
-            prefs::KEY_FILTER_TRACKERS,
-            Some("view-states"),
-        );
-        Self::view_item_new(
-            win,
-            prefs,
-            "directories-first",
-            prefs::KEY_DIRECTORIES_FIRST,
-            Some("view-states"),
-        );
+        Self::view_item_new(win, prefs, "view-states", prefs::KEY_SHOW_STATE_SELECTOR);
+        Self::view_item_new(win, prefs, "filter-dirs", prefs::KEY_FILTER_DIRS);
+        Self::view_item_new(win, prefs, "filter-trackers", prefs::KEY_FILTER_TRACKERS);
+        Self::view_item_new(win, prefs, "directories-first", prefs::KEY_DIRECTORIES_FIRST);
 
-        if let Some(view_states) = win.lookup_action("view-states") {
-            let w = win.downgrade();
-            view_states.connect_notify_local(Some("state"), move |action, _| {
-                if let Some(win) = w.upgrade() {
-                    let state = action
-                        .downcast_ref::<gio::Action>()
-                        .and_then(|a| a.state())
-                        .and_then(|s| s.get::<bool>());
-                    set_enabled(&win, VIEW_DEPENDENT_ACTIONS, state.unwrap_or(false));
-                }
-            });
-        }
+        // The sidebar's options are enabled while it's shown
+        let sidebar_shown =
+            |prefs: &Prefs| prefs.get_bool(prefs::KEY_SHOW_STATE_SELECTOR, Scope::Global);
+        set_enabled(win, VIEW_DEPENDENT_ACTIONS, sidebar_shown(prefs));
+        let w = win.downgrade();
+        prefs.connect_changed(move |prefs, key| {
+            if let (Some(win), Some(prefs::KEY_SHOW_STATE_SELECTOR)) = (w.upgrade(), key) {
+                set_enabled(&win, VIEW_DEPENDENT_ACTIONS, sidebar_shown(prefs));
+            }
+        });
 
-        Self::view_item_new(win, prefs, "view-notebook", prefs::KEY_SHOW_NOTEBOOK, None);
+        Self::view_item_new(win, prefs, "view-notebook", prefs::KEY_SHOW_NOTEBOOK);
     }
 }
 

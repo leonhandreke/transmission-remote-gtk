@@ -394,6 +394,9 @@ impl StateSelector {
     }
 
     pub fn set_show_dirs(&self, show: bool) {
+        if show == self.imp().show_dirs.get() {
+            return;
+        }
         self.imp().show_dirs.set(show);
         // rebuilt, the rows count each torrent once per update
         self.remove_dynamic(true, None);
@@ -403,6 +406,9 @@ impl StateSelector {
     }
 
     pub fn set_show_trackers(&self, show: bool) {
+        if show == self.imp().show_trackers.get() {
+            return;
+        }
         self.imp().show_trackers.set(show);
         self.remove_dynamic(false, None);
         if show {
@@ -412,6 +418,9 @@ impl StateSelector {
 
     pub fn set_directories_first(&self, first: bool) {
         let imp = self.imp();
+        if first == imp.dirs_first.get() {
+            return;
+        }
         // the sections' order changes only while they're empty
         self.remove_dynamic(true, None);
         self.remove_dynamic(false, None);
@@ -607,6 +616,18 @@ impl StateSelector {
         imp.show_dirs.set(prefs.get_bool(prefs::KEY_FILTER_DIRS, Scope::Global));
         imp.show_trackers.set(prefs.get_bool(prefs::KEY_FILTER_TRACKERS, Scope::Global));
         imp.dirs_first.set(prefs.get_bool(prefs::KEY_DIRECTORIES_FIRST, Scope::Global));
+        // and follow them, from the menu or the preferences dialog
+        let weak = self.downgrade();
+        prefs.connect_changed(move |prefs, key| {
+            let Some(s) = weak.upgrade() else { return };
+            let value = |key| prefs.get_bool(key, Scope::Global);
+            match key {
+                Some(k @ prefs::KEY_FILTER_DIRS) => s.set_show_dirs(value(k)),
+                Some(k @ prefs::KEY_FILTER_TRACKERS) => s.set_show_trackers(value(k)),
+                Some(k @ prefs::KEY_DIRECTORIES_FIRST) => s.set_directories_first(value(k)),
+                _ => {}
+            }
+        });
 
         // The states, directories and trackers are sections of the list. The
         // store is in their order already, so the sort keeps it.
