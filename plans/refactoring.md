@@ -102,11 +102,47 @@ and parent for the tree), and the state selector's row. Then:
   and most `COL_*` constants go away.
 
 Do it one model at a time, smallest first: state selector rows, peers,
-trackers, files, and the torrents last. The preferences' persisted tree
-view settings store the sort column as a model column index
-(`KEY_TV_SORT_COL` in `tree_view.rs::persist`/`restore_sort`); moving to
-names changes the config format, so map old indices or accept resetting
-the sort once.
+trackers, files, and the torrents last.
+
+**Progress:** the state selector's rows are done (`StateRow` in
+`src/state_selector.rs`, with its count label bound to the `count`
+property): use it as the pattern for the property declarations.
+
+**Next: let `TreeView` read columns from properties.** The other models are
+shown with `TreeView`, which knows rows only as `Item`s and columns only as
+model column indexes (about 60 places in `tree_view.rs`, and 27 calls from
+outside). Generalize it once, so the models can move over one by one:
+
+- `ColumnDesc` gets a value source instead of `model_column`/
+  `model_column_extra`: e.g. `enum Source { Column(usize), Property(&'static
+  str) }` for the value and the optional extra (icon or file ID). A
+  property's value is read with `obj.property_value(name)` and converted
+  into the cell value (`Val` can stay as that, until no model uses `Item`).
+- `CellState::refresh()` and `cell_bind()` read through the source, and
+  watch `column-changed::cN` for a column or `notify::<name>` for a property.
+- Rows become `glib::Object` in the API (`selected_items()`,
+  `first_selected()`, `select_item()`, `item_at()`, `ActivateFn`, `EditFn`,
+  `start_editing()`), with the callers downcasting; `item::row_item()`
+  unwraps a `TreeListRow`.
+- Sorting compares the two rows' source values (now `Item::compare` by
+  index); type-ahead search reads its column through a source.
+- "Start editing once shown" is a field of `Item` (`start_edit_column`);
+  keep it in the view instead (the row object and the column ID).
+- Persistence: the sort column is saved as the model column index
+  (`KEY_TV_SORT_COL`, `persist()`/`restore_sort()`). Keep a numeric ID per
+  column, the old `COL_*` value, so saved settings stay valid; or save the
+  column's string ID (`ColumnDesc::id`) and accept that existing sort
+  settings reset once.
+
+Then, per model: a GObject with properties (as `StateRow`), the store's
+item type, the model's update code setting properties instead of columns,
+the view's `reg_column()` calls using property sources, and the model's
+other users (`files::set_wanted()`, `TrackersView`, `FilesView`'s rename,
+`PeersModel`'s host lookups, `torrent_view::RowValues`, the window's filter
+and the properties dialog, which read `tm::COL_*`). The torrent object can
+hold the `Rc<Torrent>` and expose the derived values (flags, status text,
+icon, shortened directory, first tracker host, peer sources, ratio) as
+properties; `TorrentRow` then binds to them and `RowValues` goes away.
 
 ### 4. Split `tree_view.rs` (1,600 lines)
 
