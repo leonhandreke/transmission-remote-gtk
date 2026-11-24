@@ -20,7 +20,7 @@ use crate::i18n::{sprintf, tr};
 use crate::menu_bar::MenuBar;
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
-use crate::state_selector::{FILTER_FLAG_DIR, FILTER_FLAG_TRACKER, StateSelector};
+use crate::state_selector::{Filter, StateSelector};
 use crate::status_bar::StatusBar;
 use crate::toolbar::Toolbar;
 use crate::torrent_menu;
@@ -83,9 +83,9 @@ mod imp {
         pub parts: OnceCell<Parts>,
         pub selected_torrent_id: Cell<i64>,
 
-        // what the torrent filter shows, from the state selector and the entry
-        pub filter_criteria: Cell<u32>,
-        pub filter_selected_text: RefCell<Option<String>>,
+        // what the torrent filter shows: the state selector's filter, and
+        // the entry's text (casefolded)
+        pub filter: RefCell<Filter>,
         pub filter_text: RefCell<Option<String>>,
 
         pub queues_enabled: Cell<bool>,
@@ -510,7 +510,7 @@ impl MainWindow {
 
         // The filter and sorter don't watch the items, so the values they
         // look at may have changed.
-        if imp.filter_criteria.get() != 0 || imp.filter_text.borrow().is_some() {
+        if *imp.filter.borrow() != Filter::All || imp.filter_text.borrow().is_some() {
             self.parts().torrent_filter.changed(gtk::FilterChange::Different);
         }
         self.torrent_tv().resort();
@@ -528,23 +528,16 @@ impl MainWindow {
 
     fn visible_func(&self, torrent: &TorrentObject) -> bool {
         let imp = self.imp();
-        let criteria = imp.filter_criteria.get();
         let v = torrent.values();
 
-        if criteria != 0 {
-            if criteria & FILTER_FLAG_TRACKER != 0 {
-                if !torrent.torrent().has_tracker(imp.filter_selected_text.borrow().as_deref()) {
-                    return false;
-                }
-            } else if criteria & FILTER_FLAG_DIR != 0 {
-                if imp.filter_selected_text.borrow().as_deref()
-                    != Some(v.download_dir_short.as_str())
-                {
-                    return false;
-                }
-            } else if v.flags & criteria == 0 {
-                return false;
-            }
+        let shown = match &*imp.filter.borrow() {
+            Filter::All => true,
+            Filter::State(flags) => v.flags & flags != 0,
+            Filter::Tracker(host) => torrent.torrent().has_tracker(host),
+            Filter::Directory(dir) => v.download_dir_short == *dir,
+        };
+        if !shown {
+            return false;
         }
 
         if let Some(text) = imp.filter_text.borrow().as_ref() {
@@ -561,13 +554,7 @@ impl MainWindow {
         let selector = &parts.state_selector;
         let text = imp.filter_entry.text();
 
-        imp.filter_criteria.set(selector.flag());
-        *imp.filter_selected_text.borrow_mut() =
-            if selector.flag() & (FILTER_FLAG_TRACKER | FILTER_FLAG_DIR) != 0 {
-                selector.selected_text()
-            } else {
-                None
-            };
+        *imp.filter.borrow_mut() = selector.filter();
         *imp.filter_text.borrow_mut() =
             (!text.is_empty()).then(|| glib::casefold(&text).to_string());
 
@@ -945,7 +932,7 @@ impl MainWindow {
         self.add_controller(keys);
 
         let weak = self.downgrade();
-        selector.connect_state_changed(move |_, _| {
+        selector.connect_filter_changed(move |_| {
             if let Some(win) = weak.upgrade() {
                 win.refilter();
             }

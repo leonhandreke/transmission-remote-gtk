@@ -290,8 +290,8 @@ impl Torrent {
     }
 
     /// Whether one of its trackers has the host (see util::tracker_host())
-    pub fn has_tracker(&self, host: Option<&str>) -> bool {
-        self.tracker_stats.iter().any(|t| crate::util::tracker_host(&t.announce) == host)
+    pub fn has_tracker(&self, host: &str) -> bool {
+        self.tracker_stats.iter().any(|t| crate::util::tracker_host(&t.announce) == Some(host))
     }
 }
 
