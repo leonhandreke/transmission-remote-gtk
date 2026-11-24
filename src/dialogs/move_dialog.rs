@@ -13,8 +13,6 @@ use crate::i18n::{sprintf, tr};
 use crate::main_window::MainWindow;
 use crate::prefs;
 use crate::protocol as p;
-use crate::torrent_view;
-use crate::tree_view::TreeView;
 
 mod imp {
     use super::*;
@@ -63,7 +61,8 @@ glib::wrapper! {
 }
 
 impl TorrentMoveDialog {
-    pub fn new(win: &MainWindow, client: &Client, tv: &TreeView) -> Self {
+    /// Moves the torrents ids, the selected ones
+    pub fn new(win: &MainWindow, client: &Client, ids: Vec<i64>) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         *imp.client.borrow_mut() = Some(client.clone());
@@ -82,8 +81,8 @@ impl TorrentMoveDialog {
         d.action_set_enabled("dialog.accept", combo.has_text());
         *imp.location_combo.borrow_mut() = Some(combo);
 
-        let count = tv.count_selected();
-        *imp.ids.borrow_mut() = torrent_view::selected_ids(tv);
+        let count = ids.len();
+        *imp.ids.borrow_mut() = ids;
 
         let msg = if count == 1 {
             let name = client

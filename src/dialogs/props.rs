@@ -26,8 +26,6 @@ use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, Torrent};
 use crate::torrent_model::UpdateMode;
 use crate::torrent_object::{TorrentObject, TorrentValues};
-use crate::torrent_view;
-use crate::tree_view::TreeView;
 use crate::util;
 
 mod imp {
@@ -166,20 +164,21 @@ impl TorrentPropsDialog {
         }
     }
 
-    pub fn new(win: &MainWindow, tv: &TreeView, client: &Client) -> Self {
+    /// The properties of the torrents ids, the selected ones
+    pub fn new(win: &MainWindow, ids: Vec<i64>, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         *imp.client.borrow_mut() = Some(client.clone());
         imp.win.set(Some(win));
 
-        let row_count = tv.count_selected();
+        let row_count = ids.len();
         let prefs = client.prefs().clone();
         let show_details = prefs.get_int(prefs::KEY_STYLE, Scope::Global) != prefs::STYLE_CLASSIC
             && row_count == 1;
         imp.show_details.set(show_details);
 
         let data = client.find_torrent(win.selected_torrent_id());
-        *imp.target_ids.borrow_mut() = torrent_view::selected_ids(tv);
+        *imp.target_ids.borrow_mut() = ids;
 
         if row_count > 1 {
             d.set_title(Some(&sprintf(&tr("Multiple (%d) torrent properties"), &[&row_count])));

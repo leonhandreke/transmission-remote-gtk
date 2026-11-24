@@ -378,7 +378,8 @@ impl MainWindow {
         if self.selected_torrent_id() < 0 {
             return;
         }
-        dialogs::props::TorrentPropsDialog::new(self, &self.torrent_tv(), &self.client()).present();
+        dialogs::props::TorrentPropsDialog::new(self, self.selected_ids(), &self.client())
+            .present();
     }
 
     fn copy_magnet_link(&self) {
@@ -666,7 +667,7 @@ impl MainWindow {
         action("copy-magnet", |w| w.copy_magnet_link());
         action("move", |w| {
             if w.is_ready_for_torrent_action() {
-                dialogs::move_dialog::TorrentMoveDialog::new(w, &w.client(), &w.torrent_tv())
+                dialogs::move_dialog::TorrentMoveDialog::new(w, &w.client(), w.selected_ids())
                     .present();
             }
         });
