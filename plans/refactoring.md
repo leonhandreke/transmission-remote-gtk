@@ -53,11 +53,26 @@ is left to do, in the recommended order. Work happens on the
   `StateRow` (`state_selector.rs`), `PeerObject` (`peers.rs`),
   `TrackerObject` (`trackers.rs`), `FileObject` (`files.rs`) and
   `PersistentRow` (the preferences' lists, `dialogs/preferences.rs`).
-- `src/tree_view.rs` — a GtkTreeView-like widget on GtkColumnView; its
-  columns show a property of the row objects.
+- `src/tree_view/` — a GtkTreeView-like widget on GtkColumnView; its
+  columns show a property of the row objects. `mod.rs`: the widget, model
+  and selection, `set_list_factory()`; `cell.rs`: the cells' widgets
+  (`CellWidget`), their factory and binding; `column.rs`: `ColType`, the
+  `COLUMN_*` flags, `ColumnDesc`, registering, showing/hiding and the
+  header menus; `editing.rs`: editable cells (`start_editing`,
+  `stop_editing`); `sort.rs`: sorting, `SortKey`, the sort indicator and
+  `sort_menu()`; `persist.rs`: saving/restoring columns, widths and sorting
+  (`persist`, `setup_columns`, `restore_sort`); `rows.rs`: finding rows for
+  context menus (`item_at`, `point_in_header`, `focus_rect`,
+  `context_menu_for_rows`, `mark_row_widget`); `expand.rs`: the files
+  tree's expand/collapse (all, and the keys); `search.rs`: type-ahead;
+  `value.rs`: `Val` (a string, i64 or f64 property) and `format_value()`.
+- `src/type_ahead.rs` — `TypeAhead` (the typed text and its timing) and
+  `is_shortcut()`, shared by the tree view and the state selector.
 - `src/util.rs` — also the list helpers for any object type:
   `objects::<T>(model)`, `remove_where::<T>(store, stale)`, and
-  `set_changed(obj, property, value)`.
+  `set_changed(obj, property, value)`; context menus
+  (`add_context_menu`, `popover_menu_popup`, and `present_popovers` for the
+  `size_allocate` of widgets that parent them).
 - `src/main_window.rs` — the window: layout, wiring, filter, actions.
 - `src/details.rs` — the trackers/files/peers lists of a torrent, shared by
   the window and the properties dialog.
@@ -95,13 +110,14 @@ registered by model column index. It's gone; every list model holds
 GObjects with properties (see "Where things are"), and `TreeView` columns
 show a property.
 
-How `TreeView` works now (`src/tree_view.rs`):
+How `TreeView` works now (`src/tree_view/`):
 
 - `reg_property(ctype, key, property, header, id, flags)` registers a
   column showing a property of the row objects; `set_extra()` (the icon
   name, the file ID) and `set_search_column()` take property names too.
-  The cells read the property (as a private `Val`: strings, i64, i32, u32,
-  f64, bools) and watch `notify::<name>`.
+  The cells read the property (as a private `Val`: strings, i64 and f64,
+  the only types the row objects show; another type panics) and watch
+  `notify::<name>`.
 - Each column has a numeric `key`, which is what the sort column is saved
   as (`KEY_TV_SORT_COL`) and the target of the sort menu's actions. It's the
   model column index the column had as Items (written as numbers at the
@@ -117,6 +133,8 @@ How `TreeView` works now (`src/tree_view.rs`):
   `set_activate()` and `set_edit()` take closures over `&T`.
   `tree_view::row_object()` unwraps a `GtkTreeListRow`. The cell to start
   editing once it's shown is kept in the view (`imp::TreeView::start_edit`).
+  (Since step 4, the activate and edit closures no longer get the view:
+  `set_activate(|file: &FileObject| ..)`, `set_edit(|row, done, text| ..)`.)
 
 Setting a GObject property notifies even if the value doesn't change
 (`Item::set` didn't), so the models set values with `util::set_changed()`,
@@ -150,16 +168,37 @@ comparisons.
 name is ever too slow, compare collation keys (`g_utf8_collate_key`)
 cached in the values.
 
-### 4. Split `tree_view.rs` (1,800 lines) — next
+### 4. Split `tree_view.rs` — done
 
-Separate the cell widgets (factories, editable labels, the wanted check
-box, the priority cell, with `Val` and its formatting), the persistence
-of column layout and sorting to the preferences, and type-to-search. The
-type-to-search is duplicated almost verbatim in `state_selector.rs`
-(`key_pressed`), as is presenting popovers in `size_allocate` (both
-widgets' `WidgetImpl`): share them.
+`src/tree_view.rs` (1,800 lines) is the `src/tree_view/` module (see
+"Where things are"); the first commit (0052b61) only moved code. Then:
 
-### 5. The torrent filter as an enum
+- The type-ahead of the tree view and the state selector shares
+  `type_ahead::TypeAhead`; each still matches its own way (the sidebar
+  ignores spaces and matches name prefixes only; the tree views match a
+  prefix, else a substring). Both widgets' `size_allocate` call
+  `util::present_popovers`.
+- The activate/edit callbacks lost their unused `&TreeView` argument (and
+  the cells their reference to the view). `ColumnDesc::set_editable()` is
+  gone (`COLUMN_EDITABLE` alone makes a column editable), as is the
+  `COLUMN_SHOWING` flag: a column is showing while it has its column view
+  column, and the flags no longer change after registering (the remaining
+  ones were renumbered; they're never saved). `ColumnDesc`'s fields are
+  private to the module.
+- `Val` is `Str(String) | I64 | F64`; a cell's widgets are a `CellWidget`
+  enum instead of downcasts; the cell factory is in `cell.rs`; each part
+  sets itself up (`setup_sorting`, `setup_column_actions`,
+  `setup_type_ahead`, `setup_expand_keys`); `find_shown()` finds the
+  column of a column view column; the unused sort model field and
+  `prefs()` getter are gone.
+
+Left as it was: `reg_property()`'s name and arguments, the `ColType` and
+numeric sort keys, the `DATA_CELL`/`DATA_LIST_ITEM` object data, the
+popover positioning for the keyboard (`util::popover_menu_popup` asks
+`TreeView::focus_rect()`, the state selector does its own), and the two
+`list.scroll-to-item` helpers.
+
+### 5. The torrent filter as an enum — next
 
 `state_selector.rs` packs its tracker and directory filters into the same
 `u32` as the torrent status flags (`FILTER_FLAG_TRACKER = 1 << 14`,
@@ -221,6 +260,32 @@ statistics dialogs, adding (with "Apply to all") and removing torrents, the
 torrent rows' status and the First Tracker column.
 
 Not covered: the peers list with real peers (type-ahead, host lookups).
+
+After step 4 (commits 0052b61 to c6a9924), not clicked through yet; check,
+besides the list below:
+
+- type-ahead in the files list (prefix, then substring; a pause starts
+  over; with spaces), the peers list (by host; needs real peers), and
+  the sidebar (prefix only, spaces ignored); that typing
+  doesn't trigger the files tree's +, -, * and / keys while a search is
+  being typed, and that they (and Shift+Left/Right) expand and collapse
+  otherwise;
+- every context menu (torrents, files, trackers, sidebar, column headers)
+  opening at the pointer and from the keyboard (Shift+F10/Menu), sized
+  right on the first frame;
+- the column header menus: hiding a column, showing a hidden one after
+  another, Unremovable columns (trackers' Tier and Announce URL) not
+  hideable, the last shown column not hideable; that hidden columns,
+  order and widths survive a restart (also with settings from before);
+- sorting by clicking headers and by View > Sort, ascending and
+  descending, in the torrents, files, trackers and peers lists;
+- the files list: the check box (also on a directory: mixed), clicking the
+  priority (normal, high, low), the file icons and folder icons, the
+  expanders;
+- editing the trackers' announce URL (select, then click; Enter; Escape)
+  and the preferences' lists (as below);
+- the Transmission/compact styles (`set_list_factory`) and switching back
+  to the classic columns.
 
 After the torrents and the preferences' lists moved off `Item` (commits
 2e1022d, 6362aaa, ff4eb7c), not clicked through yet; check:
