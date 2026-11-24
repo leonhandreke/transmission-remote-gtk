@@ -141,6 +141,16 @@ impl TreeView {
         self.imp().columns.borrow().iter().find(|d| d.id == id).cloned()
     }
 
+    /// The column showing as column of the column view
+    pub(super) fn find_shown(&self, column: &gtk::ColumnViewColumn) -> Option<Rc<ColumnDesc>> {
+        self.imp()
+            .columns
+            .borrow()
+            .iter()
+            .find(|d| d.column.borrow().as_ref() == Some(column))
+            .cloned()
+    }
+
     pub(super) fn find_key(&self, key: i32) -> Option<Rc<ColumnDesc>> {
         self.imp().columns.borrow().iter().find(|d| d.key == key).cloned()
     }
@@ -157,6 +167,32 @@ impl TreeView {
     fn hide_column(&self, desc: &ColumnDesc) {
         let Some(column) = desc.column.take() else { return };
         self.imp().column_view.remove_column(&column);
+    }
+
+    /// The action of the column header menus that shows a hidden column
+    /// after another one; each column's own action hides it (see
+    /// column_action)
+    pub(super) fn setup_column_actions(&self) {
+        let imp = self.imp();
+        let show_after =
+            gio::SimpleAction::new("show-after", Some(glib::VariantTy::new("(ss)").unwrap()));
+        let weak = self.downgrade();
+        show_after.connect_activate(move |_, param| {
+            let (Some(tv), Some((id, after_id))) =
+                (weak.upgrade(), param.and_then(|p| p.get::<(String, String)>()))
+            else {
+                return;
+            };
+            let desc = tv.find_column(&id);
+            let after = tv.find_column(&after_id);
+            if let Some(desc) = desc.filter(|d| !d.showing()) {
+                tv.add_column_after(&desc, -1, after.as_ref());
+                tv.sync_sort_indicator();
+                tv.update_column_menus();
+            }
+        });
+        imp.actions.add_action(&show_after);
+        self.insert_action_group("tvcol", Some(&imp.actions));
     }
 
     fn column_action(&self, desc: &Rc<ColumnDesc>) -> gio::SimpleAction {

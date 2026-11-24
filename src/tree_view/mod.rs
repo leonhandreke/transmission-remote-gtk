@@ -27,7 +27,7 @@ mod search;
 mod sort;
 mod value;
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::{Rc, Weak};
 
 use gtk::prelude::*;
@@ -69,9 +69,9 @@ mod imp {
         pub list_view: RefCell<Option<gtk::ListView>>,
 
         pub model: RefCell<Option<gio::ListModel>>,
-        pub sort_model: RefCell<Option<gtk::SortListModel>>,
         pub selection: gtk::MultiSelection,
-        pub sorter: RefCell<Option<gtk::CustomSorter>>,
+        /// Sorts the rows (see sort_func)
+        pub sorter: OnceCell<gtk::CustomSorter>,
 
         pub sort_column: Cell<i32>,
         pub sort_order: Cell<gtk::SortType>,
@@ -83,7 +83,9 @@ mod imp {
         pub search_column: Cell<Option<&'static str>>,
         pub type_ahead: TypeAhead,
 
+        /// The actions of the column header menus
         pub actions: gio::SimpleActionGroup,
+        /// Of the column view's sorter changing, by a click on a header
         pub sorter_handler: RefCell<Option<glib::SignalHandlerId>>,
 
         /// The cell (a row object and a column) to start editing once it's
@@ -102,7 +104,6 @@ mod imp {
                 column_view: gtk::ColumnView::new(Some(selection.clone())),
                 list_view: Default::default(),
                 model: Default::default(),
-                sort_model: Default::default(),
                 selection,
                 sorter: Default::default(),
                 sort_column: Cell::new(-1),
@@ -200,27 +201,9 @@ impl TreeView {
     fn setup(&self) {
         let imp = self.imp();
 
-        let weak = self.downgrade();
-        let sorter = gtk::CustomSorter::new(move |a, b| {
-            let Some(tv) = weak.upgrade() else {
-                return gtk::Ordering::Equal;
-            };
-            tv.sort_func(a, b)
-        });
-        *imp.sorter.borrow_mut() = Some(sorter);
-
         let cv = &imp.column_view;
         cv.set_reorderable(true);
         cv.set_enable_rubberband(true);
-        if let Some(cv_sorter) = cv.sorter() {
-            let weak = self.downgrade();
-            let id = cv_sorter.connect_changed(move |sorter, _| {
-                if let Some(tv) = weak.upgrade() {
-                    tv.column_sorter_changed(sorter);
-                }
-            });
-            *imp.sorter_handler.borrow_mut() = Some(id);
-        }
         let weak = self.downgrade();
         cv.connect_activate(move |_, position| {
             if let Some(tv) = weak.upgrade() {
@@ -233,46 +216,10 @@ impl TreeView {
         imp.scrolled.set_child(Some(cv));
         imp.scrolled.set_parent(self);
 
-        let show_after =
-            gio::SimpleAction::new("show-after", Some(glib::VariantTy::new("(ss)").unwrap()));
-        let weak = self.downgrade();
-        show_after.connect_activate(move |_, param| {
-            let (Some(tv), Some((id, after_id))) =
-                (weak.upgrade(), param.and_then(|p| p.get::<(String, String)>()))
-            else {
-                return;
-            };
-            let desc = tv.find_column(&id);
-            let after = tv.find_column(&after_id);
-            if let Some(desc) = desc.filter(|d| !d.showing()) {
-                tv.add_column_after(&desc, -1, after.as_ref());
-                tv.sync_sort_indicator();
-                tv.update_column_menus();
-            }
-        });
-        imp.actions.add_action(&show_after);
-        self.insert_action_group("tvcol", Some(&imp.actions));
-
-        let keys = gtk::EventControllerKey::new();
-        let weak = self.downgrade();
-        keys.connect_key_pressed(move |_, keyval, _, state| match weak.upgrade() {
-            Some(tv) if tv.key_pressed(keyval, state) => glib::Propagation::Stop,
-            _ => glib::Propagation::Proceed,
-        });
-        self.add_controller(keys);
-
-        let keys = gtk::EventControllerKey::new();
-        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let weak = self.downgrade();
-        keys.connect_key_pressed(move |_, keyval, _, state| match weak.upgrade() {
-            Some(tv) if tv.expand_key_pressed(keyval, state) => glib::Propagation::Stop,
-            _ => glib::Propagation::Proceed,
-        });
-        self.add_controller(keys);
-    }
-
-    pub fn prefs(&self) -> Option<Prefs> {
-        self.imp().prefs.borrow().clone()
+        self.setup_sorting();
+        self.setup_column_actions();
+        self.setup_type_ahead();
+        self.setup_expand_keys();
     }
 
     pub fn connect_row_activated<F: Fn(&Self, u32) + 'static>(
@@ -298,7 +245,7 @@ impl TreeView {
         let imp = self.imp();
         let model = model.as_ref().clone();
         let sorter: gtk::Sorter = {
-            let s = imp.sorter.borrow().clone().unwrap();
+            let s = imp.sorter.get().unwrap().clone();
             if model.is::<gtk::TreeListModel>() {
                 gtk::TreeListRowSorter::new(Some(s)).upcast()
             } else {
@@ -308,7 +255,6 @@ impl TreeView {
         *imp.model.borrow_mut() = Some(model.clone());
         let sort_model = gtk::SortListModel::new(Some(model), Some(sorter));
         imp.selection.set_model(Some(&sort_model));
-        *imp.sort_model.borrow_mut() = Some(sort_model);
     }
 
     pub fn model(&self) -> Option<gio::ListModel> {
@@ -352,8 +298,7 @@ impl TreeView {
 
     pub fn select_item(&self, item: &impl IsA<glib::Object>) {
         if let Some(position) = self.find_position(item.upcast_ref()) {
-            self.imp().selection.select_item(position, true);
-            self.scroll_to(Some(position));
+            self.select_and_focus(position);
         }
     }
 

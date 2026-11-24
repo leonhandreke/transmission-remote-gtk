@@ -24,41 +24,44 @@ pub(super) fn marked_list_item(widget: &gtk::Widget) -> Option<gtk::ListItem> {
     }
 }
 
-impl TreeView {
-    fn list_item_for(widget: Option<gtk::Widget>, stop: &gtk::Widget) -> Option<gtk::ListItem> {
-        let mut widget = widget;
-        while let Some(w) = widget {
-            if &w == stop {
-                break;
-            }
-            if let Some(li) = marked_list_item(&w) {
-                return Some(li);
-            }
-            let parent = w.parent();
-            // the padding of a row (a child of the list view) is outside its
-            // row widget or cells
-            if parent.as_ref().is_some_and(|p| p.is::<gtk::ListView>()) {
-                return Self::find_marked(&w);
-            }
-            widget = parent;
+/// The list item of the row (or cell) that widget is in, looking up to stop
+fn list_item_for(widget: Option<gtk::Widget>, stop: &gtk::Widget) -> Option<gtk::ListItem> {
+    let mut widget = widget;
+    while let Some(w) = widget {
+        if &w == stop {
+            break;
         }
-        None
-    }
-
-    fn find_marked(widget: &gtk::Widget) -> Option<gtk::ListItem> {
-        if let Some(li) = marked_list_item(widget) {
+        if let Some(li) = marked_list_item(&w) {
             return Some(li);
         }
-        let mut child = widget.first_child();
-        while let Some(c) = child {
-            if let Some(li) = Self::find_marked(&c) {
-                return Some(li);
-            }
-            child = c.next_sibling();
+        let parent = w.parent();
+        // the padding of a row (a child of the list view) is outside its
+        // row widget or cells
+        if parent.as_ref().is_some_and(|p| p.is::<gtk::ListView>()) {
+            return find_marked(&w);
         }
-        None
+        widget = parent;
     }
+    None
+}
 
+/// The list item of widget or of the first of its descendants that has one
+fn find_marked(widget: &gtk::Widget) -> Option<gtk::ListItem> {
+    if let Some(li) = marked_list_item(widget) {
+        return Some(li);
+    }
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(li) = find_marked(&c) {
+            return Some(li);
+        }
+        child = c.next_sibling();
+    }
+    None
+}
+
+impl TreeView {
+    /// Whether x, y (in the view's coordinates) is in the column headers
     pub fn point_in_header(&self, x: f64, y: f64) -> bool {
         let cv: &gtk::Widget = self.imp().column_view.upcast_ref();
         let mut widget = self.pick(x, y, gtk::PickFlags::DEFAULT);
@@ -79,7 +82,7 @@ impl TreeView {
     pub fn item_at(&self, x: f64, y: f64) -> Option<(glib::Object, u32)> {
         // cells may not be targetable, like a text cell that can't be edited
         let widget = self.pick(x, y, gtk::PickFlags::INSENSITIVE | gtk::PickFlags::NON_TARGETABLE);
-        let li = Self::list_item_for(widget, self.upcast_ref())?;
+        let li = list_item_for(widget, self.upcast_ref())?;
         let row = li.item()?;
         Some((row_object(row)?, li.position()))
     }
@@ -114,8 +117,8 @@ impl TreeView {
     pub fn focus_rect(&self) -> Option<graphene::Rect> {
         let focus = self.focus_widget()?;
         // the focus is on the row widget, or in one of its cells
-        if Self::find_marked(&focus).is_none() {
-            Self::list_item_for(Some(focus.clone()), self.upcast_ref())?;
+        if find_marked(&focus).is_none() {
+            list_item_for(Some(focus.clone()), self.upcast_ref())?;
         }
         focus.compute_bounds(self)
     }
@@ -123,8 +126,7 @@ impl TreeView {
     /// The row (a GtkTreeListRow of a tree) with the keyboard focus
     pub(super) fn focus_row(&self) -> Option<glib::Object> {
         let focus = self.focus_widget()?;
-        let li = Self::find_marked(&focus)
-            .or_else(|| Self::list_item_for(Some(focus), self.upcast_ref()))?;
+        let li = find_marked(&focus).or_else(|| list_item_for(Some(focus), self.upcast_ref()))?;
         li.item()
     }
 }

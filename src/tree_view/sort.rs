@@ -54,7 +54,30 @@ impl SortKey for String {
 }
 
 impl TreeView {
-    pub(super) fn sort_func(&self, a: &glib::Object, b: &glib::Object) -> gtk::Ordering {
+    /// The view's sorter, and following clicks on the column headers
+    pub(super) fn setup_sorting(&self) {
+        let imp = self.imp();
+        let weak = self.downgrade();
+        let sorter = gtk::CustomSorter::new(move |a, b| {
+            let Some(tv) = weak.upgrade() else {
+                return gtk::Ordering::Equal;
+            };
+            tv.sort_func(a, b)
+        });
+        let _ = imp.sorter.set(sorter);
+
+        if let Some(cv_sorter) = imp.column_view.sorter() {
+            let weak = self.downgrade();
+            let id = cv_sorter.connect_changed(move |sorter, _| {
+                if let Some(tv) = weak.upgrade() {
+                    tv.column_sorter_changed(sorter);
+                }
+            });
+            *imp.sorter_handler.borrow_mut() = Some(id);
+        }
+    }
+
+    fn sort_func(&self, a: &glib::Object, b: &glib::Object) -> gtk::Ordering {
         let imp = self.imp();
         let key = imp.sort_column.get();
         if key < 0 {
@@ -109,26 +132,19 @@ impl TreeView {
     pub fn resort(&self) {
         let imp = self.imp();
         if imp.sort_column.get() >= 0
-            && let Some(s) = imp.sorter.borrow().as_ref()
+            && let Some(s) = imp.sorter.get()
         {
             s.changed(gtk::SorterChange::Different);
         }
     }
 
     /// A column header was clicked
-    pub(super) fn column_sorter_changed(&self, sorter: &gtk::Sorter) {
+    fn column_sorter_changed(&self, sorter: &gtk::Sorter) {
         if self.imp().updating_sort.get() {
             return;
         }
         let Some(cvs) = sorter.downcast_ref::<gtk::ColumnViewSorter>() else { return };
-        let desc = cvs.primary_sort_column().and_then(|c| {
-            self.imp()
-                .columns
-                .borrow()
-                .iter()
-                .find(|d| d.column.borrow().as_ref() == Some(&c))
-                .cloned()
-        });
+        let desc = cvs.primary_sort_column().and_then(|c| self.find_shown(&c));
         match desc {
             Some(d) => self.set_sort(d.key, cvs.primary_sort_order()),
             None => self.set_sort(-1, gtk::SortType::Ascending),

@@ -10,6 +10,17 @@ use super::{TreeView, row_object};
 use crate::type_ahead::TypeAhead;
 
 impl TreeView {
+    pub(super) fn setup_type_ahead(&self) {
+        let keys = gtk::EventControllerKey::new();
+        let weak = self.downgrade();
+        keys.connect_key_pressed(move |_, keyval, _, state| match weak.upgrade() {
+            Some(tv) if tv.key_pressed(keyval, state) => glib::Propagation::Stop,
+            _ => glib::Propagation::Proceed,
+        });
+        self.add_controller(keys);
+    }
+
+    /// Typing searches the property of the rows
     pub fn set_search_column(&self, property: &'static str) {
         self.imp().search_column.set(Some(property));
     }
@@ -44,7 +55,7 @@ impl TreeView {
         }
     }
 
-    pub(super) fn key_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
+    fn key_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
         let imp = self.imp();
         let Some(c) = TypeAhead::typed_char(keyval, state) else { return false };
         if imp.search_column.get().is_none() {

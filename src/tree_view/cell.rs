@@ -7,7 +7,6 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk::prelude::*;
-use gtk::subclass::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use super::column::{COLUMN_EDITABLE, ColumnDesc};
@@ -229,9 +228,7 @@ impl TreeView {
 
         // the expander of a tree goes in its file name column
         let mut expander = None;
-        let is_tree =
-            self.imp().model.borrow().as_ref().is_some_and(|m| m.is::<gtk::TreeListModel>());
-        if desc.ctype == ColType::FileIconText && is_tree {
+        if desc.ctype == ColType::FileIconText && self.tree_model().is_some() {
             let e = gtk::TreeExpander::new();
             e.set_child(Some(&child));
             child = e.clone().upcast();

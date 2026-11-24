@@ -17,7 +17,7 @@ pub const PERSIST_LAYOUT: u32 = 1 << 1;
 
 impl TreeView {
     fn with_props<R>(&self, f: impl FnOnce(&mut serde_json::Map<String, Value>) -> R) -> Option<R> {
-        let prefs = self.prefs()?;
+        let prefs = self.imp().prefs.borrow().clone()?;
         let id = self.imp().config_id.borrow().clone();
         Some(prefs.with_tree_view_props(&id, f))
     }
@@ -31,14 +31,7 @@ impl TreeView {
             for col in (0..columns.n_items())
                 .filter_map(|i| columns.item(i).and_downcast::<gtk::ColumnViewColumn>())
             {
-                let desc = self
-                    .imp()
-                    .columns
-                    .borrow()
-                    .iter()
-                    .find(|d| d.column.borrow().as_ref() == Some(&col))
-                    .cloned();
-                if let Some(desc) = desc {
+                if let Some(desc) = self.find_shown(&col) {
                     ids.push(json!(desc.id));
                     // The width is the one the user resized the column to, or -1
                     widths.push(json!(col.fixed_width()));

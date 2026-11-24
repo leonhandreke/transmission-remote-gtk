@@ -1,15 +1,27 @@
 //! Expanding and collapsing the rows of a tree: all of them, and with the
 //! keys of GtkTreeView
 
-use gtk::gdk;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
+use gtk::{gdk, glib};
 
 use super::TreeView;
 use crate::type_ahead::is_shortcut;
 
 impl TreeView {
-    fn tree_model(&self) -> Option<gtk::TreeListModel> {
+    /// Before the list's own keys (Shift+arrows extend the selection)
+    pub(super) fn setup_expand_keys(&self) {
+        let keys = gtk::EventControllerKey::new();
+        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let weak = self.downgrade();
+        keys.connect_key_pressed(move |_, keyval, _, state| match weak.upgrade() {
+            Some(tv) if tv.expand_key_pressed(keyval, state) => glib::Propagation::Stop,
+            _ => glib::Propagation::Proceed,
+        });
+        self.add_controller(keys);
+    }
+
+    pub(super) fn tree_model(&self) -> Option<gtk::TreeListModel> {
         self.model().and_downcast::<gtk::TreeListModel>()
     }
 
@@ -84,8 +96,7 @@ impl TreeView {
         }
     }
 
-    /// Before the list's own keys (Shift+arrows extend the selection)
-    pub(super) fn expand_key_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
+    fn expand_key_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
         // unless they're part of a search
         if self.imp().type_ahead.is_typing() || self.tree_model().is_none() || is_shortcut(state) {
             return false;
