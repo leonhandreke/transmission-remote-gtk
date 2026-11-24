@@ -48,10 +48,16 @@ is left to do, in the recommended order. Work happens on the
   (`torrent.rs`) and session (`session.rs`).
 - `src/json.rs` — the lenient `get_i64()`-style getters, for the preferences
   file and `JsonWidgets`.
-- `src/item.rs` — the untyped column `Item`. `src/torrent_model.rs`,
-  `src/files.rs`, `src/peers.rs`, `src/trackers.rs`, `src/state_selector.rs`
-  — models of Items with `COL_*` constants.
-- `src/tree_view.rs` — a GtkTreeView-like widget on GtkColumnView.
+- `src/item.rs` — the untyped column `Item`, still used by
+  `src/torrent_model.rs` (with `COL_*` constants) and the preferences' lists
+  (`PersistentTreeView` in `dialogs/preferences.rs`). The other models are
+  GObjects with properties: `StateRow` (`state_selector.rs`), `PeerObject`
+  (`peers.rs`), `TrackerObject` (`trackers.rs`), `FileObject` (`files.rs`).
+- `src/tree_view.rs` — a GtkTreeView-like widget on GtkColumnView; its
+  columns read an Item column or an object property (`Source`).
+- `src/util.rs` — also the list helpers for any object type:
+  `objects::<T>(model)`, `remove_where::<T>(store, stale)`, and
+  `set_changed(obj, property, value)`.
 - `src/main_window.rs` — the window: layout, wiring, filter, actions.
 - `src/details.rs` — the trackers/files/peers lists of a torrent, shared by
   the window and the properties dialog.
@@ -104,47 +110,61 @@ and parent for the tree), and the state selector's row. Then:
 Do it one model at a time, smallest first: state selector rows, peers,
 trackers, files, and the torrents last.
 
-**Progress:** the state selector's rows are done (`StateRow` in
-`src/state_selector.rs`, with its count label bound to the `count`
-property): use it as the pattern for the property declarations.
+**Progress:** done: the state selector's rows (`StateRow`), `TreeView`
+reading columns from properties, the peers (`PeerObject`), the trackers
+(`TrackerObject`, with the editable announce URL) and the files tree
+(`FileObject`, also in the add dialog and the rename dialog). Left: the
+torrents (below), and the preferences' lists (`PersistentTreeView`: two
+editable string columns of Items, whose keys come from the dialog; small,
+could be a GObject with two string properties or stay on Items until the
+torrents are done, then `Item` goes).
 
-**Next: let `TreeView` read columns from properties.** The other models are
-shown with `TreeView`, which knows rows only as `Item`s and columns only as
-model column indexes (about 60 places in `tree_view.rs`, and 27 calls from
-outside). Generalize it once, so the models can move over one by one:
+How `TreeView` works now (`src/tree_view.rs`):
 
-- `ColumnDesc` gets a value source instead of `model_column`/
-  `model_column_extra`: e.g. `enum Source { Column(usize), Property(&'static
-  str) }` for the value and the optional extra (icon or file ID). A
-  property's value is read with `obj.property_value(name)` and converted
-  into the cell value (`Val` can stay as that, until no model uses `Item`).
-- `CellState::refresh()` and `cell_bind()` read through the source, and
-  watch `column-changed::cN` for a column or `notify::<name>` for a property.
-- Rows become `glib::Object` in the API (`selected_items()`,
-  `first_selected()`, `select_item()`, `item_at()`, `ActivateFn`, `EditFn`,
-  `start_editing()`), with the callers downcasting; `item::row_item()`
-  unwraps a `TreeListRow`.
-- Sorting compares the two rows' source values (now `Item::compare` by
-  index); type-ahead search reads its column through a source.
-- "Start editing once shown" is a field of `Item` (`start_edit_column`);
-  keep it in the view instead (the row object and the column ID).
-- Persistence: the sort column is saved as the model column index
-  (`KEY_TV_SORT_COL`, `persist()`/`restore_sort()`). Keep a numeric ID per
-  column, the old `COL_*` value, so saved settings stay valid; or save the
-  column's string ID (`ColumnDesc::id`) and accept that existing sort
-  settings reset once.
+- A column's value and its extra (icon name, file ID) come from a
+  `Source`: `Column(usize)` of an `Item` or `Property(&'static str)` of the
+  row object, read as a `Val` (`Val::from_value()` converts strings, i64,
+  i32, u32, f64 and bools). The cells watch `column-changed::cN` or
+  `notify::<name>`. `reg_column()` registers an Item column,
+  `reg_property(ctype, key, property, header, id, flags)` a property one;
+  `set_extra()` and `set_search_column()` take either (a `usize` or a
+  `&'static str`).
+- Each column has a numeric `key`, which is what the sort column is saved
+  as (`KEY_TV_SORT_COL`) and the target of the sort menu's actions. For
+  property columns it's the model column index they had as Items (written
+  as numbers at the `reg_property()` calls, see "the keys are the model
+  columns…"), so saved sort settings keep their meaning. A saved key that
+  isn't registered sorts by that column of Items, as before.
+- Rows are `glib::Object`s in the API: `selected_items::<T>()`,
+  `first_selected::<T>()`, `select_item()`, `item_at()`, `start_editing()`;
+  `set_activate()` and `set_edit()` take closures over `&T`.
+  `tree_view::row_object()` unwraps a `GtkTreeListRow`.
+- The cell to start editing once it's shown is kept in the view
+  (`imp::TreeView::start_edit`: a weak row object and column), not in the
+  row.
+- `is_column_showing()` takes the column's string ID.
 
-Then, per model: a GObject with properties (as `StateRow`), the store's
-item type, the model's update code setting properties instead of columns,
-the view's `reg_column()` calls using property sources, and the model's
-other users (`files::set_wanted()`, `TrackersView`, `FilesView`'s rename,
-`PeersModel`'s host lookups, `torrent_view::RowValues`, the window's filter
-and the properties dialog, which read `tm::COL_*`). The torrent object can
-hold the `Rc<Torrent>` and expose the derived values (flags, status text,
-icon, shortened directory, first tracker host, peer sources, ratio) as
-properties; `TorrentRow` then binds to them and `RowValues` goes away.
+Setting a GObject property notifies even if the value doesn't change
+(`Item::set` didn't), so the models set values with `util::set_changed()`,
+which compares first; otherwise every update would refresh every bound
+cell. Bookkeeping properties nobody shows (`serial`) use the plain setters.
 
-### 4. Split `tree_view.rs` (1,600 lines)
+**Next: the torrents.** `TorrentObject`, holding the `Rc<Torrent>` plus the
+derived values (flags, status text, icon, shortened directory, first
+tracker host, peer sources, update serial) as properties. Then
+`torrent_view.rs`'s `reg_column()` calls become `reg_property()` with the
+`COL_*` values as keys, `TorrentRow` binds to the properties and
+`RowValues` goes, and the other users of `tm::COL_*` (about 75 places: the
+window's filter and `first_selected`, the properties dialog, the general
+panel, the state selector's counting, `TorrentItemExt`) read properties.
+Then `Item`, `Val::Torrent`, `Source::Column`, `reg_column()` and the Item
+fallback in `TreeView::sort_func` go (`Val` itself can stay as the cell
+value, or become a smaller enum). Sorting a property column reads both
+values with `property_value()` for each comparison (a string copy for text
+columns); fine for the details lists, but measure with a few thousand
+torrents, and give `ColumnDesc` a typed compare closure if it's slow.
+
+### 4. Split `tree_view.rs` (1,700 lines)
 
 After (or along with) step 3: separate the cell widgets (factories,
 editable labels, the wanted check box, the priority cell), the persistence
@@ -203,6 +223,16 @@ can stay in the window.
   testing on the base commit too).
 
 ## Not yet verified in the UI
+
+The typed list items (step 3: `TreeView`'s sources, peers, trackers, files)
+weren't clicked through either. Worth checking: sorting each details list
+by every column (and that a saved sort survives a restart), type-ahead in
+the peers (host) and files (name) lists, the host lookup when the Host
+column is shown, adding a tracker (the new row starts editing), editing
+and deleting trackers, the files' wanted check boxes and priority clicks
+(directories show mixed, and follow their files), the files' context menu,
+renaming a file, the add dialog's file list and "Apply to all", and the
+preferences' lists (adding starts editing, Enter edits, up/down, delete).
 
 These commits were not clicked through (the check was stopped early):
 the connection refactor (`client/connection.rs`), the First Tracker column
