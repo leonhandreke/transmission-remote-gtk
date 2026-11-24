@@ -601,7 +601,6 @@ template $TrgPreferencesDialog: $TrgDialog {
       CheckButton show_state_selector_check {
         label: _("Sidebar");
         use-underline: true;
-        toggled => $view_states_toggled_cb();
         hexpand: true;
         margin-start: 18;
 
@@ -616,7 +615,6 @@ template $TrgPreferencesDialog: $TrgDialog {
         label: _("Directory filters");
         use-underline: true;
         sensitive: bind show_state_selector_check.active;
-        toggled => $filter_dirs_toggled_cb();
         hexpand: true;
         margin-start: 18;
 
@@ -631,7 +629,6 @@ template $TrgPreferencesDialog: $TrgDialog {
         label: _("Tracker filters");
         use-underline: true;
         sensitive: bind show_state_selector_check.active;
-        toggled => $filter_trackers_toggled_cb();
         hexpand: true;
         margin-start: 18;
 
@@ -646,7 +643,6 @@ template $TrgPreferencesDialog: $TrgDialog {
         label: _("Directories first");
         use-underline: true;
         sensitive: bind show_state_selector_check.active;
-        toggled => $directories_first_toggled_cb();
         hexpand: true;
         margin-start: 18;
 
@@ -660,7 +656,6 @@ template $TrgPreferencesDialog: $TrgDialog {
       CheckButton show_notebook_check {
         label: _("Torrent Details");
         use-underline: true;
-        toggled => $notebook_toggled_cb();
         hexpand: true;
         margin-start: 18;
 

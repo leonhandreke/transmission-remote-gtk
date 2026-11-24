@@ -393,7 +393,7 @@ impl StateSelector {
         );
     }
 
-    pub fn set_show_dirs(&self, show: bool) {
+    fn set_show_dirs(&self, show: bool) {
         if show == self.imp().show_dirs.get() {
             return;
         }
@@ -405,7 +405,7 @@ impl StateSelector {
         }
     }
 
-    pub fn set_show_trackers(&self, show: bool) {
+    fn set_show_trackers(&self, show: bool) {
         if show == self.imp().show_trackers.get() {
             return;
         }
@@ -416,7 +416,7 @@ impl StateSelector {
         }
     }
 
-    pub fn set_directories_first(&self, first: bool) {
+    fn set_directories_first(&self, first: bool) {
         let imp = self.imp();
         if first == imp.dirs_first.get() {
             return;

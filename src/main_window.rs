@@ -281,7 +281,7 @@ impl MainWindow {
         &self.parts().menu_bar
     }
 
-    pub fn state_selector(&self) -> StateSelector {
+    fn state_selector(&self) -> StateSelector {
         self.parts().state_selector.clone()
     }
 
@@ -347,6 +347,15 @@ impl MainWindow {
             return;
         }
         let prefs = self.client().prefs().clone();
+
+        // Closing the preferences dialog without OK restores the view
+        // settings it previews, so they aren't saved here
+        let windows = gtk::Window::toplevels();
+        let dialogs: Vec<PreferencesDialog> =
+            (0..windows.n_items()).filter_map(|i| windows.item(i).and_downcast()).collect();
+        for dialog in dialogs {
+            dialog.close();
+        }
 
         self.save_window_size();
         prefs.set_int(prefs::KEY_NOTEBOOK_PANED_POS, imp.vpaned.position() as i64, Scope::Global);
@@ -1049,11 +1058,5 @@ impl MainWindow {
         if !host.is_empty() && prefs.get_bool(prefs::KEY_AUTO_CONNECT, Scope::Profile) {
             self.connect_profile(-1);
         }
-    }
-}
-
-impl MainWindow {
-    pub fn notebook_set_visible(&self, visible: bool) {
-        self.imp().notebook.set_visible(visible);
     }
 }

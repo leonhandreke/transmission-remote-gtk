@@ -3,6 +3,11 @@
 //!
 //! The widgets of the template which show a preference are listed with the
 //! key and scope of the preference, and loaded and saved with them.
+//!
+//! The view settings (the sidebar, its options, the details) are previewed:
+//! their check boxes set the preference straight away, which the window
+//! follows, and they follow it (the menu's view items set it too). Closing
+//! without OK restores the values they had when the dialog opened.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -17,7 +22,6 @@ use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
 use crate::json::{get_str, objects};
 use crate::macos;
-use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs, Scope};
 use crate::tree_view::{
     COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView, row_object,
@@ -406,23 +410,27 @@ mod imp {
         #[template_child]
         pub delete_local_torrent_check: TemplateChild<gtk::Widget>,
         #[template_child]
-        pub show_state_selector_check: TemplateChild<gtk::Widget>,
+        pub show_state_selector_check: TemplateChild<gtk::CheckButton>,
         #[template_child]
-        pub filter_dirs_check: TemplateChild<gtk::Widget>,
+        pub filter_dirs_check: TemplateChild<gtk::CheckButton>,
         #[template_child]
-        pub filter_trackers_check: TemplateChild<gtk::Widget>,
+        pub filter_trackers_check: TemplateChild<gtk::CheckButton>,
         #[template_child]
-        pub directories_first_check: TemplateChild<gtk::Widget>,
+        pub directories_first_check: TemplateChild<gtk::CheckButton>,
         #[template_child]
-        pub show_notebook_check: TemplateChild<gtk::Widget>,
+        pub show_notebook_check: TemplateChild<gtk::CheckButton>,
         #[template_child]
         pub add_notify_check: TemplateChild<gtk::Widget>,
         #[template_child]
         pub complete_notify_check: TemplateChild<gtk::Widget>,
 
         pub client: RefCell<Option<Client>>,
-        pub win: glib::WeakRef<MainWindow>,
         pub widgets: RefCell<Vec<PrefWidget>>,
+        /// The view settings when the dialog opened, restored unless it's
+        /// closed with OK
+        pub view_before: RefCell<Vec<(&'static str, bool)>>,
+        /// Its check boxes following the view settings
+        pub view_handlers: RefCell<Vec<glib::SignalHandlerId>>,
         pub populating: std::cell::Cell<bool>,
     }
 
@@ -523,50 +531,14 @@ impl PreferencesDialog {
         }
     }
 
-    #[template_callback]
-    fn view_states_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.state_selector().set_visible(check.is_active());
-        }
-    }
-
-    #[template_callback]
-    fn filter_dirs_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.state_selector().set_show_dirs(check.is_active());
-        }
-    }
-
-    #[template_callback]
-    fn filter_trackers_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.state_selector().set_show_trackers(check.is_active());
-        }
-    }
-
-    #[template_callback]
-    fn directories_first_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.state_selector().set_directories_first(check.is_active());
-        }
-    }
-
-    #[template_callback]
-    fn notebook_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.notebook_set_visible(check.is_active());
-        }
-    }
-
-    pub fn new(win: &MainWindow, client: &Client) -> Self {
+    pub fn new(win: &impl IsA<gtk::Window>, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         *imp.client.borrow_mut() = Some(client.clone());
-        imp.win.set(Some(win));
 
         d.set_transient_for(Some(win));
         if util::is_macos() {
-            d.macos_settings_window(win);
+            d.macos_settings_window(win.upcast_ref());
         }
         d.profile_combo_populate();
 
@@ -648,12 +620,22 @@ impl PreferencesDialog {
         );
 
         d.full_update_dependency();
+        d.preview_view_prefs();
 
         d.on_response(|d, response| {
             let prefs = d.prefs();
+            for id in d.imp().view_handlers.take() {
+                prefs.disconnect(id);
+            }
             if response == Response::Ok {
                 d.save_all();
                 prefs.save();
+            } else {
+                for (key, value) in d.imp().view_before.take() {
+                    if prefs.get_bool(key, Scope::Global) != value {
+                        prefs.set_bool(key, value, Scope::Global);
+                    }
+                }
             }
             if let Some(client) = d.imp().client.borrow().as_ref() {
                 client.reload_dir_aliases();
@@ -690,6 +672,37 @@ impl PreferencesDialog {
         }
     }
 
+    /// The view settings' check boxes set and follow their preferences (see
+    /// the top)
+    fn preview_view_prefs(&self) {
+        let imp = self.imp();
+        let prefs = self.prefs();
+        let checks = [
+            (&imp.show_state_selector_check, prefs::KEY_SHOW_STATE_SELECTOR),
+            (&imp.filter_dirs_check, prefs::KEY_FILTER_DIRS),
+            (&imp.filter_trackers_check, prefs::KEY_FILTER_TRACKERS),
+            (&imp.directories_first_check, prefs::KEY_DIRECTORIES_FIRST),
+            (&imp.show_notebook_check, prefs::KEY_SHOW_NOTEBOOK),
+        ];
+        for (check, key) in checks {
+            imp.view_before.borrow_mut().push((key, prefs.get_bool(key, Scope::Global)));
+            let p = prefs.clone();
+            check.connect_toggled(move |check| {
+                // not when it follows the preference
+                if p.get_bool(key, Scope::Global) != check.is_active() {
+                    p.set_bool(key, check.is_active(), Scope::Global);
+                }
+            });
+            let weak = check.downgrade();
+            let id = prefs.connect_changed(move |prefs, changed| {
+                if let (Some(check), true) = (weak.upgrade(), changed == Some(key)) {
+                    check.set_active(prefs.get_bool(key, Scope::Global));
+                }
+            });
+            imp.view_handlers.borrow_mut().push(id);
+        }
+    }
+
     fn full_update_dependency(&self) {
         let imp = self.imp();
         let check = &imp.full_update_check;
@@ -700,7 +713,7 @@ impl PreferencesDialog {
     /// size and its minimize and zoom buttons dimmed. It's sized by its
     /// content then, so the Connection tab (which is the tallest, and
     /// scrolls) has to ask for its full height, as far as the screen allows.
-    fn macos_settings_window(&self, win: &MainWindow) {
+    fn macos_settings_window(&self, win: &gtk::Window) {
         let scroll = &self.imp().connection_scroll;
         scroll.set_propagate_natural_height(true);
         if let Some(monitor) = win.surface().and_then(|s| s.display().monitor_at_surface(&s)) {
