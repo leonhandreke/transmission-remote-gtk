@@ -10,14 +10,14 @@ use gtk::{gio, glib, pango};
 use crate::client::Client;
 use crate::format;
 use crate::i18n::{ntr, sprintf, tr};
-use crate::item::Item;
 use crate::prefs::{self, Scope};
+use crate::protocol::Torrent;
 use crate::protocol::{
     TORRENT_FLAG_CHECKING, TORRENT_FLAG_COMPLETE, TORRENT_FLAG_DOWNLOADING,
     TORRENT_FLAG_DOWNLOADING_WAIT, TORRENT_FLAG_PAUSED, TORRENT_FLAG_SEEDING,
     TORRENT_FLAG_SEEDING_WAIT, TORRENT_FLAG_WAITING_CHECK,
 };
-use crate::torrent_model::*;
+use crate::torrent_object::{TorrentObject, TorrentValues};
 use crate::tree_view::{self, COLUMN_EXTRA, COLUMN_HIDE_FROM_TOP_MENU, ColType, TreeView};
 
 /// Paused or queued
@@ -46,52 +46,61 @@ pub fn torrent_tree_view_new(client: &Client, model: &impl IsA<gio::ListModel>) 
     let prefs = client.prefs();
     let tv = TreeView::new(Some(prefs), "TrgTorrentTreeView");
 
-    let reg = |t, c: usize, h: &str, id: &str, f| tv.reg_column(t, c as i32, h, id, f);
-    let desc = reg(ColType::IconText, COL_NAME, &tr("Name"), "name", 0);
-    desc.set_extra(COL_ICON);
-    reg(ColType::Size, COL_SIZEWHENDONE, &tr("Size"), "size", 0);
-    reg(ColType::Prog, COL_PERCENTDONE, &tr("Done"), "done", 0);
-    reg(ColType::Text, COL_STATUS, &tr("Status"), "status", 0);
-    reg(ColType::NumGtZero, COL_SEEDS, &tr("Seeds"), "seeds", 0);
-    reg(ColType::NumGtZero, COL_PEERS_TO_US, &tr("Sending"), "sending", COLUMN_EXTRA);
-    reg(ColType::NumGtZero, COL_LEECHERS, &tr("Leechers"), "leechers", 0);
-    reg(ColType::NumGtZero, COL_DOWNLOADS, &tr("Downloads"), "downloads", COLUMN_EXTRA);
+    // The keys are the model columns the torrents had as Items. Sorting
+    // compares the values directly, a few thousand torrents are sorted after
+    // each update.
+    let reg = |t, key, property, h: &str, id: &str, f| {
+        let desc = tv.reg_property(t, key, property, h, id, f);
+        let compare = TorrentValues::compare_fn(property).expect("a property of the values");
+        desc.set_compare(move |a: &TorrentObject, b| compare(&a.values(), &b.values()));
+        desc
+    };
+    reg(ColType::IconText, 1, "name", &tr("Name"), "name", 0).set_extra("icon");
+    reg(ColType::Size, 2, "size-when-done", &tr("Size"), "size", 0);
+    reg(ColType::Prog, 3, "percent-done", &tr("Done"), "done", 0);
+    reg(ColType::Text, 5, "status", &tr("Status"), "status", 0);
+    reg(ColType::NumGtZero, 6, "seeders", &tr("Seeds"), "seeds", 0);
+    reg(ColType::NumGtZero, 12, "peers-sending-to-us", &tr("Sending"), "sending", COLUMN_EXTRA);
+    reg(ColType::NumGtZero, 7, "leechers", &tr("Leechers"), "leechers", 0);
+    reg(ColType::NumGtZero, 8, "downloads", &tr("Downloads"), "downloads", COLUMN_EXTRA);
     reg(
         ColType::NumGtZero,
-        COL_PEERS_FROM_US,
+        10,
+        "peers-getting-from-us",
         &tr("Receiving"),
         "connected-leechers",
         COLUMN_EXTRA,
     );
-    reg(ColType::NumGtZero, COL_PEERS_CONNECTED, &tr("Connected"), "connected-peers", 0);
+    reg(ColType::NumGtZero, 9, "peers-connected", &tr("Connected"), "connected-peers", 0);
     let hidden = COLUMN_EXTRA | COLUMN_HIDE_FROM_TOP_MENU;
-    reg(ColType::NumGtZero, COL_FROMPEX, &tr("PEX Peers"), "from-pex", hidden);
-    reg(ColType::NumGtZero, COL_FROMDHT, &tr("DHT Peers"), "from-dht", hidden);
-    reg(ColType::NumGtZero, COL_FROMTRACKERS, &tr("Tracker Peers"), "from-trackers", hidden);
-    reg(ColType::NumGtZero, COL_FROMLTEP, &tr("LTEP Peers"), "from-ltep", hidden);
-    reg(ColType::NumGtZero, COL_FROMRESUME, &tr("Resumed Peers"), "from-resume", hidden);
-    reg(ColType::NumGtZero, COL_FROMINCOMING, &tr("Incoming Peers"), "from-incoming", hidden);
-    reg(ColType::Text, COL_PEER_SOURCES, &tr("Peers T/I/E/H/X/L/R"), "peer-sources", hidden);
-    reg(ColType::Speed, COL_DOWNSPEED, &tr("Down Speed"), "down-speed", 0);
-    reg(ColType::Speed, COL_UPSPEED, &tr("Up Speed"), "up-speed", 0);
-    reg(ColType::Eta, COL_ETA, &tr("ETA"), "eta", 0);
-    reg(ColType::Size, COL_UPLOADED, &tr("Uploaded"), "uploaded", 0);
-    reg(ColType::Size, COL_DOWNLOADED, &tr("Downloaded"), "downloaded", 0);
-    reg(ColType::Ratio, COL_RATIO, &tr("Ratio"), "ratio", 0);
-    reg(ColType::Epoch, COL_ADDED, &tr("Added"), "added", 0);
-    reg(ColType::Text, COL_TRACKERHOST, &tr("First Tracker"), "first-tracker", COLUMN_EXTRA);
-    reg(ColType::Text, COL_DOWNLOADDIR, &tr("Location"), "download-dir", COLUMN_EXTRA);
-    reg(ColType::Text, COL_ID, &tr("ID"), "id", COLUMN_EXTRA);
-    reg(ColType::Prio, COL_BANDWIDTH_PRIORITY, &tr("Priority"), "priority", COLUMN_EXTRA);
+    reg(ColType::NumGtZero, 31, "from-pex", &tr("PEX Peers"), "from-pex", hidden);
+    reg(ColType::NumGtZero, 32, "from-dht", &tr("DHT Peers"), "from-dht", hidden);
+    reg(ColType::NumGtZero, 33, "from-trackers", &tr("Tracker Peers"), "from-trackers", hidden);
+    reg(ColType::NumGtZero, 34, "from-ltep", &tr("LTEP Peers"), "from-ltep", hidden);
+    reg(ColType::NumGtZero, 35, "from-resume", &tr("Resumed Peers"), "from-resume", hidden);
+    reg(ColType::NumGtZero, 36, "from-incoming", &tr("Incoming Peers"), "from-incoming", hidden);
+    reg(ColType::Text, 37, "peer-sources", &tr("Peers T/I/E/H/X/L/R"), "peer-sources", hidden);
+    reg(ColType::Speed, 13, "down-speed", &tr("Down Speed"), "down-speed", 0);
+    reg(ColType::Speed, 14, "up-speed", &tr("Up Speed"), "up-speed", 0);
+    reg(ColType::Eta, 15, "eta", &tr("ETA"), "eta", 0);
+    reg(ColType::Size, 16, "uploaded", &tr("Uploaded"), "uploaded", 0);
+    reg(ColType::Size, 17, "downloaded", &tr("Downloaded"), "downloaded", 0);
+    reg(ColType::Ratio, 21, "ratio", &tr("Ratio"), "ratio", 0);
+    reg(ColType::Epoch, 22, "added", &tr("Added"), "added", 0);
+    reg(ColType::Text, 38, "tracker-host", &tr("First Tracker"), "first-tracker", COLUMN_EXTRA);
+    reg(ColType::Text, 27, "download-dir", &tr("Location"), "download-dir", COLUMN_EXTRA);
+    reg(ColType::Text, 23, "id", &tr("ID"), "id", COLUMN_EXTRA);
+    reg(ColType::Prio, 29, "bandwidth-priority", &tr("Priority"), "priority", COLUMN_EXTRA);
     reg(
         ColType::NumGtEqZero,
-        COL_QUEUE_POSITION,
+        39,
+        "queue-position",
         &tr("Queue Position"),
         "queue-position",
         COLUMN_EXTRA,
     );
-    reg(ColType::Epoch, COL_DONE_DATE, &tr("Completed"), "done-date", COLUMN_EXTRA);
-    reg(ColType::Epoch, COL_LASTACTIVE, &tr("Last Active"), "last-active", COLUMN_EXTRA);
+    reg(ColType::Epoch, 30, "done-date", &tr("Completed"), "done-date", COLUMN_EXTRA);
+    reg(ColType::Epoch, 40, "last-active", &tr("Last Active"), "last-active", COLUMN_EXTRA);
 
     // No type ahead: typing filters the list instead (see MainWindow)
 
@@ -116,7 +125,7 @@ pub fn torrent_tree_view_new(client: &Client, model: &impl IsA<gio::ListModel>) 
 
 /// The IDs of the selected torrents
 pub fn selected_ids(tv: &TreeView) -> Vec<i64> {
-    tv.selected_items::<Item>().iter().map(TorrentItemExt::torrent_id).collect()
+    tv.selected_items::<TorrentObject>().iter().map(TorrentObject::id).collect()
 }
 
 /// The columns, or the rows of the (compact) Transmission style
@@ -140,13 +149,13 @@ fn set_style(tv: &TreeView, client: &Client, style: i64) {
     factory.connect_bind(|_, obj| {
         let Some(li) = obj.downcast_ref::<gtk::ListItem>() else { return };
         if let Some(row) = li.child().and_downcast::<TorrentRow>() {
-            row.set_item(li.item().and_downcast::<Item>().as_ref());
+            row.set_torrent(li.item().and_downcast::<TorrentObject>().as_ref());
         }
     });
     factory.connect_unbind(|_, obj| {
         let Some(li) = obj.downcast_ref::<gtk::ListItem>() else { return };
         if let Some(row) = li.child().and_downcast::<TorrentRow>() {
-            row.set_item(None);
+            row.set_torrent(None);
         }
     });
     tv.set_list_factory(Some(factory.upcast_ref()));
@@ -154,272 +163,216 @@ fn set_style(tv: &TreeView, client: &Client, style: i64) {
 
 /* A row of the Transmission styles */
 
-/// The values of the item, for the text helpers below
-#[derive(Default)]
-struct RowValues {
-    flags: u32,
-    file_count: u32,
-    uploaded_ever: i64,
-    size_when_done: i64,
-    total_size: i64,
-    downloaded: i64,
-    have_valid: i64,
-    have_unchecked: i64,
-    up_speed: i64,
-    down_speed: i64,
-    peers_from_us: i64,
-    web_seeds_to_us: i64,
-    peers_to_us: i64,
-    connected: i64,
-    eta: i64,
-    error: i64,
-    seed_ratio_mode: i64,
-    done: f64,
-    metadata_percent_complete: f64,
-    ratio: f64,
-    seed_ratio_limit: f64,
-    error_string: String,
+/// The seed ratio goal of the torrent, if it has one
+fn seed_ratio(t: &Torrent, client: &Client) -> Option<f64> {
+    if t.seed_ratio_mode == 0 {
+        client.seed_ratio_limit()
+    } else if t.seed_ratio_mode == 1 {
+        Some(t.seed_ratio_limit)
+    } else {
+        None
+    }
 }
 
-impl RowValues {
-    fn from_item(item: &Item) -> Self {
-        Self {
-            flags: item.uint(COL_FLAGS),
-            file_count: item.uint(COL_FILECOUNT),
-            uploaded_ever: item.int64(COL_UPLOADED),
-            size_when_done: item.int64(COL_SIZEWHENDONE),
-            total_size: item.int64(COL_TOTALSIZE),
-            downloaded: item.int64(COL_DOWNLOADED),
-            have_valid: item.int64(COL_HAVE_VALID),
-            have_unchecked: item.int64(COL_HAVE_UNCHECKED),
-            up_speed: item.int64(COL_UPSPEED),
-            down_speed: item.int64(COL_DOWNSPEED),
-            peers_from_us: item.int64(COL_PEERS_FROM_US),
-            web_seeds_to_us: item.int64(COL_WEB_SEEDS_TO_US),
-            peers_to_us: item.int64(COL_PEERS_TO_US),
-            connected: item.int64(COL_PEERS_CONNECTED),
-            eta: item.int64(COL_ETA),
-            error: item.int64(COL_ERROR),
-            seed_ratio_mode: item.int64(COL_SEED_RATIO_MODE),
-            done: item.double(COL_PERCENTDONE),
-            metadata_percent_complete: item.double(COL_METADATAPERCENTCOMPLETE),
-            ratio: item.double(COL_RATIO),
-            seed_ratio_limit: item.double(COL_SEED_RATIO_LIMIT),
-            error_string: item.torrent().map(|t| t.error_string.clone()).unwrap_or_default(),
-        }
-    }
+fn progress_string(t: &Torrent, v: &TorrentValues, client: &Client) -> String {
+    let have_total = t.have_unchecked + t.have_valid;
+    let is_seed = t.have_valid >= t.total_size;
+    let seed_ratio = seed_ratio(t, client);
+    let size = format::size_or_none;
 
-    fn seed_ratio(&self, client: &Client) -> Option<f64> {
-        if self.seed_ratio_mode == 0 {
-            client.seed_ratio_limit()
-        } else if self.seed_ratio_mode == 1 {
-            Some(self.seed_ratio_limit)
+    let mut s = if v.flags & TORRENT_FLAG_DOWNLOADING != 0 {
+        sprintf(
+            &tr("%1$s of %2$s (%3$s)"),
+            &[&size(have_total), &size(t.size_when_done), &format::percent(v.percent_done)],
+        )
+    } else if !is_seed {
+        match seed_ratio {
+            Some(goal) => sprintf(
+                &tr("%1$s of %2$s (%3$s), uploaded %4$s (Ratio: %5$s Goal: %6$s)"),
+                &[
+                    &size(have_total),
+                    &size(t.total_size),
+                    &format::percent(v.percent_done),
+                    &size(t.uploaded_ever),
+                    &format::ratio(v.ratio),
+                    &format::ratio(goal),
+                ],
+            ),
+            None => sprintf(
+                &tr("%1$s of %2$s (%3$s), uploaded %4$s (Ratio: %5$s)"),
+                &[
+                    &size(have_total),
+                    &size(t.total_size),
+                    &format::percent(v.percent_done),
+                    &size(t.uploaded_ever),
+                    &format::ratio(v.ratio),
+                ],
+            ),
+        }
+    } else {
+        match seed_ratio {
+            Some(goal) => sprintf(
+                &tr("%1$s, uploaded %2$s (Ratio: %3$s Goal: %4$s)"),
+                &[
+                    &size(t.total_size),
+                    &size(t.uploaded_ever),
+                    &format::ratio(v.ratio),
+                    &format::ratio(goal),
+                ],
+            ),
+            None => sprintf(
+                &tr("%1$s, uploaded %2$s (Ratio: %3$s)"),
+                &[&size(t.size_when_done), &size(t.uploaded_ever), &format::ratio(v.ratio)],
+            ),
+        }
+    };
+
+    // add time when downloading
+    if v.flags & TORRENT_FLAG_DOWNLOADING != 0
+        || (seed_ratio.is_some() && v.flags & TORRENT_FLAG_SEEDING != 0)
+    {
+        s.push_str(" - ");
+        if t.eta < 0 {
+            s.push_str(&tr("Remaining time unknown"));
         } else {
-            None
+            s.push_str(&sprintf(&tr("%s remaining"), &[&format::time_long(t.eta)]));
         }
     }
 
-    fn progress_string(&self, client: &Client) -> String {
-        let have_total = self.have_unchecked + self.have_valid;
-        let is_seed = self.have_valid >= self.total_size;
-        let seed_ratio = self.seed_ratio(client);
-        let size = format::size_or_none;
+    s
+}
 
-        let mut s = if self.flags & TORRENT_FLAG_DOWNLOADING != 0 {
-            sprintf(
-                &tr("%1$s of %2$s (%3$s)"),
-                &[&size(have_total), &size(self.size_when_done), &format::percent(self.done)],
-            )
-        } else if !is_seed {
-            match seed_ratio {
-                Some(goal) => sprintf(
-                    &tr("%1$s of %2$s (%3$s), uploaded %4$s (Ratio: %5$s Goal: %6$s)"),
-                    &[
-                        &size(have_total),
-                        &size(self.total_size),
-                        &format::percent(self.done),
-                        &size(self.uploaded_ever),
-                        &format::ratio(self.ratio),
-                        &format::ratio(goal),
-                    ],
-                ),
-                None => sprintf(
-                    &tr("%1$s of %2$s (%3$s), uploaded %4$s (Ratio: %5$s)"),
-                    &[
-                        &size(have_total),
-                        &size(self.total_size),
-                        &format::percent(self.done),
-                        &size(self.uploaded_ever),
-                        &format::ratio(self.ratio),
-                    ],
-                ),
-            }
+fn short_transfer_string(t: &Torrent) -> String {
+    let have_meta = !t.files.is_empty();
+    let have_up = have_meta && t.peers_getting_from_us > 0;
+    let have_down = have_meta && t.peers_sending_to_us > 0;
+    let down = format::speed_kbps((t.rate_download / format::SPEED_K) as f64);
+    let up = format::speed_kbps((t.rate_upload / format::SPEED_K) as f64);
+
+    if have_down && have_up {
+        sprintf(&tr("%1$s %2$s, %3$s %4$s"), &[&UNICODE_DOWN, &down, &UNICODE_UP, &up])
+    } else if have_down {
+        sprintf(&tr("%1$s %2$s"), &[&UNICODE_DOWN, &down])
+    } else if have_up {
+        sprintf(&tr("%1$s %2$s"), &[&UNICODE_UP, &up])
+    } else if have_meta {
+        tr("Idle")
+    } else {
+        String::new()
+    }
+}
+
+fn short_status_string(t: &Torrent, v: &TorrentValues) -> String {
+    let flags = v.flags;
+    if flags & TORRENT_FLAG_PAUSED != 0 {
+        if flags & TORRENT_FLAG_COMPLETE != 0 { tr("Finished") } else { tr("Paused") }
+    } else if flags & TORRENT_FLAG_WAITING_CHECK != 0 {
+        tr("Queued for verification")
+    } else if flags & TORRENT_FLAG_DOWNLOADING_WAIT != 0 {
+        tr("Queued for download")
+    } else if flags & TORRENT_FLAG_SEEDING_WAIT != 0 {
+        tr("Queued for seeding")
+    } else if flags & TORRENT_FLAG_CHECKING != 0 {
+        sprintf(&tr("Verifying data (%1$s tested)"), &[&format::percent(v.percent_done)])
+    } else if flags & (TORRENT_FLAG_DOWNLOADING | TORRENT_FLAG_SEEDING) != 0 {
+        let transfer = short_transfer_string(t);
+        if flags & TORRENT_FLAG_DOWNLOADING != 0 {
+            transfer
         } else {
-            match seed_ratio {
-                Some(goal) => sprintf(
-                    &tr("%1$s, uploaded %2$s (Ratio: %3$s Goal: %4$s)"),
-                    &[
-                        &size(self.total_size),
-                        &size(self.uploaded_ever),
-                        &format::ratio(self.ratio),
-                        &format::ratio(goal),
-                    ],
-                ),
-                None => sprintf(
-                    &tr("%1$s, uploaded %2$s (Ratio: %3$s)"),
-                    &[
-                        &size(self.size_when_done),
-                        &size(self.uploaded_ever),
-                        &format::ratio(self.ratio),
-                    ],
-                ),
-            }
-        };
-
-        // add time when downloading
-        if self.flags & TORRENT_FLAG_DOWNLOADING != 0
-            || (seed_ratio.is_some() && self.flags & TORRENT_FLAG_SEEDING != 0)
-        {
-            s.push_str(" - ");
-            if self.eta < 0 {
-                s.push_str(&tr("Remaining time unknown"));
-            } else {
-                s.push_str(&sprintf(&tr("%s remaining"), &[&format::time_long(self.eta)]));
-            }
+            // seeding
+            format!("{}, {transfer}", sprintf(&tr("Ratio %s"), &[&format::ratio(v.ratio)]))
         }
-
-        s
+    } else {
+        String::new()
     }
+}
 
-    fn short_transfer_string(&self) -> String {
-        let have_meta = self.file_count > 0;
-        let have_up = have_meta && self.peers_from_us > 0;
-        let have_down = have_meta && self.peers_to_us > 0;
-        let down = format::speed_kbps((self.down_speed / format::SPEED_K) as f64);
-        let up = format::speed_kbps((self.up_speed / format::SPEED_K) as f64);
-
-        if have_down && have_up {
-            sprintf(&tr("%1$s %2$s, %3$s %4$s"), &[&UNICODE_DOWN, &down, &UNICODE_UP, &up])
-        } else if have_down {
-            sprintf(&tr("%1$s %2$s"), &[&UNICODE_DOWN, &down])
-        } else if have_up {
-            sprintf(&tr("%1$s %2$s"), &[&UNICODE_UP, &up])
-        } else if have_meta {
-            tr("Idle")
-        } else {
-            String::new()
+fn status_string(t: &Torrent, v: &TorrentValues) -> String {
+    let flags = v.flags;
+    let mut s = if t.error != 0 {
+        match t.error {
+            1 => sprintf(&tr("Tracker gave a warning: \"%s\""), &[&t.error_string]),
+            2 => sprintf(&tr("Tracker gave an error: \"%s\""), &[&t.error_string]),
+            3 => sprintf(&tr("Error: \"%s\""), &[&t.error_string]),
+            _ => String::new(),
         }
-    }
-
-    fn short_status_string(&self) -> String {
-        let flags = self.flags;
-        if flags & TORRENT_FLAG_PAUSED != 0 {
-            if flags & TORRENT_FLAG_COMPLETE != 0 { tr("Finished") } else { tr("Paused") }
-        } else if flags & TORRENT_FLAG_WAITING_CHECK != 0 {
-            tr("Queued for verification")
-        } else if flags & TORRENT_FLAG_DOWNLOADING_WAIT != 0 {
-            tr("Queued for download")
-        } else if flags & TORRENT_FLAG_SEEDING_WAIT != 0 {
-            tr("Queued for seeding")
-        } else if flags & TORRENT_FLAG_CHECKING != 0 {
-            sprintf(&tr("Verifying data (%1$s tested)"), &[&format::percent(self.done)])
-        } else if flags & (TORRENT_FLAG_DOWNLOADING | TORRENT_FLAG_SEEDING) != 0 {
-            let transfer = self.short_transfer_string();
-            if flags & TORRENT_FLAG_DOWNLOADING != 0 {
-                transfer
-            } else {
-                // seeding
-                format!("{}, {transfer}", sprintf(&tr("Ratio %s"), &[&format::ratio(self.ratio)]))
-            }
-        } else {
-            String::new()
-        }
-    }
-
-    fn status_string(&self) -> String {
-        let flags = self.flags;
-        let mut s = if self.error != 0 {
-            match self.error {
-                1 => sprintf(&tr("Tracker gave a warning: \"%s\""), &[&self.error_string]),
-                2 => sprintf(&tr("Tracker gave an error: \"%s\""), &[&self.error_string]),
-                3 => sprintf(&tr("Error: \"%s\""), &[&self.error_string]),
-                _ => String::new(),
-            }
-        } else if flags
-            & (TORRENT_FLAG_PAUSED
-                | TORRENT_FLAG_WAITING_CHECK
-                | TORRENT_FLAG_CHECKING
-                | TORRENT_FLAG_DOWNLOADING_WAIT
-                | TORRENT_FLAG_SEEDING_WAIT)
-            != 0
-        {
-            self.short_status_string()
-        } else if flags & TORRENT_FLAG_DOWNLOADING != 0 {
-            if self.file_count > 0 {
-                let n = self.web_seeds_to_us + self.peers_to_us;
-                sprintf(
-                    &ntr(
-                        "Downloading from %1$lu of %2$lu connected peer",
-                        "Downloading from %1$lu of %2$lu connected peers",
-                        n,
-                    ),
-                    &[&n, &(self.web_seeds_to_us + self.connected)],
-                )
-            } else {
-                let n = self.connected + self.web_seeds_to_us;
-                sprintf(
-                    &ntr(
-                        "Downloading metadata from %1$lu peer (%2$s done)",
-                        "Downloading metadata from %1$lu peers (%2$s done)",
-                        n,
-                    ),
-                    &[&n, &format::percent(self.metadata_percent_complete)],
-                )
-            }
-        } else if flags & TORRENT_FLAG_SEEDING != 0 {
+    } else if flags
+        & (TORRENT_FLAG_PAUSED
+            | TORRENT_FLAG_WAITING_CHECK
+            | TORRENT_FLAG_CHECKING
+            | TORRENT_FLAG_DOWNLOADING_WAIT
+            | TORRENT_FLAG_SEEDING_WAIT)
+        != 0
+    {
+        short_status_string(t, v)
+    } else if flags & TORRENT_FLAG_DOWNLOADING != 0 {
+        if !t.files.is_empty() {
+            let n = t.webseeds_sending_to_us + t.peers_sending_to_us;
             sprintf(
                 &ntr(
-                    "Seeding to %1$lu of %2$lu connected peer",
-                    "Seeding to %1$lu of %2$lu connected peers",
-                    self.connected,
+                    "Downloading from %1$lu of %2$lu connected peer",
+                    "Downloading from %1$lu of %2$lu connected peers",
+                    n,
                 ),
-                &[&self.peers_from_us, &self.connected],
+                &[&n, &(t.webseeds_sending_to_us + t.peers_connected)],
             )
         } else {
-            String::new()
-        };
-
-        // the speeds, unless it's paused, waiting or being checked
-        let t = self.short_transfer_string();
-        if flags & (INACTIVE | TORRENT_FLAG_WAITING_CHECK | TORRENT_FLAG_CHECKING) == 0
-            && !t.is_empty()
-        {
-            s.push_str(" - ");
-            s.push_str(&t);
+            let n = t.peers_connected + t.webseeds_sending_to_us;
+            sprintf(
+                &ntr(
+                    "Downloading metadata from %1$lu peer (%2$s done)",
+                    "Downloading metadata from %1$lu peers (%2$s done)",
+                    n,
+                ),
+                &[&n, &format::percent(t.metadata_percent())],
+            )
         }
-        s
-    }
+    } else if flags & TORRENT_FLAG_SEEDING != 0 {
+        sprintf(
+            &ntr(
+                "Seeding to %1$lu of %2$lu connected peer",
+                "Seeding to %1$lu of %2$lu connected peers",
+                t.peers_connected,
+            ),
+            &[&t.peers_getting_from_us, &t.peers_connected],
+        )
+    } else {
+        String::new()
+    };
 
-    fn percent_done(&self, client: &Client) -> f64 {
-        if self.flags & TORRENT_FLAG_SEEDING != 0 && self.seed_ratio(client).is_some() {
-            let baseline = if self.downloaded != 0 { self.downloaded } else { self.size_when_done };
-            let goal = (baseline as f64 * self.seed_ratio_limit) as i64;
-            let bytes_left = if goal > self.uploaded_ever { goal - self.uploaded_ever } else { 0 };
-            let done = (goal - bytes_left) as f32 / goal as f32;
-            (done as f64 * 100.0).max(0.0)
-        } else {
-            self.done.max(0.0)
-        }
+    // the speeds, unless it's paused, waiting or being checked
+    let transfer = short_transfer_string(t);
+    if flags & (INACTIVE | TORRENT_FLAG_WAITING_CHECK | TORRENT_FLAG_CHECKING) == 0
+        && !transfer.is_empty()
+    {
+        s.push_str(" - ");
+        s.push_str(&transfer);
     }
+    s
+}
 
-    fn icon(&self) -> gio::Icon {
-        let mime = match self.file_count {
-            0 => "unknown",
-            1 => "file",
-            _ => "folder",
-        };
-        mime_type_icon(mime)
+/// Of the seed ratio goal while it's seeding towards one
+fn percent_done(t: &Torrent, v: &TorrentValues, client: &Client) -> f64 {
+    if v.flags & TORRENT_FLAG_SEEDING != 0 && seed_ratio(t, client).is_some() {
+        let downloaded = t.downloaded_ever;
+        let baseline = if downloaded != 0 { downloaded } else { t.size_when_done };
+        let goal = (baseline as f64 * t.seed_ratio_limit) as i64;
+        let uploaded = t.uploaded_ever;
+        let bytes_left = if goal > uploaded { goal - uploaded } else { 0 };
+        let done = (goal - bytes_left) as f32 / goal as f32;
+        (done as f64 * 100.0).max(0.0)
+    } else {
+        v.percent_done.max(0.0)
     }
+}
+
+fn torrent_icon(t: &Torrent) -> gio::Icon {
+    let mime = match t.files.len() {
+        0 => "unknown",
+        1 => "file",
+        _ => "folder",
+    };
+    mime_type_icon(mime)
 }
 
 mod imp {
@@ -429,7 +382,7 @@ mod imp {
     pub struct TorrentRow {
         pub client: RefCell<Option<Client>>,
         pub compact: Cell<bool>,
-        pub item: RefCell<Option<Item>>,
+        pub torrent: RefCell<Option<TorrentObject>>,
         pub handler: RefCell<Option<glib::SignalHandlerId>>,
         pub icon: gtk::Image,
         pub name: RefCell<Option<gtk::Label>>,
@@ -462,7 +415,7 @@ mod imp {
         }
 
         fn dispose(&self) {
-            self.obj().set_item(None);
+            self.obj().set_torrent(None);
             while let Some(child) = self.obj().first_child() {
                 child.unparent();
             }
@@ -495,13 +448,13 @@ fn row_label(scale: f64, bold: bool) -> gtk::Label {
 }
 
 /// errors in red, paused torrents dimmed
-fn set_text_style(label: &gtk::Label, v: &RowValues) {
-    if v.error != 0 {
+fn set_text_style(label: &gtk::Label, t: &Torrent, v: &TorrentValues) {
+    if t.error != 0 {
         label.add_css_class("error");
     } else {
         label.remove_css_class("error");
     }
-    label.set_opacity(if v.error == 0 && v.flags & TORRENT_FLAG_PAUSED != 0 { 0.55 } else { 1.0 });
+    label.set_opacity(if t.error == 0 && v.flags & TORRENT_FLAG_PAUSED != 0 { 0.55 } else { 1.0 });
 }
 
 impl TorrentRow {
@@ -560,21 +513,22 @@ impl TorrentRow {
 
     fn refresh(&self) {
         let imp = self.imp();
-        let Some(item) = imp.item.borrow().clone() else { return };
+        let Some(obj) = imp.torrent.borrow().clone() else { return };
         let Some(client) = imp.client.borrow().clone() else { return };
-        let v = RowValues::from_item(&item);
+        let t = obj.torrent();
+        let v = obj.values();
 
-        let percent_done = v.percent_done(&client);
+        let percent_done = percent_done(&t, &v, &client);
 
         // paused and queued torrents are dimmed, unless they have an error
-        let sensitive = v.flags & INACTIVE == 0 || v.error != 0;
+        let sensitive = v.flags & INACTIVE == 0 || t.error != 0;
 
-        imp.icon.set_from_gicon(&v.icon());
+        imp.icon.set_from_gicon(&torrent_icon(&t));
         imp.icon.set_sensitive(sensitive);
 
         if let Some(name) = imp.name.borrow().as_ref() {
-            name.set_text(&item.string(COL_NAME).unwrap_or_default());
-            set_text_style(name, &v);
+            name.set_text(&v.name);
+            set_text_style(name, &t, &v);
         }
 
         imp.bar.set_fraction(percent_done.clamp(0.0, 100.0) / 100.0);
@@ -582,39 +536,39 @@ impl TorrentRow {
 
         let status_text = if imp.compact.get() {
             imp.bar.set_text(Some(&format::progress_text(percent_done)));
-            v.short_status_string()
+            short_status_string(&t, &v)
         } else {
             if let Some(progress) = imp.progress.borrow().as_ref() {
-                progress.set_text(&v.progress_string(&client));
-                set_text_style(progress, &v);
+                progress.set_text(&progress_string(&t, &v, &client));
+                set_text_style(progress, &t, &v);
             }
-            v.status_string()
+            status_string(&t, &v)
         };
 
         if let Some(status) = imp.status.borrow().as_ref() {
             status.set_text(&status_text);
-            set_text_style(status, &v);
+            set_text_style(status, &t, &v);
         }
     }
 
-    pub fn set_item(&self, item: Option<&Item>) {
+    pub fn set_torrent(&self, torrent: Option<&TorrentObject>) {
         let imp = self.imp();
-        if imp.item.borrow().as_ref() == item {
+        if imp.torrent.borrow().as_ref() == torrent {
             return;
         }
-        if let (Some(old), Some(h)) = (imp.item.take(), imp.handler.take()) {
+        if let (Some(old), Some(h)) = (imp.torrent.take(), imp.handler.take()) {
             old.disconnect(h);
         }
-        if let Some(item) = item {
-            // An update sets the update serial last, so all the values have
-            // changed by the time this is notified.
+        if let Some(torrent) = torrent {
+            // An update sets the serial last, so all the values have changed
+            // by the time this is notified.
             let weak = self.downgrade();
-            let h = item.connect_column_changed(COL_UPDATESERIAL, move |_| {
+            let h = torrent.connect_notify_local(Some("serial"), move |_, _| {
                 if let Some(row) = weak.upgrade() {
                     row.refresh();
                 }
             });
-            *imp.item.borrow_mut() = Some(item.clone());
+            *imp.torrent.borrow_mut() = Some(torrent.clone());
             *imp.handler.borrow_mut() = Some(h);
             self.refresh();
         }

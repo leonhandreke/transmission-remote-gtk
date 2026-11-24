@@ -6,9 +6,8 @@ use gtk::{CompositeTemplate, glib};
 
 use crate::format;
 use crate::i18n::tr;
-use crate::item::Item;
 use crate::protocol::{self as p, Torrent};
-use crate::torrent_model as tm;
+use crate::torrent_object::TorrentValues;
 
 mod imp {
     use super::*;
@@ -120,11 +119,9 @@ impl GeneralPanel {
         }
     }
 
-    pub fn update(&self, t: &Torrent, item: &Item) {
+    pub fn update(&self, t: &Torrent, v: &TorrentValues) {
         let i = self.imp();
-        let seeders = item.int64(tm::COL_SEEDS);
-        let leechers = item.int64(tm::COL_LEECHERS);
-        let status = item.string(tm::COL_STATUS).unwrap_or_default();
+        let (seeders, leechers, status) = (v.seeders, v.leechers, &v.status);
 
         i.gen_size_label.set_text(&format::size(t.size_when_done));
 

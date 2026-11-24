@@ -19,7 +19,7 @@ pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::M
     let ids = torrent_view::selected_ids(tv);
     // The radio items show the values of the first selected torrent
     let client = win.client();
-    let current = client.torrent_data(win.selected_torrent_id()).map(|(t, _)| t);
+    let current = client.find_torrent(win.selected_torrent_id()).map(|t| t.torrent());
     let current = current.as_deref();
     let actions = gio::SimpleActionGroup::new();
 

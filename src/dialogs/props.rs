@@ -21,12 +21,11 @@ use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::format;
 use crate::i18n::{sprintf, tr};
-use crate::item::Item;
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, Torrent};
-use crate::torrent_model as tm;
 use crate::torrent_model::UpdateMode;
+use crate::torrent_object::{TorrentObject, TorrentValues};
 use crate::torrent_view;
 use crate::tree_view::TreeView;
 use crate::util;
@@ -179,28 +178,25 @@ impl TorrentPropsDialog {
             && row_count == 1;
         imp.show_details.set(show_details);
 
-        let data = client.torrent_data(win.selected_torrent_id());
+        let data = client.find_torrent(win.selected_torrent_id());
         *imp.target_ids.borrow_mut() = torrent_view::selected_ids(tv);
 
         if row_count > 1 {
             d.set_title(Some(&sprintf(&tr("Multiple (%d) torrent properties"), &[&row_count])));
-        } else if let Some((t, _)) = &data {
-            d.set_title(Some(&t.name));
+        } else if let Some(obj) = &data {
+            d.set_title(Some(&obj.torrent().name));
         }
 
         d.set_transient_for(Some(win));
         d.on_response(|d, response| d.response_cb(response));
 
-        let (torrent, item) = match &data {
-            Some((t, i)) => (t.clone(), Some(i.clone())),
-            None => (Rc::new(Torrent::default()), None),
-        };
+        let torrent = data.as_ref().map_or_else(|| Rc::new(Torrent::default()), |o| o.torrent());
 
         let notebook = &imp.notebook;
         if show_details {
             let serial = client.serial();
-            if let Some(item) = &item {
-                d.info_page_update(&torrent, item);
+            if let Some(obj) = &data {
+                d.info_page_update(&torrent, &obj.values());
             }
 
             // after the information page
@@ -271,10 +267,8 @@ impl TorrentPropsDialog {
         self.destroy();
     }
 
-    fn info_page_update(&self, t: &Torrent, item: &Item) {
+    fn info_page_update(&self, t: &Torrent, v: &TorrentValues) {
         let imp = self.imp();
-        let flags = item.uint(tm::COL_FLAGS);
-        let error = item.int64(tm::COL_ERROR);
 
         imp.privacy_lb.set_text(&if t.is_private {
             tr("Private to this tracker -- DHT and PEX disabled")
@@ -297,25 +291,25 @@ impl TorrentPropsDialog {
 
         imp.comment_buffer.set_text(&t.comment);
         imp.destination_lb.set_text(&t.download_dir);
-        imp.state_lb.set_text(&item.string(tm::COL_STATUS).unwrap_or_default());
+        imp.state_lb.set_text(&v.status);
         imp.date_started_lb.set_text(&format::date_time(t.added_date));
 
-        let eta = item.int64(tm::COL_ETA);
+        let eta = t.eta;
         imp.eta_lb.set_text(&if eta > 0 { format::time_long(eta) } else { String::new() });
 
         imp.hash_lb.set_text(&t.hash_string);
-        imp.error_lb.set_text(&if error != 0 { t.error_string.clone() } else { tr("No errors") });
+        imp.error_lb.set_text(&if t.error != 0 { t.error_string.clone() } else { tr("No errors") });
 
-        if flags & p::TORRENT_FLAG_ACTIVE != 0 {
+        if v.flags & p::TORRENT_FLAG_ACTIVE != 0 {
             imp.last_activity_lb.set_text(&tr("Active now"));
         } else {
-            imp.last_activity_lb.set_text(&format::date_time(item.int64(tm::COL_LASTACTIVE)));
+            imp.last_activity_lb.set_text(&format::date_time(t.activity_date));
         }
 
-        imp.size_lb.set_text(&format::size_or_none(item.int64(tm::COL_SIZEWHENDONE)));
-        imp.dl_lb.set_text(&format::size_or_none(item.int64(tm::COL_DOWNLOADED)));
-        imp.ul_lb.set_text(&format::size_or_none(item.int64(tm::COL_UPLOADED)));
-        imp.have_lb.set_text(&format::size_or_none(item.int64(tm::COL_HAVE_VALID)));
+        imp.size_lb.set_text(&format::size_or_none(t.size_when_done));
+        imp.dl_lb.set_text(&format::size_or_none(t.downloaded_ever));
+        imp.ul_lb.set_text(&format::size_or_none(t.uploaded_ever));
+        imp.have_lb.set_text(&format::size_or_none(t.have_valid));
     }
 
     fn limits_page_load(&self, torrent: &Torrent) {
@@ -376,17 +370,18 @@ impl TorrentPropsDialog {
         let client = self.client();
         let serial = client.serial();
         let id = imp.target_ids.borrow().first().copied().unwrap_or(-1);
-        let data = client.torrent_data(id);
+        let data = client.find_torrent(id);
         let exists = data.is_some();
 
         let Some(lists) = imp.lists.get() else { return };
 
-        let last = imp.last_torrent.replace(data.as_ref().map(|(t, _)| t.clone()));
-        if let Some((t, item)) = &data
+        let torrent = data.as_ref().map(TorrentObject::torrent);
+        let last = imp.last_torrent.replace(torrent.clone());
+        if let (Some(obj), Some(t)) = (&data, &torrent)
             && !last.is_some_and(|l| Rc::ptr_eq(&l, t))
         {
             lists.update(t, serial, UpdateMode::Update);
-            self.info_page_update(t, item);
+            self.info_page_update(t, &obj.values());
         }
         lists.set_sensitive(exists);
     }

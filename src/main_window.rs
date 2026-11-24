@@ -17,7 +17,6 @@ use crate::dialogs::{
 };
 use crate::general_panel::GeneralPanel;
 use crate::i18n::{sprintf, tr};
-use crate::item::Item;
 use crate::menu_bar::MenuBar;
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
@@ -25,7 +24,8 @@ use crate::state_selector::{FILTER_FLAG_DIR, FILTER_FLAG_TRACKER, StateSelector}
 use crate::status_bar::StatusBar;
 use crate::toolbar::Toolbar;
 use crate::torrent_menu;
-use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel, UpdateMode};
+use crate::torrent_model::{TorrentModel, UpdateMode};
+use crate::torrent_object::TorrentObject;
 use crate::torrent_view;
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
 use crate::util;
@@ -296,12 +296,13 @@ impl MainWindow {
     fn update_selected_torrent_notebook(&self, mode: UpdateMode, id: i64) {
         let client = self.client();
         let serial = client.serial();
-        let data = if id >= 0 { client.torrent_data(id) } else { None };
+        let data = if id >= 0 { client.find_torrent(id) } else { None };
 
         match data {
-            Some((t, item)) => {
+            Some(obj) => {
+                let t = obj.torrent();
                 self.menu_bar().torrent_actions_sensitive(true);
-                self.imp().gen_details.update(&t, &item);
+                self.imp().gen_details.update(&t, &obj.values());
                 self.parts().details.update(&t, serial, mode);
             }
             None => self.torrent_scrub(),
@@ -310,11 +311,17 @@ impl MainWindow {
         self.imp().selected_torrent_id.set(id);
     }
 
-    fn torrent_event_notification(&self, icon_name: &str, desc: &str, pref_key: &str, item: &Item) {
+    fn torrent_event_notification(
+        &self,
+        icon_name: &str,
+        desc: &str,
+        pref_key: &str,
+        torrent: &TorrentObject,
+    ) {
         if !self.client().prefs().get_bool(pref_key, Scope::Global) {
             return;
         }
-        let name = item.string(tm::COL_NAME).unwrap_or_default();
+        let name = torrent.values().name.clone();
         let notification = gio::Notification::new(&name);
         notification.set_body(Some(desc));
         notification.set_icon(&gio::ThemedIcon::new(icon_name));
@@ -370,8 +377,8 @@ impl MainWindow {
         if id < 0 {
             return;
         }
-        if let Some((t, _)) = self.client().torrent_data(id) {
-            self.clipboard().set_text(&t.magnet_link);
+        if let Some(obj) = self.client().find_torrent(id) {
+            self.clipboard().set_text(&obj.torrent().magnet_link);
         }
     }
 
@@ -449,8 +456,8 @@ impl MainWindow {
 
         let markup = if count == 1 {
             let name = tv
-                .first_selected::<Item>()
-                .and_then(|i| i.string(tm::COL_NAME))
+                .first_selected::<TorrentObject>()
+                .map(|t| t.values().name.clone())
                 .unwrap_or_default();
             sprintf(
                 &tr("<big><b>%s \"%s\"?</b></big>"),
@@ -519,31 +526,29 @@ impl MainWindow {
         }
     }
 
-    fn visible_func(&self, item: &Item) -> bool {
+    fn visible_func(&self, torrent: &TorrentObject) -> bool {
         let imp = self.imp();
         let criteria = imp.filter_criteria.get();
+        let v = torrent.values();
 
         if criteria != 0 {
             if criteria & FILTER_FLAG_TRACKER != 0 {
-                let Some(t) = item.torrent() else { return false };
-                if !t.has_tracker(imp.filter_selected_text.borrow().as_deref()) {
+                if !torrent.torrent().has_tracker(imp.filter_selected_text.borrow().as_deref()) {
                     return false;
                 }
             } else if criteria & FILTER_FLAG_DIR != 0 {
                 if imp.filter_selected_text.borrow().as_deref()
-                    != item.string(tm::COL_DOWNLOADDIR_SHORT).as_deref()
+                    != Some(v.download_dir_short.as_str())
                 {
                     return false;
                 }
-            } else if item.uint(tm::COL_FLAGS) & criteria == 0 {
+            } else if v.flags & criteria == 0 {
                 return false;
             }
         }
 
-        if let Some(text) = imp.filter_text.borrow().as_ref()
-            && let Some(name) = item.string(tm::COL_NAME)
-        {
-            return glib::casefold(&name).contains(text.as_str());
+        if let Some(text) = imp.filter_text.borrow().as_ref() {
+            return glib::casefold(&v.name).contains(text.as_str());
         }
 
         true
@@ -578,7 +583,7 @@ impl MainWindow {
     }
 
     fn first_selected_id(&self) -> i64 {
-        self.torrent_tv().first_selected::<Item>().map(|i| i.torrent_id()).unwrap_or(-1)
+        self.torrent_tv().first_selected::<TorrentObject>().map(|t| t.id()).unwrap_or(-1)
     }
 
     fn torrent_scrub(&self) {
@@ -803,24 +808,24 @@ impl MainWindow {
         let model = client.torrent_model();
 
         let weak = self.downgrade();
-        model.connect_torrent_completed(move |item| {
+        model.connect_torrent_completed(move |torrent| {
             if let Some(win) = weak.upgrade() {
                 win.torrent_event_notification(
                     "trg-gtk-apply",
                     &tr("This torrent has completed."),
                     prefs::KEY_COMPLETE_NOTIFY,
-                    item,
+                    torrent,
                 );
             }
         });
         let weak = self.downgrade();
-        model.connect_torrent_added(move |item| {
+        model.connect_torrent_added(move |torrent| {
             if let Some(win) = weak.upgrade() {
                 win.torrent_event_notification(
                     "list-add",
                     &tr("This torrent has been added."),
                     prefs::KEY_ADD_NOTIFY,
-                    item,
+                    torrent,
                 );
             }
         });
@@ -828,10 +833,11 @@ impl MainWindow {
         // the torrents shown, filtered by the state selector and the entry
         let weak = self.downgrade();
         let filter = gtk::CustomFilter::new(move |obj| {
-            let (Some(win), Some(item)) = (weak.upgrade(), obj.downcast_ref::<Item>()) else {
+            let (Some(win), Some(torrent)) = (weak.upgrade(), obj.downcast_ref::<TorrentObject>())
+            else {
                 return true;
             };
-            win.visible_func(item)
+            win.visible_func(torrent)
         });
         let filtered = gtk::FilterListModel::new(Some(model.store()), Some(filter.clone()));
 

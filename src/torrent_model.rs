@@ -1,11 +1,12 @@
-//! The torrents: a list of Items which updates from a torrent-get response.
+//! The torrents: a list of TorrentObjects which updates from a torrent-get
+//! response.
 //! It handles a number of different update modes:
 //!   1) the first update,
 //!   2) a full update,
 //!   3) an active-only update,
 //!   4) individual torrent updates.
 //!
-//! The items are updated in place (only the values that changed notify), and
+//! The objects are updated in place (only the values that changed notify), and
 //! looked up by ID in a hash table, so an update is linear in the number of
 //! torrents.
 //!
@@ -24,58 +25,11 @@ use gtk::prelude::*;
 
 use crate::client::Client;
 use crate::i18n::tr;
-use crate::item::{Item, Val};
 use crate::json::{Obj, get_str, objects};
 use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, Torrent};
+use crate::torrent_object::{TorrentObject, TorrentValues};
 use crate::util;
-
-pub const COL_ICON: usize = 0;
-pub const COL_NAME: usize = 1;
-pub const COL_SIZEWHENDONE: usize = 2;
-pub const COL_PERCENTDONE: usize = 3;
-pub const COL_METADATAPERCENTCOMPLETE: usize = 4;
-pub const COL_STATUS: usize = 5;
-pub const COL_SEEDS: usize = 6;
-pub const COL_LEECHERS: usize = 7;
-pub const COL_DOWNLOADS: usize = 8;
-pub const COL_PEERS_CONNECTED: usize = 9;
-pub const COL_PEERS_FROM_US: usize = 10;
-pub const COL_WEB_SEEDS_TO_US: usize = 11;
-pub const COL_PEERS_TO_US: usize = 12;
-pub const COL_DOWNSPEED: usize = 13;
-pub const COL_UPSPEED: usize = 14;
-pub const COL_ETA: usize = 15;
-pub const COL_UPLOADED: usize = 16;
-pub const COL_DOWNLOADED: usize = 17;
-pub const COL_TOTALSIZE: usize = 18;
-pub const COL_HAVE_UNCHECKED: usize = 19;
-pub const COL_HAVE_VALID: usize = 20;
-pub const COL_RATIO: usize = 21;
-pub const COL_ADDED: usize = 22;
-pub const COL_ID: usize = 23;
-pub const COL_TORRENT: usize = 24;
-pub const COL_UPDATESERIAL: usize = 25;
-pub const COL_FLAGS: usize = 26;
-pub const COL_DOWNLOADDIR: usize = 27;
-pub const COL_DOWNLOADDIR_SHORT: usize = 28;
-pub const COL_BANDWIDTH_PRIORITY: usize = 29;
-pub const COL_DONE_DATE: usize = 30;
-pub const COL_FROMPEX: usize = 31;
-pub const COL_FROMDHT: usize = 32;
-pub const COL_FROMTRACKERS: usize = 33;
-pub const COL_FROMLTEP: usize = 34;
-pub const COL_FROMRESUME: usize = 35;
-pub const COL_FROMINCOMING: usize = 36;
-pub const COL_PEER_SOURCES: usize = 37;
-pub const COL_TRACKERHOST: usize = 38;
-pub const COL_QUEUE_POSITION: usize = 39;
-pub const COL_LASTACTIVE: usize = 40;
-pub const COL_FILECOUNT: usize = 41;
-pub const COL_ERROR: usize = 42;
-pub const COL_SEED_RATIO_MODE: usize = 43;
-pub const COL_SEED_RATIO_LIMIT: usize = 44;
-pub const N_COLUMNS: usize = 45;
 
 /// What a torrent_get was for, which decides how it updates the models
 #[derive(Clone, Copy, Debug, PartialEq, Eq, glib::Enum)]
@@ -96,47 +50,6 @@ pub enum UpdateMode {
 pub const UPDATE_STATE_CHANGE: u32 = 1 << 0;
 pub const UPDATE_PATH_CHANGE: u32 = 1 << 1;
 pub const UPDATE_ADDREMOVE: u32 = 1 << 2;
-
-/// A torrent is an Item with the columns above. The torrent column holds the
-/// torrent of the last update.
-pub type TorrentItem = Item;
-
-pub trait TorrentItemExt {
-    fn torrent(&self) -> Option<Rc<Torrent>>;
-    fn torrent_id(&self) -> i64;
-}
-
-impl TorrentItemExt for Item {
-    fn torrent(&self) -> Option<Rc<Torrent>> {
-        self.torrent_value(COL_TORRENT)
-    }
-
-    fn torrent_id(&self) -> i64 {
-        self.int64(COL_ID)
-    }
-}
-
-fn new_torrent_item() -> TorrentItem {
-    let mut values = vec![Val::I64(0); N_COLUMNS];
-    for c in [
-        COL_ICON,
-        COL_NAME,
-        COL_STATUS,
-        COL_DOWNLOADDIR,
-        COL_DOWNLOADDIR_SHORT,
-        COL_PEER_SOURCES,
-        COL_TRACKERHOST,
-    ] {
-        values[c] = Val::Str(None);
-    }
-    for c in [COL_PERCENTDONE, COL_METADATAPERCENTCOMPLETE, COL_RATIO, COL_SEED_RATIO_LIMIT] {
-        values[c] = Val::F64(0.0);
-    }
-    values[COL_FLAGS] = Val::U32(0);
-    values[COL_FILECOUNT] = Val::U32(0);
-    values[COL_TORRENT] = Val::Torrent(None);
-    Item::new(values)
-}
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct Stats {
@@ -161,14 +74,14 @@ mod imp {
 
     pub struct TorrentModel {
         pub store: gio::ListStore,
-        pub ht: RefCell<HashMap<i64, Item>>,
+        pub ht: RefCell<HashMap<i64, TorrentObject>>,
         pub stats: RefCell<Stats>,
     }
 
     impl Default for TorrentModel {
         fn default() -> Self {
             Self {
-                store: gio::ListStore::new::<Item>(),
+                store: gio::ListStore::new::<TorrentObject>(),
                 ht: Default::default(),
                 stats: Default::default(),
             }
@@ -187,11 +100,11 @@ mod imp {
             SIGNALS.get_or_init(|| {
                 vec![
                     glib::subclass::Signal::builder("torrent-completed")
-                        .param_types([Item::static_type()])
+                        .param_types([TorrentObject::static_type()])
                         .build(),
                     glib::subclass::Signal::builder("update").build(),
                     glib::subclass::Signal::builder("torrent-added")
-                        .param_types([Item::static_type()])
+                        .param_types([TorrentObject::static_type()])
                         .build(),
                     glib::subclass::Signal::builder("torrents-state-change")
                         .param_types([u32::static_type()])
@@ -258,25 +171,25 @@ impl TorrentModel {
         *self.imp().stats.borrow()
     }
 
-    pub fn find(&self, id: i64) -> Option<Item> {
+    pub fn find(&self, id: i64) -> Option<TorrentObject> {
         self.imp().ht.borrow().get(&id).cloned()
     }
 
     /// The download directories of all the torrents
     pub fn download_dirs(&self) -> Vec<String> {
-        self.imp().ht.borrow().values().filter_map(|i| i.string(COL_DOWNLOADDIR)).collect()
+        self.imp().ht.borrow().values().map(|t| t.values().download_dir.clone()).collect()
     }
 
-    pub fn connect_torrent_completed<F: Fn(&Item) + 'static>(&self, f: F) {
+    pub fn connect_torrent_completed<F: Fn(&TorrentObject) + 'static>(&self, f: F) {
         self.connect_local("torrent-completed", false, move |args| {
-            f(&args[1].get::<Item>().unwrap());
+            f(&args[1].get::<TorrentObject>().unwrap());
             None
         });
     }
 
-    pub fn connect_torrent_added<F: Fn(&Item) + 'static>(&self, f: F) {
+    pub fn connect_torrent_added<F: Fn(&TorrentObject) + 'static>(&self, f: F) {
         self.connect_local("torrent-added", false, move |args| {
-            f(&args[1].get::<Item>().unwrap());
+            f(&args[1].get::<TorrentObject>().unwrap());
             None
         });
     }
@@ -296,9 +209,10 @@ impl TorrentModel {
     }
 
     pub fn reload_dir_aliases(&self, client: &Client) {
-        for item in util::objects::<Item>(&self.imp().store) {
-            let dir = item.string(COL_DOWNLOADDIR).unwrap_or_default();
-            item.set(COL_DOWNLOADDIR_SHORT, shorten_download_dir(client, &dir));
+        for obj in util::objects::<TorrentObject>(&self.imp().store) {
+            let mut values = obj.values().clone();
+            values.download_dir_short = shorten_download_dir(client, &values.download_dir);
+            obj.set_values(values);
         }
         self.emit_by_name::<()>("torrents-state-change", &[&UPDATE_PATH_CHANGE]);
     }
@@ -308,8 +222,8 @@ impl TorrentModel {
         let (down_rate, up_rate) = (stats.down_rate_total, stats.up_rate_total);
         *stats = Stats { down_rate_total: down_rate, up_rate_total: up_rate, ..Default::default() };
 
-        for item in util::objects::<Item>(&self.imp().store) {
-            let flags = item.uint(COL_FLAGS);
+        for obj in util::objects::<TorrentObject>(&self.imp().store) {
+            let flags = obj.values().flags;
             if flags & p::TORRENT_FLAG_SEEDING != 0 {
                 stats.seeding += 1;
             } else if flags & p::TORRENT_FLAG_DOWNLOADING != 0 {
@@ -346,12 +260,13 @@ impl TorrentModel {
         self.imp().store.remove_all();
     }
 
-    fn update_item(
+    fn update_object(
         &self,
         client: &Client,
         serial: i64,
-        item: &Item,
+        obj: &TorrentObject,
         t: Rc<Torrent>,
+        added: bool,
         changed: &mut u32,
     ) {
         {
@@ -363,8 +278,11 @@ impl TorrentModel {
         let download_dir = util::rm_trailing_slashes(&t.download_dir).to_string();
         let new_flags = t.flags();
 
-        let last_flags = item.uint(COL_FLAGS);
-        let last_download_dir = item.string(COL_DOWNLOADDIR);
+        let (last_flags, last_download_dir, last_download_dir_short) = {
+            let v = obj.values();
+            (v.flags, v.download_dir.clone(), v.download_dir_short.clone())
+        };
+        let dir_changed = added || last_download_dir != download_dir;
 
         // like the sidebar's tracker filters (the "host" field is host:port,
         // without a scheme)
@@ -372,7 +290,7 @@ impl TorrentModel {
             t.tracker_stats.first().and_then(|tracker| util::tracker_host(&tracker.announce));
 
         let pf = &t.peers_from;
-        let peer_sources = (new_flags & p::TORRENT_FLAG_ACTIVE != 0).then(|| {
+        let peer_sources = if new_flags & p::TORRENT_FLAG_ACTIVE != 0 {
             let lpd = pf.from_lpd.map_or_else(|| "N/A".to_string(), |lpd| lpd.to_string());
             format!(
                 "{} / {} / {} / {} / {} / {lpd} / {}",
@@ -383,7 +301,9 @@ impl TorrentModel {
                 pf.from_pex,
                 pf.from_cache
             )
-        });
+        } else {
+            String::new()
+        };
 
         let percent_done = if new_flags & p::TORRENT_FLAG_CHECKING != 0 {
             t.recheck_percent()
@@ -398,67 +318,63 @@ impl TorrentModel {
         let downloads: i64 = trackers.iter().map(|t| t.download_count).sum();
 
         let (uploaded, have_valid) = (t.uploaded_ever, t.have_valid);
-        item.set(COL_ICON, p::status_icon(new_flags));
-        item.set(COL_ADDED, t.added_date);
-        item.set(COL_FILECOUNT, t.files.len() as u32);
-        item.set(COL_DONE_DATE, t.done_date);
-        item.set(COL_NAME, t.name.as_str());
-        item.set(COL_ERROR, t.error);
-        item.set(COL_SIZEWHENDONE, t.size_when_done);
-        item.set(COL_PERCENTDONE, percent_done);
-        item.set(COL_METADATAPERCENTCOMPLETE, t.metadata_percent());
-        item.set(COL_STATUS, t.status_text(new_flags));
-        item.set(COL_DOWNSPEED, t.rate_download);
-        item.set(COL_FLAGS, new_flags);
-        item.set(COL_UPSPEED, t.rate_upload);
-        item.set(COL_ETA, t.eta);
-        item.set(COL_UPLOADED, uploaded);
-        item.set(COL_DOWNLOADED, t.downloaded_ever);
-        item.set(COL_TOTALSIZE, t.total_size);
-        item.set(COL_HAVE_UNCHECKED, t.have_unchecked);
-        item.set(COL_HAVE_VALID, have_valid);
-        item.set(COL_FROMPEX, pf.from_pex);
-        item.set(COL_FROMDHT, pf.from_dht);
-        item.set(COL_FROMTRACKERS, pf.from_tracker);
-        item.set(COL_FROMLTEP, pf.from_ltep);
-        item.set(COL_FROMRESUME, pf.from_cache);
-        item.set(COL_FROMINCOMING, pf.from_incoming);
-        item.set(COL_PEER_SOURCES, peer_sources);
-        item.set(COL_PEERS_CONNECTED, t.peers_connected);
-        item.set(COL_PEERS_TO_US, t.peers_sending_to_us);
-        item.set(COL_PEERS_FROM_US, t.peers_getting_from_us);
-        item.set(COL_WEB_SEEDS_TO_US, t.webseeds_sending_to_us);
-        item.set(COL_QUEUE_POSITION, t.queue_position.unwrap_or(-1));
-        item.set(COL_SEED_RATIO_LIMIT, t.seed_ratio_limit);
-        item.set(COL_SEED_RATIO_MODE, t.seed_ratio_mode);
-        item.set(COL_LASTACTIVE, t.activity_date);
-        item.set(
-            COL_RATIO,
-            if uploaded > 0 && have_valid > 0 { uploaded as f64 / have_valid as f64 } else { 0.0 },
-        );
-        item.set(COL_DOWNLOADDIR, download_dir.as_str());
-        item.set(COL_BANDWIDTH_PRIORITY, t.bandwidth_priority);
-        item.set(COL_ID, t.id);
-        item.set(COL_TORRENT, t.clone());
-        item.set(COL_TRACKERHOST, first_tracker_host.unwrap_or_default());
-
-        if last_download_dir.as_deref() != Some(download_dir.as_str()) {
-            item.set(COL_DOWNLOADDIR_SHORT, shorten_download_dir(client, &download_dir));
+        let download_dir_short = if dir_changed {
             *changed |= UPDATE_PATH_CHANGE;
-        }
+            shorten_download_dir(client, &download_dir)
+        } else {
+            last_download_dir_short
+        };
 
-        item.set(COL_SEEDS, seeders);
-        item.set(COL_LEECHERS, leechers);
-        item.set(COL_DOWNLOADS, downloads);
+        obj.set_torrent(t.clone());
+        obj.set_values(TorrentValues {
+            id: t.id,
+            name: t.name.clone(),
+            icon: p::status_icon(new_flags).to_string(),
+            flags: new_flags,
+            status: t.status_text(new_flags),
+            percent_done,
+            size_when_done: t.size_when_done,
+            ratio: if uploaded > 0 && have_valid > 0 {
+                uploaded as f64 / have_valid as f64
+            } else {
+                0.0
+            },
+            seeders,
+            leechers,
+            downloads,
+            peers_connected: t.peers_connected,
+            peers_sending_to_us: t.peers_sending_to_us,
+            peers_getting_from_us: t.peers_getting_from_us,
+            from_pex: pf.from_pex,
+            from_dht: pf.from_dht,
+            from_trackers: pf.from_tracker,
+            from_ltep: pf.from_ltep,
+            from_resume: pf.from_cache,
+            from_incoming: pf.from_incoming,
+            peer_sources,
+            down_speed: t.rate_download,
+            up_speed: t.rate_upload,
+            eta: t.eta,
+            uploaded,
+            downloaded: t.downloaded_ever,
+            added: t.added_date,
+            done_date: t.done_date,
+            last_active: t.activity_date,
+            tracker_host: first_tracker_host.unwrap_or_default().to_string(),
+            download_dir,
+            download_dir_short,
+            bandwidth_priority: t.bandwidth_priority,
+            queue_position: t.queue_position.unwrap_or(-1),
+        });
 
         // set last, so a row watching it sees all the changes
-        item.set(COL_UPDATESERIAL, serial);
+        obj.set_serial(serial);
 
         if last_flags & p::TORRENT_FLAG_DOWNLOADING != 0
             && new_flags & p::TORRENT_FLAG_DOWNLOADING == 0
             && new_flags & p::TORRENT_FLAG_COMPLETE != 0
         {
-            self.emit_by_name::<()>("torrent-completed", &[item]);
+            self.emit_by_name::<()>("torrent-completed", &[obj]);
         }
 
         if last_flags != new_flags {
@@ -470,11 +386,11 @@ impl TorrentModel {
     /// and if serial isn't -1, those which weren't updated with it.
     fn remove_stale(&self, serial: i64) -> bool {
         let ht = &self.imp().ht;
-        util::remove_where(&self.imp().store, |item: &Item| {
-            let s = item.int64(COL_UPDATESERIAL);
+        util::remove_where(&self.imp().store, |obj: &TorrentObject| {
+            let s = obj.serial();
             let stale = !(s != -1 && (serial == -1 || s == serial));
             if stale {
-                ht.borrow_mut().remove(&item.int64(COL_ID));
+                ht.borrow_mut().remove(&obj.id());
             }
             stale
         }) > 0
@@ -499,13 +415,13 @@ impl TorrentModel {
             let existing = self.find(id);
             match existing {
                 None => {
-                    let item = new_torrent_item();
-                    self.update_item(client, serial, &item, t, &mut changed);
-                    self.imp().ht.borrow_mut().insert(id, item.clone());
-                    added.push(item);
+                    let obj = TorrentObject::new(t.clone());
+                    self.update_object(client, serial, &obj, t, true, &mut changed);
+                    self.imp().ht.borrow_mut().insert(id, obj.clone());
+                    added.push(obj);
                     changed |= UPDATE_ADDREMOVE;
                 }
-                Some(item) => self.update_item(client, serial, &item, t, &mut changed),
+                Some(obj) => self.update_object(client, serial, &obj, t, false, &mut changed),
             }
         }
 
@@ -516,8 +432,8 @@ impl TorrentModel {
         }
 
         if mode != UpdateMode::First {
-            for item in &added {
-                self.emit_by_name::<()>("torrent-added", &[item]);
+            for obj in &added {
+                self.emit_by_name::<()>("torrent-added", &[obj]);
             }
         }
 
@@ -528,8 +444,8 @@ impl TorrentModel {
         } else if mode != UpdateMode::First && !removed.is_empty() {
             for id in removed {
                 // mark it, the stale ones are removed below
-                if let Some(item) = self.find(id) {
-                    item.set(COL_UPDATESERIAL, -1i64);
+                if let Some(obj) = self.find(id) {
+                    obj.set_serial(-1);
                 }
             }
             self.remove_stale(-1);

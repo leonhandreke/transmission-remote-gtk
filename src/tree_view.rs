@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 
 use crate::format;
 use crate::i18n::tr;
-use crate::item::{Item, Val};
+use crate::item::{Item, Val, utf8_collate};
 use crate::json::value_as_i64;
 use crate::prefs::{self, Prefs};
 use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL};
@@ -134,6 +134,38 @@ pub type ActivateFn = Rc<dyn Fn(&TreeView, &glib::Object)>;
 /// new_text None), and when they finish (done is true, new_text is None if
 /// the text wasn't changed).
 pub type EditFn = Rc<dyn Fn(&TreeView, &glib::Object, bool, Option<&str>)>;
+/// Compares two rows by a column, for sorting without reading properties
+pub type CompareFn = Rc<dyn Fn(&glib::Object, &glib::Object) -> Ordering>;
+
+/// A value rows can be sorted by, compared like the cells' values (strings
+/// by their collation)
+pub trait SortKey {
+    fn compare(&self, other: &Self) -> Ordering;
+}
+
+impl SortKey for i64 {
+    fn compare(&self, other: &Self) -> Ordering {
+        self.cmp(other)
+    }
+}
+
+impl SortKey for u32 {
+    fn compare(&self, other: &Self) -> Ordering {
+        self.cmp(other)
+    }
+}
+
+impl SortKey for f64 {
+    fn compare(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+    }
+}
+
+impl SortKey for String {
+    fn compare(&self, other: &Self) -> Ordering {
+        utf8_collate(self, other)
+    }
+}
 
 pub struct ColumnDesc {
     /// What sorting by the column is saved as (see the top)
@@ -146,6 +178,8 @@ pub struct ColumnDesc {
     pub ctype: ColType,
     pub activate: RefCell<Option<ActivateFn>>,
     pub edit: RefCell<Option<EditFn>>,
+    /// How to sort by it, if not by comparing its property values
+    pub compare: RefCell<Option<CompareFn>>,
     pub editable: Cell<bool>,
     column: RefCell<Option<gtk::ColumnViewColumn>>,
 }
@@ -175,6 +209,16 @@ impl ColumnDesc {
                 f(tv, obj, done, new_text);
             }
         }));
+    }
+
+    /// Sorts rows of type T by it with f, which reads their values directly
+    /// (reading two properties for each comparison is slow for long lists)
+    pub fn set_compare<T: IsA<glib::Object>>(&self, f: impl Fn(&T, &T) -> Ordering + 'static) {
+        *self.compare.borrow_mut() =
+            Some(Rc::new(move |a, b| match (a.downcast_ref::<T>(), b.downcast_ref::<T>()) {
+                (Some(a), Some(b)) => f(a, b),
+                _ => Ordering::Equal,
+            }));
     }
 
     pub fn set_editable(&self, editable: bool) {
@@ -660,6 +704,7 @@ impl TreeView {
             ctype,
             activate: Default::default(),
             edit: Default::default(),
+            compare: Default::default(),
             editable: Cell::new(flags & COLUMN_EDITABLE != 0),
             column: Default::default(),
         });
@@ -981,8 +1026,13 @@ impl TreeView {
         }
         // a key that isn't registered (from older settings) is a column of
         // Items, as it was
-        let source = self.find_key(key).map_or(Source::Column(key as usize), |d| d.value);
-        let mut result = source.compare(a, b);
+        let mut result = match self.find_key(key) {
+            Some(desc) => match desc.compare.borrow().as_ref() {
+                Some(compare) => compare(a, b),
+                None => desc.value.compare(a, b),
+            },
+            None => Source::Column(key as usize).compare(a, b),
+        };
         if imp.sort_order.get() == gtk::SortType::Descending {
             result = result.reverse();
         }

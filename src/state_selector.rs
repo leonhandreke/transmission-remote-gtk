@@ -10,10 +10,10 @@ use gtk::{gdk, gio, glib};
 
 use crate::client::Client;
 use crate::i18n::tr;
-use crate::item::Item;
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol as p;
-use crate::torrent_model::{self as tm, Stats, TorrentItemExt, TorrentModel};
+use crate::torrent_model::{self as tm, Stats, TorrentModel};
+use crate::torrent_object::TorrentObject;
 use crate::util;
 
 pub const FILTER_FLAG_TRACKER: u32 = 1 << 14;
@@ -330,8 +330,8 @@ impl StateSelector {
         let model = client.torrent_model();
         let n_cat = imp.n_categories.get() as usize;
 
-        for torrent in util::objects::<Item>(&model.store()) {
-            let Some(t) = torrent.torrent() else { continue };
+        for torrent in util::objects::<TorrentObject>(&model.store()) {
+            let t = torrent.torrent();
 
             if update_trackers {
                 for tracker in &t.tracker_stats {
@@ -360,7 +360,7 @@ impl StateSelector {
             }
 
             if update_dirs {
-                let Some(dir) = torrent.string(tm::COL_DOWNLOADDIR_SHORT) else { continue };
+                let dir = torrent.values().download_dir_short.clone();
                 let existing = imp.directories.borrow().get(&dir).cloned();
                 if let Some(item) = existing {
                     Self::update_dynamic_filter(&item, serial);

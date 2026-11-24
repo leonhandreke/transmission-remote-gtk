@@ -37,6 +37,7 @@ mod status_bar;
 mod toolbar;
 mod torrent_menu;
 mod torrent_model;
+mod torrent_object;
 mod torrent_view;
 mod trackers;
 mod tree_view;

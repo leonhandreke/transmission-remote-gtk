@@ -14,7 +14,6 @@
 //!    "session-updated" with it.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
 
 use gtk::glib;
 use gtk::glib::prelude::*;
@@ -22,9 +21,10 @@ use gtk::glib::subclass::prelude::*;
 
 use crate::json::{get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
-use crate::protocol::{self, Request, Session, Torrent};
+use crate::protocol::{self, Request, Session};
 use crate::rpc::{self, Config, Transport};
-use crate::torrent_model::{TorrentItem, TorrentItemExt, TorrentModel, UpdateMode};
+use crate::torrent_model::{TorrentModel, UpdateMode};
+use crate::torrent_object::TorrentObject;
 
 mod connection;
 
@@ -232,11 +232,9 @@ impl Client {
         self.imp().torrent_model.clone()
     }
 
-    /// Looks up a torrent by its ID: its JSON object (from the last update)
-    /// and item.
-    pub fn torrent_data(&self, id: i64) -> Option<(Rc<Torrent>, TorrentItem)> {
-        let item = self.torrent_model().find(id)?;
-        Some((item.torrent()?, item))
+    /// Looks up a torrent by its ID
+    pub fn find_torrent(&self, id: i64) -> Option<TorrentObject> {
+        self.torrent_model().find(id)
     }
 
     /// Reads the connection settings of the current profile, which becomes

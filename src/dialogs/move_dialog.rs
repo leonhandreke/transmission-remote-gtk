@@ -87,8 +87,8 @@ impl TorrentMoveDialog {
 
         let msg = if count == 1 {
             let name = client
-                .torrent_data(win.selected_torrent_id())
-                .map(|(t, _)| t.name.clone())
+                .find_torrent(win.selected_torrent_id())
+                .map(|t| t.values().name.clone())
                 .unwrap_or_default();
             sprintf(&tr("Move %s"), &[&name])
         } else {
