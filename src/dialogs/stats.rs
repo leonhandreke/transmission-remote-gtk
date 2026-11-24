@@ -9,7 +9,7 @@ use gtk::{CompositeTemplate, glib};
 use crate::client::{Client, Response};
 use crate::dialogs::dialog::{Dialog, DialogImpl, TrgDialogExt};
 use crate::format;
-use crate::json::{Obj, get_f64, get_i64, get_obj};
+use crate::json::Obj;
 use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::util;
@@ -97,10 +97,6 @@ glib::wrapper! {
             gtk::ShortcutManager;
 }
 
-fn stats<'a>(args: &'a Obj, key: &str) -> Option<&'a Obj> {
-    get_obj(args, key)
-}
-
 impl StatsDialog {
     pub fn new(win: &MainWindow, client: &Client) -> Self {
         let d: Self = glib::Object::new();
@@ -173,45 +169,32 @@ impl StatsDialog {
         }
     }
 
-    fn show_stats(&self, args: &Obj) {
+    fn show_stats(&self, result: &Obj) {
         let imp = self.imp();
-        {
-            let empty = Obj::new();
-            let session = stats(args, p::STATS_CURRENT).unwrap_or(&empty);
-            let cumulat = stats(args, p::STATS_CUMULATIVE).unwrap_or(&empty);
+        let stats: p::SessionStats = p::parse(result);
+        let (session, cumulative) = (&stats.current_stats, &stats.cumulative_stats);
 
-            imp.version_session.set_text(&format!(
-                "Transmission {}",
-                self.client().version_string().unwrap_or_default()
-            ));
+        imp.version_session.set_text(&format!(
+            "Transmission {}",
+            self.client().version_string().unwrap_or_default()
+        ));
 
-            let set = |s: &gtk::Label, c: &gtk::Label, f: &dyn Fn(&Obj) -> String| {
-                s.set_text(&f(session));
-                c.set_text(&f(cumulat));
-            };
-            set(&imp.up_session, &imp.up_cumulat, &|o| {
-                format::size(get_i64(o, p::STATS_UPLOADED_BYTES))
-            });
-            set(&imp.down_session, &imp.down_cumulat, &|o| {
-                format::size(get_i64(o, p::STATS_DOWNLOADED_BYTES))
-            });
-            // NAN and INFINITY are handled by format_ratio
-            set(&imp.ratio_session, &imp.ratio_cumulat, &|o| {
-                format::ratio(
-                    get_f64(o, p::STATS_UPLOADED_BYTES) / get_f64(o, p::STATS_DOWNLOADED_BYTES),
-                )
-            });
-            set(&imp.files_added_session, &imp.files_added_cumulat, &|o| {
-                get_i64(o, p::STATS_FILES_ADDED).to_string()
-            });
-            set(&imp.session_count_session, &imp.session_count_cumulat, &|o| {
-                get_i64(o, p::STATS_SESSION_COUNT).to_string()
-            });
-            set(&imp.active_session, &imp.active_cumulat, &|o| {
-                format::time_long(get_i64(o, p::STATS_SECONDS_ACTIVE))
-            });
+        let set = |s: &gtk::Label, c: &gtk::Label, f: &dyn Fn(&p::TransferStats) -> String| {
+            s.set_text(&f(session));
+            c.set_text(&f(cumulative));
+        };
+        set(&imp.up_session, &imp.up_cumulat, &|s| format::size(s.uploaded_bytes));
+        set(&imp.down_session, &imp.down_cumulat, &|s| format::size(s.downloaded_bytes));
+        // NAN and INFINITY are handled by format::ratio()
+        set(&imp.ratio_session, &imp.ratio_cumulat, &|s| {
+            format::ratio(s.uploaded_bytes as f64 / s.downloaded_bytes as f64)
+        });
+        set(&imp.files_added_session, &imp.files_added_cumulat, &|s| s.files_added.to_string());
+        set(&imp.session_count_session, &imp.session_count_cumulat, &|s| {
+            s.session_count.to_string()
+        });
+        set(&imp.active_session, &imp.active_cumulat, &|s| format::time_long(s.seconds_active));
 
-            imp.error_shown.set(false);
-        }
+        imp.error_shown.set(false);
     }
 }

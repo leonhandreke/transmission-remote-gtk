@@ -3,6 +3,7 @@
 //! such as the torrents (see torrent.rs). The wire format is in rpc.
 
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::json::{Obj, get_i64, get_obj, value_as_i64};
@@ -75,19 +76,6 @@ pub const PARAM_PATH: &str = "path";
 pub const PARAM_IP_PROTOCOL: &str = "ip_protocol";
 pub const IP_PROTOCOL_IPV4: &str = "ipv4";
 pub const IP_PROTOCOL_IPV6: &str = "ipv6";
-
-/* port_test, free_space and blocklist_update results */
-pub const FIELD_PORT_IS_OPEN: &str = "port_is_open";
-pub const FIELD_SIZE_BYTES: &str = "size_bytes";
-
-/* session_stats */
-pub const STATS_CURRENT: &str = "current_stats";
-pub const STATS_CUMULATIVE: &str = "cumulative_stats";
-pub const STATS_UPLOADED_BYTES: &str = "uploaded_bytes";
-pub const STATS_DOWNLOADED_BYTES: &str = "downloaded_bytes";
-pub const STATS_FILES_ADDED: &str = "files_added";
-pub const STATS_SESSION_COUNT: &str = "session_count";
-pub const STATS_SECONDS_ACTIVE: &str = "seconds_active";
 
 /// Not in the protocol, just used in the UI
 pub const TR_PRI_UNSET: i64 = -3;
@@ -237,12 +225,44 @@ fn request(method: &'static str, ids: Option<&[i64]>) -> Request {
     req
 }
 
+/// A result as T, or T's default if it doesn't fit
+pub fn parse<T: DeserializeOwned + Default>(result: &Obj) -> T {
+    serde_json::from_value(Value::Object(result.clone())).unwrap_or_default()
+}
+
 pub fn session_stats() -> Request {
     Request::new(METHOD_SESSION_STATS)
 }
 
+/// The result of session_stats
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct SessionStats {
+    /// Since the server started
+    pub current_stats: TransferStats,
+    /// Ever
+    pub cumulative_stats: TransferStats,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct TransferStats {
+    pub uploaded_bytes: i64,
+    pub downloaded_bytes: i64,
+    pub files_added: i64,
+    pub session_count: i64,
+    pub seconds_active: i64,
+}
+
 pub fn blocklist_update() -> Request {
     Request::new(METHOD_BLOCKLIST_UPDATE)
+}
+
+/// The result of blocklist_update
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct BlocklistUpdate {
+    pub blocklist_size: i64,
 }
 
 /// A port test over IPv4 or IPv6, or whatever the OS picks
@@ -252,6 +272,13 @@ pub fn port_test(ip_protocol: Option<&str>) -> Request {
         req.set(PARAM_IP_PROTOCOL, ip);
     }
     req
+}
+
+/// The result of port_test
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct PortTest {
+    pub port_is_open: bool,
 }
 
 /// The session, the fields the application uses
@@ -268,8 +295,14 @@ pub fn free_space(path: &str) -> Request {
     Request::new(METHOD_FREE_SPACE).with(PARAM_PATH, path)
 }
 
+/// The free space of a free_space result, -1 if it's unknown
 pub fn free_space_bytes(result: &Obj) -> i64 {
-    result.get(FIELD_SIZE_BYTES).map(value_as_i64).unwrap_or(-1)
+    #[derive(Default, Deserialize)]
+    #[serde(default)]
+    struct FreeSpace {
+        size_bytes: Option<i64>,
+    }
+    parse::<FreeSpace>(result).size_bytes.unwrap_or(-1)
 }
 
 pub fn torrent_set_location(ids: &[i64], location: &str, move_data: bool) -> Request {

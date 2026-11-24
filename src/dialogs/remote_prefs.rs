@@ -13,7 +13,7 @@ use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::i18n::{sprintf, tr};
-use crate::json::{Obj, get_bool, get_i64, get_str};
+use crate::json::{Obj, get_i64, get_str};
 use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::util;
@@ -235,7 +235,7 @@ impl RemotePrefsDialog {
             let mut errors = Vec::new();
             for ((_, name), result) in families.iter().zip(&results) {
                 let state = match result {
-                    Ok(r) if get_bool(r, p::FIELD_PORT_IS_OPEN) => {
+                    Ok(r) if p::parse::<p::PortTest>(r).port_is_open => {
                         format!(
                             "<span font_weight=\"bold\" fgcolor=\"darkgreen\">{}</span>",
                             tr("open")
@@ -273,7 +273,7 @@ impl RemotePrefsDialog {
             imp.blocklist_update_button.set_label(&tr("Update"));
             match response {
                 Ok(r) => {
-                    let size = get_i64(&r, p::SGET_BLOCKLIST_SIZE);
+                    let size = p::parse::<p::BlocklistUpdate>(&r).blocklist_size;
                     imp.blocklist_check
                         .set_label(Some(&sprintf(&tr("Blocklist (%ld entries)"), &[&size])));
                 }
