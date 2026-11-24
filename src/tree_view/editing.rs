@@ -101,21 +101,19 @@ impl TreeView {
 }
 
 pub(super) fn cell_editing_changed(cell: &Rc<CellState>, label: &gtk::EditableLabel) {
-    let (Some(tv), Some(item)) = (cell.tv.upgrade(), cell.item.borrow().clone()) else {
-        return;
-    };
+    let Some(item) = cell.item.borrow().clone() else { return };
     let edit = cell.desc.edit.borrow().clone();
 
     if label.is_editing() {
         *cell.edit_original.borrow_mut() = Some(label.text().to_string());
         if let Some(edit) = edit {
-            edit(&tv, &item, false, None);
+            edit(&item, false, None);
         }
     } else {
         let text = label.text().to_string();
         let changed = Some(&text) != cell.edit_original.borrow().as_ref();
         if let Some(edit) = edit {
-            edit(&tv, &item, true, changed.then_some(text.as_str()));
+            edit(&item, true, changed.then_some(text.as_str()));
         }
         cell.edit_original.take();
         if cell.item.borrow().as_ref() == Some(&item) {

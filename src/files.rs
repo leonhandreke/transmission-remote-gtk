@@ -520,7 +520,7 @@ impl FilesView {
 
         // A click on the Download check box toggles it
         let weak = Rc::downgrade(&view);
-        wanted.set_activate(move |_, file: &FileObject| {
+        wanted.set_activate(move |file: &FileObject| {
             // a mixed directory is skipped
             set_wanted(file, (file.wanted() == 0) as i64);
             if let Some(v) = weak.upgrade() {
@@ -530,7 +530,7 @@ impl FilesView {
 
         // A click on the priority goes from normal to high to low
         let weak = Rc::downgrade(&view);
-        priority.set_activate(move |_, file: &FileObject| {
+        priority.set_activate(move |file: &FileObject| {
             let next = match file.priority() {
                 TR_PRI_NORMAL => TR_PRI_HIGH,
                 TR_PRI_HIGH => TR_PRI_LOW,

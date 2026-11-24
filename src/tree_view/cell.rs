@@ -23,7 +23,6 @@ const DATA_CELL: &str = "trg-cell";
 /// A cell (the widgets of a column of a row) and what it's bound to
 pub(super) struct CellState {
     pub(super) desc: Rc<ColumnDesc>,
-    pub(super) tv: glib::WeakRef<TreeView>,
     pub(super) list_item: glib::WeakRef<gtk::ListItem>,
     pub(super) expander: Option<gtk::TreeExpander>,
     pub(super) image: Option<gtk::Image>,
@@ -116,12 +115,10 @@ impl CellState {
     }
 
     pub(super) fn activate(&self) {
-        let (Some(tv), Some(item)) = (self.tv.upgrade(), self.item.borrow().clone()) else {
-            return;
-        };
+        let Some(item) = self.item.borrow().clone() else { return };
         let f = self.desc.activate.borrow().clone();
         if let Some(f) = f {
-            f(&tv, &item);
+            f(&item);
         }
     }
 }
@@ -199,7 +196,6 @@ impl TreeView {
 
         let cell = Rc::new(CellState {
             desc: desc.clone(),
-            tv: self.downgrade(),
             list_item: list_item.downgrade(),
             expander,
             image,

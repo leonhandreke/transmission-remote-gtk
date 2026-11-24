@@ -241,7 +241,7 @@ impl PersistentTreeView {
             key,
             COLUMN_UNREMOVABLE | COLUMN_EDITABLE,
         );
-        desc.set_edit(move |_, row: &PersistentRow, done, new_text| {
+        desc.set_edit(move |row: &PersistentRow, done, new_text| {
             if let (true, Some(text)) = (done, new_text) {
                 row.set_property(property, text);
             }

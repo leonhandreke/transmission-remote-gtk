@@ -233,7 +233,7 @@ impl TrackersView {
         });
 
         let weak = Rc::downgrade(&view);
-        announce.set_edit(move |_, tracker: &TrackerObject, done, new_text| {
+        announce.set_edit(move |tracker: &TrackerObject, done, new_text| {
             if let Some(view) = weak.upgrade() {
                 view.announce_edit(tracker, done, new_text);
             }

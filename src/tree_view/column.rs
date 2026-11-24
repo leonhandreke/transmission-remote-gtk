@@ -35,11 +35,11 @@ pub const COLUMN_HIDE_FROM_TOP_MENU: u32 = 1 << 3;
 pub const COLUMN_EDITABLE: u32 = 1 << 4;
 
 /// Called when the user toggles a "wanted" cell or clicks a priority cell
-pub type ActivateFn = Rc<dyn Fn(&TreeView, &glib::Object)>;
+pub type ActivateFn = Rc<dyn Fn(&glib::Object)>;
 /// Called when the user starts editing an editable text cell (done is false,
 /// new_text None), and when they finish (done is true, new_text is None if
 /// the text wasn't changed).
-pub type EditFn = Rc<dyn Fn(&TreeView, &glib::Object, bool, Option<&str>)>;
+pub type EditFn = Rc<dyn Fn(&glib::Object, bool, Option<&str>)>;
 /// Compares two rows by a column, for sorting without reading properties
 pub type CompareFn = Rc<dyn Fn(&glib::Object, &glib::Object) -> Ordering>;
 
@@ -71,22 +71,19 @@ impl ColumnDesc {
     }
 
     /// Sets the activate function, for rows of type T
-    pub fn set_activate<T: IsA<glib::Object>>(&self, f: impl Fn(&TreeView, &T) + 'static) {
-        *self.activate.borrow_mut() = Some(Rc::new(move |tv, obj| {
+    pub fn set_activate<T: IsA<glib::Object>>(&self, f: impl Fn(&T) + 'static) {
+        *self.activate.borrow_mut() = Some(Rc::new(move |obj| {
             if let Some(obj) = obj.downcast_ref::<T>() {
-                f(tv, obj);
+                f(obj);
             }
         }));
     }
 
     /// Sets the edit function, for rows of type T
-    pub fn set_edit<T: IsA<glib::Object>>(
-        &self,
-        f: impl Fn(&TreeView, &T, bool, Option<&str>) + 'static,
-    ) {
-        *self.edit.borrow_mut() = Some(Rc::new(move |tv, obj, done, new_text| {
+    pub fn set_edit<T: IsA<glib::Object>>(&self, f: impl Fn(&T, bool, Option<&str>) + 'static) {
+        *self.edit.borrow_mut() = Some(Rc::new(move |obj, done, new_text| {
             if let Some(obj) = obj.downcast_ref::<T>() {
-                f(tv, obj, done, new_text);
+                f(obj, done, new_text);
             }
         }));
     }
