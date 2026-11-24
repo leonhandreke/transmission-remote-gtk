@@ -15,7 +15,6 @@ use serde_json::{Value, json};
 use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
-use crate::item::{Item, Val};
 use crate::json::{get_str, objects};
 use crate::macos;
 use crate::main_window::MainWindow;
@@ -58,13 +57,43 @@ impl ProfileItem {
     }
 }
 
+/* An entry of a config list: two texts (like a label and a directory) */
+
+mod row_imp {
+    use super::*;
+
+    #[derive(glib::Properties, Default)]
+    #[properties(wrapper_type = super::PersistentRow)]
+    pub struct PersistentRow {
+        #[property(get, set)]
+        pub first: RefCell<String>,
+        #[property(get, set)]
+        pub second: RefCell<String>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for PersistentRow {
+        const NAME: &'static str = "TrgPersistentRow";
+        type Type = super::PersistentRow;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for PersistentRow {}
+}
+
+glib::wrapper! {
+    pub struct PersistentRow(ObjectSubclass<row_imp::PersistentRow>);
+}
+
 /* A config list which saves and restores simple data in the preferences: a
  * box with a tree view of editable text columns, and the buttons to add,
  * delete and move entries. */
 
 struct PersistentColumn {
+    /// The key of its text in the entries of the preference
     key: String,
-    index: usize,
+    /// The property of the rows it shows
+    property: &'static str,
     desc: Rc<ColumnDesc>,
 }
 
@@ -81,14 +110,10 @@ pub struct PersistentTreeView {
     scope: Scope,
 }
 
-fn new_persistent_item() -> Item {
-    Item::new(vec![Val::Str(None), Val::Str(None)])
-}
-
 impl PersistentTreeView {
     fn new(key: &str, scope: Scope) -> Rc<Self> {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let store = gio::ListStore::new::<Item>();
+        let store = gio::ListStore::new::<PersistentRow>();
 
         // no prefs: nothing about the view itself is persisted
         let tv = TreeView::new(None, "TrgPersistentTreeView");
@@ -147,26 +172,26 @@ impl PersistentTreeView {
         let weak = Rc::downgrade(&ptv);
         tv.connect_row_activated(move |tv, position| {
             let Some(p) = weak.upgrade() else { return };
-            if let Some(item) =
-                tv.selection().item(position).and_then(row_object).and_downcast::<Item>()
+            if let Some(row) =
+                tv.selection().item(position).and_then(row_object).and_downcast::<PersistentRow>()
             {
-                p.edit_item(&item);
+                p.edit_row(&row);
             }
         });
 
         let weak = Rc::downgrade(&ptv);
         add_button.connect_clicked(move |_| {
             if let Some(p) = weak.upgrade() {
-                let item = new_persistent_item();
-                p.store.append(&item);
-                p.edit_item(&item);
+                let row: PersistentRow = glib::Object::new();
+                p.store.append(&row);
+                p.edit_row(&row);
             }
         });
         let weak = Rc::downgrade(&ptv);
         del_button.connect_clicked(move |_| {
             if let Some(p) = weak.upgrade() {
-                for item in p.tv.selected_items::<Item>() {
-                    if let Some(pos) = p.store.find(&item) {
+                for row in p.tv.selected_items::<PersistentRow>() {
+                    if let Some(pos) = p.store.find(&row) {
                         p.store.remove(pos);
                     }
                 }
@@ -193,7 +218,7 @@ impl PersistentTreeView {
         if self.tv.count_selected() != 1 {
             return None;
         }
-        self.tv.first_selected::<Item>().and_then(|i| self.store.find(&i))
+        self.tv.first_selected::<PersistentRow>().and_then(|r| self.store.find(&r))
     }
 
     fn update_buttons(&self) {
@@ -204,20 +229,24 @@ impl PersistentTreeView {
         self.down_button.set_sensitive(position.is_some_and(|p| p + 1 < n));
     }
 
-    fn add_column(self: &Rc<Self>, index: usize, key: &str, label: &str) -> usize {
-        let desc = self.tv.reg_column(
+    /// Adds a column of the texts with key, shown in the property of the rows
+    fn add_column(self: &Rc<Self>, property: &'static str, key: &str, label: &str) -> usize {
+        // nothing is saved, the sort key is the column's position
+        let position = self.columns.borrow().len() as i32;
+        let desc = self.tv.reg_property(
             ColType::Text,
-            index as i32,
+            position,
+            property,
             label,
             key,
             COLUMN_UNREMOVABLE | COLUMN_EDITABLE,
         );
-        desc.set_edit(move |_, item: &Item, done, new_text| {
+        desc.set_edit(move |_, row: &PersistentRow, done, new_text| {
             if let (true, Some(text)) = (done, new_text) {
-                item.set(index, text);
+                row.set_property(property, text);
             }
         });
-        self.columns.borrow_mut().push(PersistentColumn { key: key.to_string(), index, desc });
+        self.columns.borrow_mut().push(PersistentColumn { key: key.to_string(), property, desc });
         self.tv.remove_all_columns();
         self.tv.setup_columns();
         self.columns.borrow().len() - 1
@@ -227,12 +256,12 @@ impl PersistentTreeView {
         *self.add_select.borrow_mut() = Some(column);
     }
 
-    fn edit_item(&self, item: &Item) {
+    fn edit_row(&self, row: &PersistentRow) {
         let columns = self.columns.borrow();
         let column = self.add_select.borrow().and_then(|i| columns.get(i)).or(columns.first());
-        self.tv.select_item(item);
+        self.tv.select_item(row);
         if let Some(c) = column {
-            self.tv.start_editing(item, &c.desc);
+            self.tv.start_editing(row, &c.desc);
         }
     }
 
@@ -242,36 +271,36 @@ impl PersistentTreeView {
         if (offset < 0 && position == 0) || (offset > 0 && position + 1 >= n) {
             return;
         }
-        let item = self.store.item(position).and_downcast::<Item>().unwrap();
+        let row = self.store.item(position).and_downcast::<PersistentRow>().unwrap();
         self.store.remove(position);
-        self.store.insert((position as i32 + offset) as u32, &item);
-        self.tv.select_item(&item);
+        self.store.insert((position as i32 + offset) as u32, &row);
+        self.tv.select_item(&row);
     }
 
     fn refresh(&self, prefs: &Prefs) {
         let entries = prefs.get_array(&self.key, self.scope).unwrap_or_default();
         let columns = self.columns.borrow();
-        let items: Vec<Item> = objects(&entries)
+        let rows: Vec<PersistentRow> = objects(&entries)
             .map(|obj| {
-                let item = new_persistent_item();
+                let row: PersistentRow = glib::Object::new();
                 for c in columns.iter() {
-                    item.set(c.index, get_str(obj, &c.key));
+                    row.set_property(c.property, get_str(obj, &c.key).unwrap_or_default());
                 }
-                item
+                row
             })
             .collect();
-        self.store.splice(0, self.store.n_items(), &items);
+        self.store.splice(0, self.store.n_items(), &rows);
     }
 
     fn save(&self, prefs: &Prefs) {
         // keep an entry that is still being edited, like when OK is clicked
         self.tv.stop_editing();
         let columns = self.columns.borrow();
-        let entries: Vec<Value> = util::objects::<Item>(&self.store)
-            .map(|item| {
+        let entries: Vec<Value> = util::objects::<PersistentRow>(&self.store)
+            .map(|row| {
                 let mut obj = serde_json::Map::new();
                 for c in columns.iter() {
-                    obj.insert(c.key.clone(), json!(item.string(c.index).unwrap_or_default()));
+                    obj.insert(c.key.clone(), json!(row.property::<String>(c.property)));
                 }
                 Value::Object(obj)
             })
@@ -716,9 +745,9 @@ impl PreferencesDialog {
         col2: (&str, &str),
     ) {
         let ptv = PersistentTreeView::new(key, scope);
-        let first = ptv.add_column(0, col1.0, col1.1);
+        let first = ptv.add_column("first", col1.0, col1.1);
         ptv.set_add_select(first);
-        ptv.add_column(1, col2.0, col2.1);
+        ptv.add_column("second", col2.0, col2.1);
         let wd = PrefWidget::List(ptv.clone());
         wd.refresh(&self.prefs());
         self.imp().widgets.borrow_mut().push(wd);
