@@ -20,17 +20,85 @@ use crate::protocol::TR_PRI_MIXED;
 
 const DATA_CELL: &str = "trg-cell";
 
+/// The widgets of a cell that show its value
+enum CellWidget {
+    /// A text, formatted by the column's type
+    Text(gtk::Label),
+    /// The text of an editable column
+    Editable(gtk::EditableLabel),
+    /// A text and an icon: a named one (IconText) or a file's (FileIconText)
+    IconText(gtk::Image, gtk::Label),
+    /// The wanted check box
+    Wanted(gtk::CheckButton),
+    Progress(gtk::ProgressBar),
+}
+
+impl CellWidget {
+    /// The widgets for a cell of the column desc, and the one that has them
+    fn new(desc: &ColumnDesc) -> (Self, gtk::Widget) {
+        match desc.ctype {
+            ColType::IconText | ColType::FileIconText => {
+                let bx = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+                let image = gtk::Image::new();
+                bx.append(&image);
+                let label = gtk::Label::new(None);
+                label.set_xalign(0.0);
+                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                label.set_hexpand(true);
+                bx.append(&label);
+                (CellWidget::IconText(image, label), bx.upcast())
+            }
+            ColType::Wanted => {
+                let check = gtk::CheckButton::new();
+                check.set_halign(gtk::Align::Center);
+                // the keyboard focus stays on the row, so Enter activates the
+                // row rather than toggling the check box
+                check.set_focusable(false);
+                check.set_focus_on_click(false);
+                (CellWidget::Wanted(check.clone()), check.upcast())
+            }
+            ColType::Prog => {
+                let bar = gtk::ProgressBar::new();
+                bar.set_show_text(true);
+                bar.set_valign(gtk::Align::Center);
+                (CellWidget::Progress(bar.clone()), bar.upcast())
+            }
+            _ if desc.flags & COLUMN_EDITABLE != 0 => {
+                let label = gtk::EditableLabel::new("");
+                (CellWidget::Editable(label.clone()), label.upcast())
+            }
+            ctype => {
+                let label = gtk::Label::new(None);
+                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+                let xalign = match ctype {
+                    ColType::Speed
+                    | ColType::Size
+                    | ColType::Ratio
+                    | ColType::NumGtZero
+                    | ColType::NumGtEqZero => 1.0,
+                    _ => 0.0,
+                };
+                label.set_xalign(xalign);
+                (CellWidget::Text(label.clone()), label.upcast())
+            }
+        }
+    }
+}
+
 /// A cell (the widgets of a column of a row) and what it's bound to
 pub(super) struct CellState {
     pub(super) desc: Rc<ColumnDesc>,
-    pub(super) list_item: glib::WeakRef<gtk::ListItem>,
-    pub(super) expander: Option<gtk::TreeExpander>,
-    pub(super) image: Option<gtk::Image>,
-    pub(super) widget: gtk::Widget,
+    list_item: glib::WeakRef<gtk::ListItem>,
+    /// In the file name column of a tree
+    expander: Option<gtk::TreeExpander>,
+    widget: CellWidget,
     /// The row object
     pub(super) item: RefCell<Option<glib::Object>>,
-    pub(super) handlers: RefCell<Vec<glib::SignalHandlerId>>,
-    pub(super) updating: Cell<bool>,
+    /// Of the notify signals of the row object's properties it shows
+    handlers: RefCell<Vec<glib::SignalHandlerId>>,
+    /// While refresh() sets the check box, which isn't the user toggling it
+    updating: Cell<bool>,
+    /// The text when the editing started
     pub(super) edit_original: RefCell<Option<String>>,
 }
 
@@ -54,32 +122,30 @@ fn file_icon_for(file_id: i64, name: &str) -> gio::Icon {
 }
 
 impl CellState {
+    /// Shows the row object's value
     pub(super) fn refresh(&self) {
         let Some(item) = self.item.borrow().clone() else {
             return;
         };
         let desc = &self.desc;
         let value = Val::of(&item, desc.property);
-        let extra = desc.extra.get().map(|p| Val::of(&item, p));
         self.updating.set(true);
 
-        match desc.ctype {
-            ColType::Prog => {
+        match &self.widget {
+            CellWidget::Progress(bar) => {
                 let progress = value.as_f64().clamp(0.0, 100.0);
-                let bar = self.widget.downcast_ref::<gtk::ProgressBar>().unwrap();
                 bar.set_fraction(progress / 100.0);
                 bar.set_text(Some(&format::progress_text(progress)));
             }
-            ColType::Wanted => {
+            CellWidget::Wanted(check) => {
                 let wanted = value.as_i64();
-                let check = self.widget.downcast_ref::<gtk::CheckButton>().unwrap();
                 check.set_inconsistent(wanted == TR_PRI_MIXED);
                 check.set_active(wanted == 1);
             }
-            ColType::IconText | ColType::FileIconText => {
+            CellWidget::IconText(image, label) => {
                 let text = value.to_text();
-                self.widget.downcast_ref::<gtk::Label>().unwrap().set_text(&text);
-                let image = self.image.as_ref().unwrap();
+                label.set_text(&text);
+                let extra = desc.extra.get().map(|p| Val::of(&item, p));
                 if desc.ctype == ColType::IconText {
                     image.set_icon_name(extra.as_ref().and_then(Val::as_str));
                 } else {
@@ -91,93 +157,75 @@ impl CellState {
                     }
                 }
             }
-            _ => {
-                let text = format_value(desc.ctype, &value);
-                if let Some(label) = self.widget.downcast_ref::<gtk::EditableLabel>() {
-                    if !label.is_editing() {
-                        label.set_text(text.as_deref().unwrap_or(""));
-                    }
-                    // like a GtkTreeView, a click selects the row, and a click
-                    // on a selected row starts editing
-                    let selected = self.list_item.upgrade().is_some_and(|li| li.is_selected());
-                    label.set_can_target(selected);
-                } else if let Some(label) = self.widget.downcast_ref::<gtk::Label>() {
-                    label.set_text(text.as_deref().unwrap_or(""));
+            CellWidget::Editable(label) => {
+                if !label.is_editing() {
+                    label.set_text(format_value(desc.ctype, &value).as_deref().unwrap_or(""));
                 }
+                // like a GtkTreeView, a click selects the row, and a click
+                // on a selected row starts editing
+                let selected = self.list_item.upgrade().is_some_and(|li| li.is_selected());
+                label.set_can_target(selected);
+            }
+            CellWidget::Text(label) => {
+                label.set_text(format_value(desc.ctype, &value).as_deref().unwrap_or(""));
             }
         }
 
         self.updating.set(false);
     }
 
-    pub(super) fn activate(&self) {
+    fn is_editing(&self) -> bool {
+        matches!(&self.widget, CellWidget::Editable(label) if label.is_editing())
+    }
+
+    /// The user toggled the check box or clicked the priority
+    fn activate(&self) {
         let Some(item) = self.item.borrow().clone() else { return };
         let f = self.desc.activate.borrow().clone();
         if let Some(f) = f {
             f(&item);
         }
     }
+
+    fn unbind(&self) {
+        if let Some(item) = self.item.take() {
+            for h in self.handlers.take() {
+                item.disconnect(h);
+            }
+        }
+        if let Some(e) = &self.expander {
+            e.set_list_row(None);
+        }
+    }
 }
 
 impl TreeView {
-    pub(super) fn cell_setup(&self, list_item: &gtk::ListItem, desc: &Rc<ColumnDesc>) {
-        let mut image = None;
-        let widget: gtk::Widget;
-        let mut child: gtk::Widget;
+    /// The factory of the cells of the column desc
+    pub(super) fn cell_factory(&self, desc: &Rc<ColumnDesc>) -> gtk::SignalListItemFactory {
+        let factory = gtk::SignalListItemFactory::new();
+        let weak = self.downgrade();
+        let d = desc.clone();
+        factory.connect_setup(move |_, obj| {
+            if let (Some(tv), Some(li)) = (weak.upgrade(), obj.downcast_ref::<gtk::ListItem>()) {
+                tv.cell_setup(li, &d);
+            }
+        });
+        let weak = self.downgrade();
+        factory.connect_bind(move |_, obj| {
+            if let (Some(tv), Some(li)) = (weak.upgrade(), obj.downcast_ref::<gtk::ListItem>()) {
+                tv.cell_bind(li);
+            }
+        });
+        factory.connect_unbind(move |_, obj| {
+            if let Some(cell) = obj.downcast_ref::<gtk::ListItem>().and_then(cell_of) {
+                cell.unbind();
+            }
+        });
+        factory
+    }
 
-        match desc.ctype {
-            ColType::IconText | ColType::FileIconText => {
-                let bx = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-                let img = gtk::Image::new();
-                bx.append(&img);
-                let label = gtk::Label::new(None);
-                label.set_xalign(0.0);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label.set_hexpand(true);
-                bx.append(&label);
-                image = Some(img);
-                widget = label.upcast();
-                child = bx.upcast();
-            }
-            ColType::Wanted => {
-                let check = gtk::CheckButton::new();
-                check.set_halign(gtk::Align::Center);
-                // the keyboard focus stays on the row, so Enter activates the
-                // row rather than toggling the check box
-                check.set_focusable(false);
-                check.set_focus_on_click(false);
-                widget = check.clone().upcast();
-                child = check.upcast();
-            }
-            ColType::Prog => {
-                let bar = gtk::ProgressBar::new();
-                bar.set_show_text(true);
-                bar.set_valign(gtk::Align::Center);
-                widget = bar.clone().upcast();
-                child = bar.upcast();
-            }
-            _ => {
-                if desc.flags & COLUMN_EDITABLE != 0 {
-                    let label = gtk::EditableLabel::new("");
-                    widget = label.clone().upcast();
-                    child = label.upcast();
-                } else {
-                    let label = gtk::Label::new(None);
-                    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                    let xalign = match desc.ctype {
-                        ColType::Speed
-                        | ColType::Size
-                        | ColType::Ratio
-                        | ColType::NumGtZero
-                        | ColType::NumGtEqZero => 1.0,
-                        _ => 0.0,
-                    };
-                    label.set_xalign(xalign);
-                    widget = label.clone().upcast();
-                    child = label.upcast();
-                }
-            }
-        }
+    fn cell_setup(&self, list_item: &gtk::ListItem, desc: &Rc<ColumnDesc>) {
+        let (widget, mut child) = CellWidget::new(desc);
 
         // the expander of a tree goes in its file name column
         let mut expander = None;
@@ -194,8 +242,7 @@ impl TreeView {
             desc: desc.clone(),
             list_item: list_item.downgrade(),
             expander,
-            image,
-            widget: widget.clone(),
+            widget,
             item: Default::default(),
             handlers: Default::default(),
             updating: Cell::new(false),
@@ -203,51 +250,50 @@ impl TreeView {
         });
 
         let weak = Rc::downgrade(&cell);
-        if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
-            let weak = weak.clone();
-            check.connect_toggled(move |_| {
-                let Some(cell) = weak.upgrade() else { return };
-                if cell.updating.get() || cell.item.borrow().is_none() {
-                    return;
-                }
-                cell.activate();
-                // the model decides the state
-                cell.refresh();
-            });
-        } else if let Some(label) = widget.downcast_ref::<gtk::EditableLabel>() {
-            let w = weak.clone();
-            label.connect_editing_notify(move |label| {
-                if let Some(cell) = w.upgrade() {
-                    cell_editing_changed(&cell, label);
-                }
-            });
-            let w = weak.clone();
-            list_item.connect_selected_notify(move |_| {
-                if let Some(cell) = w.upgrade() {
-                    let editing =
-                        cell.widget.downcast_ref::<gtk::EditableLabel>().unwrap().is_editing();
-                    if cell.item.borrow().is_some() && !editing {
+        match &cell.widget {
+            CellWidget::Wanted(check) => {
+                check.connect_toggled(move |_| {
+                    let Some(cell) = weak.upgrade() else { return };
+                    if cell.updating.get() || cell.item.borrow().is_none() {
+                        return;
+                    }
+                    cell.activate();
+                    // the model decides the state
+                    cell.refresh();
+                });
+            }
+            CellWidget::Editable(label) => {
+                let w = weak.clone();
+                label.connect_editing_notify(move |label| {
+                    if let Some(cell) = w.upgrade() {
+                        cell_editing_changed(&cell, label);
+                    }
+                });
+                list_item.connect_selected_notify(move |_| {
+                    if let Some(cell) = weak.upgrade()
+                        && cell.item.borrow().is_some()
+                        && !cell.is_editing()
+                    {
                         cell.refresh();
                     }
-                }
-            });
-        }
-
-        if desc.ctype == ColType::Prio {
-            let gesture = gtk::GestureClick::new();
-            gesture.set_button(gdk::BUTTON_PRIMARY);
-            let w = weak.clone();
-            gesture.connect_released(move |gesture, n_press, _, _| {
-                let Some(cell) = w.upgrade() else { return };
-                if n_press == 1
-                    && cell.item.borrow().is_some()
-                    && cell.desc.activate.borrow().is_some()
-                {
-                    cell.activate();
-                    gesture.set_state(gtk::EventSequenceState::Claimed);
-                }
-            });
-            widget.add_controller(gesture);
+                });
+            }
+            CellWidget::Text(label) if desc.ctype == ColType::Prio => {
+                let gesture = gtk::GestureClick::new();
+                gesture.set_button(gdk::BUTTON_PRIMARY);
+                gesture.connect_released(move |gesture, n_press, _, _| {
+                    let Some(cell) = weak.upgrade() else { return };
+                    if n_press == 1
+                        && cell.item.borrow().is_some()
+                        && cell.desc.activate.borrow().is_some()
+                    {
+                        cell.activate();
+                        gesture.set_state(gtk::EventSequenceState::Claimed);
+                    }
+                });
+                label.add_controller(gesture);
+            }
+            _ => {}
         }
 
         mark_row_widget(&child, list_item);
@@ -257,7 +303,7 @@ impl TreeView {
         list_item.set_child(Some(&child));
     }
 
-    pub(super) fn cell_bind(&self, list_item: &gtk::ListItem) {
+    fn cell_bind(&self, list_item: &gtk::ListItem) {
         let Some(cell) = cell_of(list_item) else { return };
         let Some(row) = list_item.item() else { return };
 
@@ -268,12 +314,9 @@ impl TreeView {
         let Some(item) = row_object(row) else { return };
         *cell.item.borrow_mut() = Some(item.clone());
 
-        let mut properties = vec![cell.desc.property];
-        if matches!(cell.desc.ctype, ColType::IconText | ColType::FileIconText) {
-            properties.extend(cell.desc.extra.get());
-        }
+        // (only icon columns have an extra property)
+        let properties = std::iter::once(cell.desc.property).chain(cell.desc.extra.get());
         let handlers = properties
-            .into_iter()
             .map(|property| {
                 let weak = Rc::downgrade(&cell);
                 item.connect_notify_local(Some(property), move |_, _| {
@@ -287,22 +330,10 @@ impl TreeView {
 
         cell.refresh();
 
-        if let Some(label) = cell.widget.downcast_ref::<gtk::EditableLabel>()
+        if let CellWidget::Editable(label) = &cell.widget
             && self.take_start_edit(&item, &cell.desc)
         {
             queue_start_editing(label);
-        }
-    }
-
-    pub(super) fn cell_unbind(&self, list_item: &gtk::ListItem) {
-        let Some(cell) = cell_of(list_item) else { return };
-        if let Some(item) = cell.item.take() {
-            for h in cell.handlers.take() {
-                item.disconnect(h);
-            }
-        }
-        if let Some(e) = &cell.expander {
-            e.set_list_row(None);
         }
     }
 }

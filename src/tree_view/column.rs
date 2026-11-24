@@ -226,27 +226,7 @@ impl TreeView {
     ) {
         let imp = self.imp();
         let cv = &imp.column_view;
-        let factory = gtk::SignalListItemFactory::new();
-
-        let weak = self.downgrade();
-        let d = desc.clone();
-        factory.connect_setup(move |_, obj| {
-            if let (Some(tv), Some(li)) = (weak.upgrade(), obj.downcast_ref::<gtk::ListItem>()) {
-                tv.cell_setup(li, &d);
-            }
-        });
-        let weak = self.downgrade();
-        factory.connect_bind(move |_, obj| {
-            if let (Some(tv), Some(li)) = (weak.upgrade(), obj.downcast_ref::<gtk::ListItem>()) {
-                tv.cell_bind(li);
-            }
-        });
-        let weak = self.downgrade();
-        factory.connect_unbind(move |_, obj| {
-            if let (Some(tv), Some(li)) = (weak.upgrade(), obj.downcast_ref::<gtk::ListItem>()) {
-                tv.cell_unbind(li);
-            }
-        });
+        let factory = self.cell_factory(desc);
 
         let column = gtk::ColumnViewColumn::new(Some(&desc.header), Some(factory));
         column.set_id(Some(&desc.id));
