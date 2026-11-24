@@ -222,25 +222,40 @@ can stay in the window.
 - **The About dialog** doesn't close with Escape on macOS (seen in UI
   testing on the base commit too).
 
-## Not yet verified in the UI
+## UI verification
 
-The typed list items (step 3: `TreeView`'s sources, peers, trackers, files)
-weren't clicked through either. Worth checking: sorting each details list
-by every column (and that a saved sort survives a restart), type-ahead in
-the peers (host) and files (name) lists, the host lookup when the Host
-column is shown, adding a tracker (the new row starts editing), editing
-and deleting trackers, the files' wanted check boxes and priority clicks
-(directories show mixed, and follow their files), the files' context menu,
-renaming a file, the add dialog's file list and "Apply to all", and the
-preferences' lists (adding starts editing, Enter edits, up/down, delete).
+Everything up to commit a17c365 was clicked through on macOS against
+Transmission 4.1.4, and passed: connecting, disconnecting, failures while
+connected and while connecting, periodic updates, the sidebar's tracker
+filter, the details pages (trackers added, edited and deleted; files'
+check boxes, priorities, context menu, rename, sorting and type-ahead),
+column menus and their persistence across restarts, the torrent context
+menu's limits and priority, the properties, remote preferences and
+statistics dialogs, adding (with "Apply to all") and removing torrents, the
+torrent rows' status and the First Tracker column.
 
-These commits were not clicked through (the check was stopped early):
-the connection refactor (`client/connection.rs`), the First Tracker column
-and torrent row status fixes, `DetailLists`, and the typed `Torrent`,
-`Session` and small results. Worth
-a subagent UI pass: connect/disconnect/reconnect, failures while connected
-(stop the daemon) and while connecting (bad port), periodic updates, the
-torrent context menu's limits and priority, remote preferences (every
-field loads and saves; the free space and the statistics show), removing
-and adding torrents, the details pages and the properties dialog, the
-First Tracker column and the sidebar's tracker filter.
+Not covered: the preferences' lists (destinations, custom headers: adding
+starts editing, Enter edits, up/down, delete), the peers list with real
+peers (type-ahead, host lookups), and a saved sort of the torrent and
+trackers lists. Check these after changing them, and after the torrents
+move off `Item`.
+
+Open observations from that pass, not investigated:
+
+- `Gdk-CRITICAL: gdk_surface_thaw_updates: assertion
+  'surface->update_freeze_count > 0' failed`, a few times while opening and
+  closing the Remote Preferences and Statistics dialogs (Escape, the close
+  button). It didn't reproduce in a dedicated run on the base commit
+  (13fdfd0) or on 936a848, so it's intermittent, likely in GTK's macOS
+  backend, and maybe older than this branch.
+- The add dialog's file tree of a multi-file torrent starts below the
+  torrent's own folder (`bencode.rs` and `FilesModel::set_tree`), while the
+  server's file list includes it.
+- The properties dialog's "Running time" shows the date the torrent was
+  added, and "Remaining time" is empty for a complete torrent (check the
+  labels against what `info_page_update` sets).
+- After adding or deleting a tracker, the remaining tracker's Last
+  Announce and Last Result are blank until the next update (the server
+  gives the trackers new IDs).
+- The Delete key alone didn't remove a torrent in the test (Cmd+Backspace
+  did); possibly only the test tool's key mapping.
