@@ -11,7 +11,6 @@ use gtk::{CompositeTemplate, gio, glib};
 use crate::client::Client;
 use crate::json::{get_str, objects};
 use crate::prefs::{self, Scope};
-use crate::protocol as p;
 use crate::util;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -152,9 +151,7 @@ impl DestinationCombo {
         // the default dir
         let default_dir = client
             .session()
-            .and_then(|s| {
-                get_str(&s, p::SGET_DOWNLOAD_DIR).map(|d| util::rm_trailing_slashes(d).to_string())
-            })
+            .map(|s| util::rm_trailing_slashes(&s.download_dir).to_string())
             .unwrap_or_default();
         self.insert(None, &default_dir, DestType::Default);
 

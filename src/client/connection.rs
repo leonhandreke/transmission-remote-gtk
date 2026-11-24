@@ -14,9 +14,10 @@ use gtk::glib::subclass::prelude::*;
 
 use super::{Client, ConnectionState, Error, Response};
 use crate::i18n::{sprintf, tr};
-use crate::json::get_str;
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
+use crate::protocol::Session;
+use crate::rpc;
 use crate::torrent_model::UpdateMode;
 
 impl Client {
@@ -64,7 +65,7 @@ impl Client {
                     return;
                 };
                 let was_connected = client.is_connected();
-                client.on_session_get(session);
+                client.on_session_get(session.and_then(Session::of));
                 if !was_connected && client.is_connected() {
                     client.on_torrent_get(torrents, UpdateMode::First);
                 }
@@ -251,7 +252,7 @@ impl Client {
         self.dispatch(p::torrent_get(&torrents), move |r| client.on_torrent_get(r, mode));
     }
 
-    fn on_session_get(&self, response: Response) {
+    fn on_session_get(&self, response: rpc::Result<Session>) {
         let was_connected = self.is_connected();
         match response {
             // servers older than 4.1 fail with Error::Unsupported
@@ -261,9 +262,8 @@ impl Client {
             }
             Err(_) => {}
             Ok(session) => {
-                let reload_aliases = self.session().is_some_and(|last| {
-                    get_str(&last, p::SGET_DOWNLOAD_DIR) != get_str(&session, p::SGET_DOWNLOAD_DIR)
-                });
+                let reload_aliases =
+                    self.session().is_some_and(|last| last.download_dir != session.download_dir);
                 self.set_session(session);
                 if reload_aliases {
                     self.reload_dir_aliases();

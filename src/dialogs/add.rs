@@ -18,7 +18,7 @@ use crate::i18n::{sprintf, tr};
 use crate::item;
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Prefs, Scope};
-use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_NORMAL};
+use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_NORMAL};
 use crate::util;
 
 const MAGNET_MAX_LINK_WIDTH: usize = 75;
@@ -219,8 +219,8 @@ impl TorrentAddDialog {
         imp.delete_check.set_active(prefs.get_bool(prefs::KEY_DELETE_LOCAL_TORRENT, Scope::Global));
 
         // the server's default for added torrents
-        match client.session().and_then(|s| s.get(p::SGET_SEQUENTIAL_DOWNLOAD).cloned()) {
-            Some(v) => imp.sequential_check.set_active(v.as_bool().unwrap_or(false)),
+        match client.session().and_then(|s| s.sequential_download) {
+            Some(v) => imp.sequential_check.set_active(v),
             None => imp.sequential_check.set_visible(false),
         }
 

@@ -6,11 +6,13 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::json::{Obj, get_i64, get_obj, value_as_i64};
+use crate::json::{Obj, get_obj, value_as_i64};
 
+mod session;
 mod torrent;
 
 pub use crate::rpc::Request;
+pub use session::*;
 pub use torrent::*;
 
 pub const FIELD_RECENTLY_ACTIVE: &str = "recently_active";
@@ -84,13 +86,9 @@ pub const TR_PRI_LOW: i64 = -1;
 pub const TR_PRI_NORMAL: i64 = 0;
 pub const TR_PRI_HIGH: i64 = 1;
 
-/* session_get */
-/// Not asked for (it's deprecated), but filled in by the client with the
-/// result of free_space for download_dir
-pub const SGET_DOWNLOAD_DIR_FREE_SPACE: &str = "download_dir_free_space";
+/* The keys of the session (for session_set) */
 pub const SGET_BLOCKLIST_ENABLED: &str = "blocklist_enabled";
 pub const SGET_BLOCKLIST_URL: &str = "blocklist_url";
-pub const SGET_BLOCKLIST_SIZE: &str = "blocklist_size";
 pub const SGET_DHT_ENABLED: &str = "dht_enabled";
 pub const SGET_LPD_ENABLED: &str = "lpd_enabled";
 pub const SGET_DOWNLOAD_DIR: &str = "download_dir";
@@ -103,14 +101,12 @@ pub const SGET_PEER_PORT: &str = "peer_port";
 pub const SGET_PEER_PORT_RANDOM_ON_START: &str = "peer_port_random_on_start";
 pub const SGET_PEX_ENABLED: &str = "pex_enabled";
 pub const SGET_PORT_FORWARDING_ENABLED: &str = "port_forwarding_enabled";
-pub const SGET_RPC_VERSION_SEMVER: &str = "rpc_version_semver";
 pub const SGET_SEED_RATIO_LIMIT: &str = "seed_ratio_limit";
 pub const SGET_SEED_RATIO_LIMITED: &str = "seed_ratio_limited";
 pub const SGET_SPEED_LIMIT_DOWN: &str = "speed_limit_down";
 pub const SGET_SPEED_LIMIT_DOWN_ENABLED: &str = "speed_limit_down_enabled";
 pub const SGET_SPEED_LIMIT_UP: &str = "speed_limit_up";
 pub const SGET_SPEED_LIMIT_UP_ENABLED: &str = "speed_limit_up_enabled";
-pub const SGET_VERSION: &str = "version";
 pub const SGET_TRASH_ORIGINAL_TORRENT_FILES: &str = "trash_original_torrent_files";
 pub const SGET_START_ADDED_TORRENTS: &str = "start_added_torrents";
 pub const SGET_RENAME_PARTIAL_FILES: &str = "rename_partial_files";
@@ -138,54 +134,6 @@ pub const TRANSPORT_TCP: &str = "tcp";
 pub const ENCRYPTION_REQUIRED: &str = "required";
 pub const ENCRYPTION_PREFERRED: &str = "preferred";
 pub const ENCRYPTION_ALLOWED: &str = "allowed";
-
-/// The session fields asked for, all of the above
-const SESSION_GET_FIELDS: &[&str] = &[
-    SGET_BLOCKLIST_ENABLED,
-    SGET_BLOCKLIST_URL,
-    SGET_BLOCKLIST_SIZE,
-    SGET_DHT_ENABLED,
-    SGET_LPD_ENABLED,
-    SGET_DOWNLOAD_DIR,
-    SGET_INCOMPLETE_DIR,
-    SGET_INCOMPLETE_DIR_ENABLED,
-    SGET_ENCRYPTION,
-    SGET_PEER_LIMIT_GLOBAL,
-    SGET_PEER_LIMIT_PER_TORRENT,
-    SGET_PEER_PORT,
-    SGET_PEER_PORT_RANDOM_ON_START,
-    SGET_PEX_ENABLED,
-    SGET_PORT_FORWARDING_ENABLED,
-    SGET_RPC_VERSION_SEMVER,
-    SGET_SEED_RATIO_LIMIT,
-    SGET_SEED_RATIO_LIMITED,
-    SGET_SPEED_LIMIT_DOWN,
-    SGET_SPEED_LIMIT_DOWN_ENABLED,
-    SGET_SPEED_LIMIT_UP,
-    SGET_SPEED_LIMIT_UP_ENABLED,
-    SGET_VERSION,
-    SGET_TRASH_ORIGINAL_TORRENT_FILES,
-    SGET_START_ADDED_TORRENTS,
-    SGET_RENAME_PARTIAL_FILES,
-    SGET_CACHE_SIZE_MIB,
-    SGET_SCRIPT_TORRENT_DONE_FILENAME,
-    SGET_SCRIPT_TORRENT_DONE_ENABLED,
-    SGET_DOWNLOAD_QUEUE_ENABLED,
-    SGET_DOWNLOAD_QUEUE_SIZE,
-    SGET_SEED_QUEUE_ENABLED,
-    SGET_SEED_QUEUE_SIZE,
-    SGET_QUEUE_STALLED_ENABLED,
-    SGET_QUEUE_STALLED_MINUTES,
-    SGET_ALT_SPEED_DOWN,
-    SGET_ALT_SPEED_ENABLED,
-    SGET_ALT_SPEED_TIME_BEGIN,
-    SGET_ALT_SPEED_TIME_ENABLED,
-    SGET_ALT_SPEED_TIME_END,
-    SGET_ALT_SPEED_TIME_DAY,
-    SGET_ALT_SPEED_UP,
-    SGET_SEQUENTIAL_DOWNLOAD,
-    SGET_PREFERRED_TRANSPORTS,
-];
 
 /* Requests */
 
@@ -283,7 +231,7 @@ pub struct PortTest {
 
 /// The session, the fields the application uses
 pub fn session_get() -> Request {
-    Request::new(METHOD_SESSION_GET).with(PARAM_FIELDS, SESSION_GET_FIELDS)
+    Request::new(METHOD_SESSION_GET).with(PARAM_FIELDS, session_fields())
 }
 
 pub fn session_set() -> Request {
@@ -423,12 +371,6 @@ pub fn tracker_list(trackers: &[(i64, String)]) -> String {
         last_tier = Some(*tier);
     }
     list
-}
-
-/* Session */
-
-pub fn session_get_cache_size_mib(s: &Obj) -> i64 {
-    if s.contains_key(SGET_CACHE_SIZE_MIB) { get_i64(s, SGET_CACHE_SIZE_MIB) } else { -1 }
 }
 
 #[cfg(test)]

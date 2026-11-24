@@ -19,11 +19,10 @@ use std::rc::Rc;
 use gtk::glib;
 use gtk::glib::prelude::*;
 use gtk::glib::subclass::prelude::*;
-use serde_json::json;
 
-use crate::json::{Obj, get_bool, get_f64, get_str, objects};
+use crate::json::{get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
-use crate::protocol::{self, Request, Torrent};
+use crate::protocol::{self, Request, Session, Torrent};
 use crate::rpc::{self, Config, Transport};
 use crate::torrent_model::{TorrentItem, TorrentItemExt, TorrentModel, UpdateMode};
 
@@ -52,9 +51,7 @@ mod imp {
         pub connid: Cell<i64>,
         pub fail_count: Cell<u32>,
         pub update_serial: Cell<i64>,
-        pub session: RefCell<Option<Obj>>,
-        pub seed_ratio_limited: Cell<bool>,
-        pub seed_ratio_limit: Cell<f64>,
+        pub session: RefCell<Option<Session>>,
         pub torrent_model: TorrentModel,
         /// From connect_to_profile() until the connection succeeds or fails
         pub connecting: Cell<bool>,
@@ -71,8 +68,6 @@ mod imp {
                 fail_count: Default::default(),
                 update_serial: Default::default(),
                 session: Default::default(),
-                seed_ratio_limited: Default::default(),
-                seed_ratio_limit: Default::default(),
                 torrent_model: TorrentModel::new(),
                 connecting: Default::default(),
                 torrents_timer: Default::default(),
@@ -142,56 +137,45 @@ impl Client {
         })
     }
 
-    pub fn session(&self) -> Option<std::cell::Ref<'_, Obj>> {
+    pub fn session(&self) -> Option<std::cell::Ref<'_, Session>> {
         std::cell::Ref::filter_map(self.imp().session.borrow(), Option::as_ref).ok()
     }
 
-    pub fn session_clone(&self) -> Option<Obj> {
+    pub fn session_clone(&self) -> Option<Session> {
         self.imp().session.borrow().clone()
     }
 
+    /// The download directory of the session, if there is one
     fn download_dir(&self) -> Option<String> {
-        self.session().and_then(|s| get_str(&s, protocol::SGET_DOWNLOAD_DIR).map(str::to_string))
+        self.session().map(|s| s.download_dir.clone()).filter(|d| !d.is_empty())
     }
 
-    pub fn set_session(&self, mut session: Obj) {
-        let imp = self.imp();
-
+    pub fn set_session(&self, mut session: Session) {
         // the free space of the last update, if it isn't in this one
-        let dir = get_str(&session, protocol::SGET_DOWNLOAD_DIR).map(str::to_string);
-        if !session.contains_key(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE)
-            && dir.is_some()
-            && self.download_dir() == dir
+        if session.download_dir_free_space.is_none()
+            && let Some(last) = self.session()
+            && last.download_dir == session.download_dir
         {
-            let last =
-                self.session().and_then(|s| s.get(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE).cloned());
-            if let Some(free) = last {
-                session.insert(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE.into(), free);
-            }
+            session.download_dir_free_space = last.download_dir_free_space;
         }
-        let needs_free_space = !session.contains_key(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE);
+        let needs_free_space = session.download_dir_free_space.is_none();
+        let dir = session.download_dir.clone();
 
-        imp.seed_ratio_limit.set(get_f64(&session, protocol::SGET_SEED_RATIO_LIMIT));
-        imp.seed_ratio_limited.set(get_bool(&session, protocol::SGET_SEED_RATIO_LIMITED));
-        *imp.session.borrow_mut() = Some(session);
+        *self.imp().session.borrow_mut() = Some(session);
         self.emit_by_name::<()>("session-updated", &[]);
 
         // a new download directory (or the first session): its free space
         // now rather than with the next session update
-        if let (true, Some(dir)) = (needs_free_space, dir) {
+        if needs_free_space && !dir.is_empty() {
             let client = self.clone();
             self.dispatch(protocol::free_space(&dir), move |r| {
                 let Ok(r) = r else { return };
                 {
                     let mut session = client.imp().session.borrow_mut();
-                    let Some(s) = session.as_mut() else { return };
-                    if get_str(s, protocol::SGET_DOWNLOAD_DIR) != Some(dir.as_str()) {
+                    let Some(s) = session.as_mut().filter(|s| s.download_dir == dir) else {
                         return;
-                    }
-                    s.insert(
-                        protocol::SGET_DOWNLOAD_DIR_FREE_SPACE.into(),
-                        json!(protocol::free_space_bytes(&r)),
-                    );
+                    };
+                    s.download_dir_free_space = Some(protocol::free_space_bytes(&r));
                 }
                 client.emit_by_name::<()>("session-updated", &[]);
             });
@@ -199,7 +183,7 @@ impl Client {
     }
 
     pub fn version_string(&self) -> Option<String> {
-        self.session().and_then(|s| get_str(&s, protocol::SGET_VERSION).map(str::to_string))
+        self.session().map(|s| s.version.clone())
     }
 
     pub fn is_connected(&self) -> bool {
@@ -238,12 +222,9 @@ impl Client {
         self.imp().fail_count.set(0);
     }
 
-    pub fn seed_ratio_limited(&self) -> bool {
-        self.imp().seed_ratio_limited.get()
-    }
-
-    pub fn seed_ratio_limit(&self) -> f64 {
-        self.imp().seed_ratio_limit.get()
+    /// The session's seed ratio limit, if it's on
+    pub fn seed_ratio_limit(&self) -> Option<f64> {
+        self.session().filter(|s| s.seed_ratio_limited).map(|s| s.seed_ratio_limit)
     }
 
     /// The torrents
@@ -334,7 +315,7 @@ impl Client {
     /// the requests and the session.
     pub fn update_session_after<F>(&self, mut reqs: Vec<Request>, callback: F)
     where
-        F: FnOnce(Vec<Response>, Response) + 'static,
+        F: FnOnce(Vec<Response>, rpc::Result<Session>) + 'static,
     {
         let n = reqs.len();
         reqs.push(protocol::session_get());
@@ -344,14 +325,12 @@ impl Client {
         }
         self.dispatch_batch(reqs, move |mut results| {
             let free_space = if dir.is_some() { results.pop() } else { None };
-            let mut session = results.pop().unwrap_or_else(|| Err(Error::Decode(String::new())));
+            let session = results.pop().unwrap_or_else(|| Err(Error::Decode(String::new())));
+            let mut session = session.and_then(Session::of);
             if let (Ok(s), Some(Ok(free))) = (&mut session, free_space) {
                 // only if the directory didn't change in the meantime
-                if get_str(s, protocol::SGET_DOWNLOAD_DIR) == dir.as_deref() {
-                    s.insert(
-                        protocol::SGET_DOWNLOAD_DIR_FREE_SPACE.into(),
-                        json!(protocol::free_space_bytes(&free)),
-                    );
+                if Some(&s.download_dir) == dir.as_ref() {
+                    s.download_dir_free_space = Some(protocol::free_space_bytes(&free));
                 }
             }
             results.truncate(n);
@@ -359,7 +338,7 @@ impl Client {
         });
     }
 
-    pub fn update_session<F: FnOnce(Response) + 'static>(&self, callback: F) {
+    pub fn update_session<F: FnOnce(rpc::Result<Session>) + 'static>(&self, callback: F) {
         self.update_session_after(Vec::new(), |_, session| callback(session));
     }
 }

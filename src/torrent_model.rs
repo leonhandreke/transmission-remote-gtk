@@ -227,10 +227,7 @@ pub fn shorten_download_dir(client: &Client, download_dir: &str) -> String {
         }
     }
 
-    let default_dir = client
-        .session()
-        .and_then(|s| get_str(&s, p::SGET_DOWNLOAD_DIR).map(str::to_string))
-        .unwrap_or_default();
+    let default_dir = client.session().map(|s| s.download_dir.clone()).unwrap_or_default();
 
     if download_dir == default_dir {
         return tr("Default");

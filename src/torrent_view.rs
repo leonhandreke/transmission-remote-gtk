@@ -210,8 +210,8 @@ impl RowValues {
     }
 
     fn seed_ratio(&self, client: &Client) -> Option<f64> {
-        if self.seed_ratio_mode == 0 && client.seed_ratio_limited() {
-            Some(client.seed_ratio_limit())
+        if self.seed_ratio_mode == 0 {
+            client.seed_ratio_limit()
         } else if self.seed_ratio_mode == 1 {
             Some(self.seed_ratio_limit)
         } else {

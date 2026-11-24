@@ -9,7 +9,6 @@ use gtk::{CompositeTemplate, gio, glib};
 use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
-use crate::json::get_bool;
 use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::util;
@@ -94,7 +93,7 @@ impl TorrentAddUrlDialog {
                 let text = imp.url_entry.text().to_string();
                 let win = imp.win.upgrade();
 
-                let dht = client.session().map(|s| get_bool(&s, p::SGET_DHT_ENABLED)).unwrap_or(false);
+                let dht = client.session().is_some_and(|s| s.dht_enabled);
                 if text.starts_with("magnet:") && !dht {
                     // The add dialog is destroyed right after this, so use the
                     // main window as parent now that the warning doesn't block.

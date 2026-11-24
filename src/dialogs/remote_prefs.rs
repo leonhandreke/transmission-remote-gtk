@@ -13,9 +13,9 @@ use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::dialogs::json_widgets::JsonWidgets;
 use crate::i18n::{sprintf, tr};
-use crate::json::{Obj, get_i64, get_str};
+use crate::json::{Obj, get_i64};
 use crate::main_window::MainWindow;
-use crate::protocol as p;
+use crate::protocol::{self as p, Session};
 use crate::util;
 
 mod imp {
@@ -43,15 +43,9 @@ mod imp {
         #[template_child]
         pub alt_days_grid: TemplateChild<gtk::Grid>,
         #[template_child]
-        pub cache_size_label: TemplateChild<gtk::Label>,
-        #[template_child]
         pub cache_size_spin: TemplateChild<gtk::SpinButton>,
         #[template_child]
-        pub blocklist_url_label: TemplateChild<gtk::Label>,
-        #[template_child]
         pub blocklist_url_entry: TemplateChild<gtk::Entry>,
-        #[template_child]
-        pub queues_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub download_dir_entry: TemplateChild<gtk::Widget>,
         #[template_child]
@@ -289,7 +283,8 @@ impl RemotePrefsDialog {
         imp.win.set(Some(win));
         d.set_transient_for(Some(win));
 
-        let s = client.session_clone().unwrap_or_default();
+        let session = client.session_clone().unwrap_or_default();
+        let s = session.to_obj();
         let mut widgets = JsonWidgets::default();
 
         let session_widgets: Vec<(gtk::Widget, &str)> = vec![
@@ -359,40 +354,18 @@ impl RemotePrefsDialog {
             widgets.add(w, &s, key);
         }
 
-        let queue_widgets: Vec<(gtk::Widget, &str)> = vec![
-            (
-                imp.download_queue_check.get().upcast::<gtk::Widget>(),
-                p::SGET_DOWNLOAD_QUEUE_ENABLED,
-            ),
-            (imp.download_queue_spin.get().upcast::<gtk::Widget>(), p::SGET_DOWNLOAD_QUEUE_SIZE),
-            (imp.seed_queue_check.get().upcast::<gtk::Widget>(), p::SGET_SEED_QUEUE_ENABLED),
-            (imp.seed_queue_spin.get().upcast::<gtk::Widget>(), p::SGET_SEED_QUEUE_SIZE),
-            (imp.queue_stalled_check.get().upcast::<gtk::Widget>(), p::SGET_QUEUE_STALLED_ENABLED),
-            (imp.queue_stalled_spin.get().upcast::<gtk::Widget>(), p::SGET_QUEUE_STALLED_MINUTES),
+        let more_widgets: [(gtk::Widget, &str); 8] = [
+            (imp.download_queue_check.get().upcast(), p::SGET_DOWNLOAD_QUEUE_ENABLED),
+            (imp.download_queue_spin.get().upcast(), p::SGET_DOWNLOAD_QUEUE_SIZE),
+            (imp.seed_queue_check.get().upcast(), p::SGET_SEED_QUEUE_ENABLED),
+            (imp.seed_queue_spin.get().upcast(), p::SGET_SEED_QUEUE_SIZE),
+            (imp.queue_stalled_check.get().upcast(), p::SGET_QUEUE_STALLED_ENABLED),
+            (imp.queue_stalled_spin.get().upcast(), p::SGET_QUEUE_STALLED_MINUTES),
+            (imp.cache_size_spin.get().upcast(), p::SGET_CACHE_SIZE_MIB),
+            (imp.blocklist_url_entry.get().upcast(), p::SGET_BLOCKLIST_URL),
         ];
-        if s.contains_key(p::SGET_DOWNLOAD_QUEUE_ENABLED) {
-            for (w, key) in &queue_widgets {
-                widgets.add(w, &s, key);
-            }
-        } else {
-            imp.queues_label.set_visible(false);
-            for (w, _) in &queue_widgets {
-                w.set_visible(false);
-            }
-        }
-
-        if p::session_get_cache_size_mib(&s) >= 0 {
-            widgets.add(&imp.cache_size_spin.get(), &s, p::SGET_CACHE_SIZE_MIB);
-        } else {
-            imp.cache_size_label.set_visible(false);
-            imp.cache_size_spin.set_visible(false);
-        }
-
-        if get_str(&s, p::SGET_BLOCKLIST_URL).is_some() {
-            widgets.add(&imp.blocklist_url_entry.get(), &s, p::SGET_BLOCKLIST_URL);
-        } else {
-            imp.blocklist_url_label.set_visible(false);
-            imp.blocklist_url_entry.set_visible(false);
+        for (w, key) in &more_widgets {
+            widgets.add(w, &s, key);
         }
 
         Self::time_widget_add(
@@ -413,19 +386,16 @@ impl RemotePrefsDialog {
         *imp.widgets.borrow_mut() = widgets;
         d.alt_speed_dependency();
 
-        let encryption = get_str(&s, p::SGET_ENCRYPTION).unwrap_or("");
-        imp.encryption_combo.set_selected(match encryption {
+        imp.encryption_combo.set_selected(match session.encryption.as_str() {
             p::ENCRYPTION_REQUIRED => 0,
             p::ENCRYPTION_ALLOWED => 2,
             _ => 1,
         });
 
-        d.transports_add(&mut imp.widgets.borrow_mut(), &s);
+        d.transports_add(&mut imp.widgets.borrow_mut(), &session);
 
-        imp.blocklist_check.set_label(Some(&sprintf(
-            &tr("Blocklist (%ld entries)"),
-            &[&get_i64(&s, p::SGET_BLOCKLIST_SIZE)],
-        )));
+        imp.blocklist_check
+            .set_label(Some(&sprintf(&tr("Blocklist (%ld entries)"), &[&session.blocklist_size])));
 
         d.on_response(|d, response| {
             if response == Response::Ok {
@@ -473,14 +443,14 @@ impl RemotePrefsDialog {
         &[p::TRANSPORT_UTP],
     ];
 
-    fn transports_add(&self, widgets: &mut JsonWidgets, s: &Obj) {
+    fn transports_add(&self, widgets: &mut JsonWidgets, s: &Session) {
         let imp = self.imp();
-        let Some(current) = s.get(p::SGET_PREFERRED_TRANSPORTS).and_then(|v| v.as_array()) else {
+        let Some(current) = &s.preferred_transports else {
             imp.transport_label.set_visible(false);
             imp.transport_combo.set_visible(false);
             return;
         };
-        let current: Vec<&str> = current.iter().filter_map(|v| v.as_str()).collect();
+        let current: Vec<&str> = current.iter().map(String::as_str).collect();
         let index = Self::TRANSPORTS.iter().position(|t| *t == current.as_slice()).unwrap_or(0);
         imp.transport_combo.set_selected(index as u32);
         let combo = imp.transport_combo.get();

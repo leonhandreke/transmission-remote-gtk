@@ -18,7 +18,6 @@ use crate::dialogs::{
 use crate::general_panel::GeneralPanel;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
-use crate::json::get_bool;
 use crate::menu_bar::MenuBar;
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
@@ -779,9 +778,7 @@ impl MainWindow {
         // the speed limits may have changed
         imp.status_bar.update_speed(&self.torrent_model().stats(), &client);
 
-        let queues_enabled = session.contains_key(p::SGET_DOWNLOAD_QUEUE_ENABLED)
-            && (get_bool(&session, p::SGET_DOWNLOAD_QUEUE_ENABLED)
-                || get_bool(&session, p::SGET_SEED_QUEUE_ENABLED));
+        let queues_enabled = session.queues_enabled();
 
         if imp.queues_enabled.get() != queues_enabled {
             self.menu_bar().set_supports_queues(queues_enabled);

@@ -10,9 +10,8 @@ use gtk::{CompositeTemplate, glib};
 use crate::client::Client;
 use crate::format;
 use crate::i18n::{sprintf, tr};
-use crate::json::{Obj, get_bool, get_i64, get_str, value_as_i64};
 use crate::prefs::{self, Scope};
-use crate::protocol as p;
+use crate::protocol::{self as p, Session};
 use crate::torrent_model::Stats;
 use crate::util;
 
@@ -181,28 +180,27 @@ impl StatusBar {
         self.imp().info_lbl.set_text(msg);
     }
 
-    fn set_connected_label(&self, session: &Obj, client: &Client) {
+    fn set_connected_label(&self, session: &Session, client: &Client) {
         let profile_name = client
             .prefs()
             .get_string(prefs::KEY_PROFILE_NAME, Scope::Connection)
             .unwrap_or_default();
         self.push_connection_msg(&sprintf(
             &tr("Connected: %s :: %s"),
-            &[&profile_name, &get_str(session, p::SGET_VERSION).unwrap_or("")],
+            &[&profile_name, &session.version],
         ));
     }
 
-    pub fn connect(&self, session: &Obj, client: &Client) {
+    pub fn connect(&self, session: &Session, client: &Client) {
         self.set_connected_label(session, client);
         self.imp().speed_lbl.set_text(&tr("Updating torrents..."));
     }
 
-    pub fn session_update(&self, session: &Obj) {
+    pub fn session_update(&self, session: &Session) {
         let imp = self.imp();
-        let free = session.get(p::SGET_DOWNLOAD_DIR_FREE_SPACE).map(value_as_i64).unwrap_or(-1);
-        let alt = get_bool(session, p::SGET_ALT_SPEED_ENABLED);
+        let alt = session.alt_speed_enabled;
 
-        if free >= 0 {
+        if let Some(free) = session.download_dir_free_space.filter(|f| *f >= 0) {
             imp.free_lbl.set_text(&sprintf(&tr("Free space: %s"), &[&format::size(free)]));
         } else {
             imp.free_lbl.set_text("");
@@ -219,31 +217,19 @@ impl StatusBar {
 
     pub fn update_speed(&self, stats: &Stats, client: &Client) {
         let Some(session) = client.session_clone() else { return };
-        let alt = get_bool(&session, p::SGET_ALT_SPEED_ENABLED);
-
-        let (down_limit, up_limit) = if alt {
-            (get_i64(&session, p::SGET_ALT_SPEED_DOWN), get_i64(&session, p::SGET_ALT_SPEED_UP))
+        let s = &session;
+        let (down_limit, up_limit) = if s.alt_speed_enabled {
+            (Some(s.alt_speed_down), Some(s.alt_speed_up))
         } else {
             (
-                if get_bool(&session, p::SGET_SPEED_LIMIT_DOWN_ENABLED) {
-                    get_i64(&session, p::SGET_SPEED_LIMIT_DOWN)
-                } else {
-                    -1
-                },
-                if get_bool(&session, p::SGET_SPEED_LIMIT_UP_ENABLED) {
-                    get_i64(&session, p::SGET_SPEED_LIMIT_UP)
-                } else {
-                    -1
-                },
+                s.speed_limit_down_enabled.then_some(s.speed_limit_down),
+                s.speed_limit_up_enabled.then_some(s.speed_limit_up),
             )
         };
 
-        let limit = |l: i64| {
-            if l >= 0 {
-                sprintf(&tr(" (Limit: %s)"), &[&format::speed_kbps(l as f64)])
-            } else {
-                String::new()
-            }
+        let limit = |l: Option<i64>| match l {
+            Some(l) => sprintf(&tr(" (Limit: %s)"), &[&format::speed_kbps(l as f64)]),
+            None => String::new(),
         };
 
         let text = sprintf(
