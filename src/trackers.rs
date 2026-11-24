@@ -2,54 +2,97 @@
 //! tracker, the context menu adds and deletes them. Changes send the whole list
 //! of the rows (tracker_list).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use gtk::gio;
 use gtk::prelude::*;
+use gtk::subclass::prelude::*;
+use gtk::{gio, glib};
 
 use crate::client::Client;
 use crate::i18n::tr;
-use crate::item::{self, Item, Val};
 use crate::protocol::{self as p, Torrent};
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{
     COLUMN_EDITABLE, COLUMN_EXTRA, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView,
 };
-use crate::util;
+use crate::util::{self, set_changed};
 
-pub const COL_ICON: usize = 0;
-pub const COL_TIER: usize = 1;
-pub const COL_ANNOUNCE: usize = 2;
-pub const COL_SCRAPE: usize = 3;
-pub const COL_ID: usize = 4;
-pub const COL_LAST_ANNOUNCE_PEER_COUNT: usize = 5;
-pub const COL_LAST_ANNOUNCE_TIME: usize = 6;
-pub const COL_LAST_SCRAPE_TIME: usize = 7;
-pub const COL_SEEDERCOUNT: usize = 8;
-pub const COL_LEECHERCOUNT: usize = 9;
-pub const COL_HOST: usize = 10;
-pub const COL_LAST_ANNOUNCE_RESULT: usize = 11;
-pub const COL_UPDATESERIAL: usize = 12;
-pub const COL_DOWNLOADERCOUNT: usize = 13;
+/* A tracker of the torrent, or a new one being added */
 
-fn new_tracker_item() -> Item {
-    Item::new(vec![
-        Val::Str(None),
-        Val::I64(0),
-        Val::Str(None),
-        Val::Str(None),
-        Val::I64(0),
-        Val::I64(0),
-        Val::I64(0),
-        Val::I64(0),
-        Val::I64(0),
-        Val::I64(0),
-        Val::Str(None),
-        Val::Str(None),
-        Val::I64(0),
-        Val::I64(0),
-    ])
+mod imp {
+    use super::*;
+
+    #[derive(glib::Properties, Default)]
+    #[properties(wrapper_type = super::TrackerObject)]
+    pub struct TrackerObject {
+        #[property(get, set)]
+        pub icon: RefCell<String>,
+        /// The server's ID of the tracker, -1 for a new one
+        #[property(get, set)]
+        pub id: Cell<i64>,
+        #[property(get, set)]
+        pub tier: Cell<i64>,
+        #[property(get, set)]
+        pub announce: RefCell<String>,
+        #[property(get, set)]
+        pub scrape: RefCell<String>,
+        #[property(get, set)]
+        pub host: RefCell<String>,
+        #[property(get, set)]
+        pub last_announce_result: RefCell<String>,
+        #[property(get, set)]
+        pub last_announce_time: Cell<i64>,
+        #[property(get, set)]
+        pub last_scrape_time: Cell<i64>,
+        #[property(get, set)]
+        pub last_announce_peer_count: Cell<i64>,
+        #[property(get, set)]
+        pub seeder_count: Cell<i64>,
+        #[property(get, set)]
+        pub leecher_count: Cell<i64>,
+        #[property(get, set)]
+        pub downloader_count: Cell<i64>,
+        /// The serial of the update it was last in
+        #[property(get, set)]
+        pub serial: Cell<i64>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for TrackerObject {
+        const NAME: &'static str = "TrgTrackerObject";
+        type Type = super::TrackerObject;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for TrackerObject {}
+}
+
+glib::wrapper! {
+    pub struct TrackerObject(ObjectSubclass<imp::TrackerObject>);
+}
+
+impl TrackerObject {
+    fn new() -> Self {
+        glib::Object::new()
+    }
+
+    fn update(&self, serial: i64, tracker: &p::TrackerStat) {
+        set_changed(self, "icon", "network-workgroup".to_string());
+        set_changed(self, "id", tracker.id);
+        self.set_serial(serial);
+        set_changed(self, "tier", tracker.tier);
+        set_changed(self, "announce", tracker.announce.clone());
+        set_changed(self, "scrape", tracker.scrape.clone());
+        set_changed(self, "host", tracker.host.clone());
+        set_changed(self, "last-announce-result", tracker.last_announce_result.clone());
+        set_changed(self, "last-announce-time", tracker.last_announce_time);
+        set_changed(self, "last-scrape-time", tracker.last_scrape_time);
+        set_changed(self, "last-announce-peer-count", tracker.last_announce_peer_count);
+        set_changed(self, "leecher-count", tracker.leecher_count);
+        set_changed(self, "seeder-count", tracker.seeder_count);
+        set_changed(self, "downloader-count", tracker.downloader_count);
+    }
 }
 
 /// The trackers of a torrent
@@ -62,7 +105,7 @@ pub struct TrackersModel {
 impl TrackersModel {
     pub fn new() -> Rc<Self> {
         Rc::new(Self {
-            store: gio::ListStore::new::<Item>(),
+            store: gio::ListStore::new::<TrackerObject>(),
             torrent_id: Cell::new(-1),
             accept: Cell::new(true),
         })
@@ -84,15 +127,19 @@ impl TrackersModel {
         self.accept.set(accept);
     }
 
+    fn trackers(&self) -> impl Iterator<Item = TrackerObject> + '_ {
+        util::objects(&self.store)
+    }
+
     /// A new row for a tracker to add, which the user edits the announce URL of
-    pub fn add_new(&self) -> Item {
-        let tier = item::items(&self.store).map(|i| i.int64(COL_TIER) + 1).max().unwrap_or(0);
-        let item = new_tracker_item();
-        item.set(COL_ICON, "list-add");
-        item.set(COL_ID, -1i64);
-        item.set(COL_TIER, tier);
-        self.store.append(&item);
-        item
+    pub fn add_new(&self) -> TrackerObject {
+        let tier = self.trackers().map(|t| t.tier() + 1).max().unwrap_or(0);
+        let tracker = TrackerObject::new();
+        tracker.set_icon("list-add");
+        tracker.set_id(-1);
+        tracker.set_tier(tier);
+        self.store.append(&tracker);
+        tracker
     }
 
     pub fn update(&self, serial: i64, t: &Torrent, mode: UpdateMode) {
@@ -105,35 +152,20 @@ impl TrackersModel {
         }
 
         for tracker in &t.tracker_stats {
-            let id = tracker.id;
             let existing = if mode != UpdateMode::First {
-                item::find_item(&self.store, COL_ID, id).map(|(i, _)| i)
+                self.trackers().find(|o| o.id() == tracker.id)
             } else {
                 None
             };
-            let item = existing.unwrap_or_else(|| {
-                let item = new_tracker_item();
-                self.store.append(&item);
-                item
+            let obj = existing.unwrap_or_else(|| {
+                let obj = TrackerObject::new();
+                self.store.append(&obj);
+                obj
             });
-
-            item.set(COL_ICON, "network-workgroup");
-            item.set(COL_ID, id);
-            item.set(COL_UPDATESERIAL, serial);
-            item.set(COL_TIER, tracker.tier);
-            item.set(COL_ANNOUNCE, tracker.announce.as_str());
-            item.set(COL_SCRAPE, tracker.scrape.as_str());
-            item.set(COL_HOST, tracker.host.as_str());
-            item.set(COL_LAST_ANNOUNCE_RESULT, tracker.last_announce_result.as_str());
-            item.set(COL_LAST_ANNOUNCE_TIME, tracker.last_announce_time);
-            item.set(COL_LAST_SCRAPE_TIME, tracker.last_scrape_time);
-            item.set(COL_LAST_ANNOUNCE_PEER_COUNT, tracker.last_announce_peer_count);
-            item.set(COL_LEECHERCOUNT, tracker.leecher_count);
-            item.set(COL_SEEDERCOUNT, tracker.seeder_count);
-            item.set(COL_DOWNLOADERCOUNT, tracker.downloader_count);
+            obj.update(serial, tracker);
         }
 
-        item::remove_removed(&self.store, COL_UPDATESERIAL, serial);
+        util::remove_where(&self.store, |o: &TrackerObject| o.serial() != serial);
     }
 }
 
@@ -149,54 +181,49 @@ impl TrackersView {
     pub fn new(model: &Rc<TrackersModel>, client: &Client, config_id: Option<&str>) -> Rc<Self> {
         let tv = TreeView::new(Some(client.prefs()), config_id.unwrap_or("TrgTrackersTreeView"));
 
-        let desc = tv.reg_column(
-            ColType::IconText,
-            COL_TIER as i32,
-            &tr("Tier"),
-            "tier",
-            COLUMN_UNREMOVABLE,
-        );
-        desc.set_extra(COL_ICON);
-
-        let announce = tv.reg_column(
+        // the keys are the model columns the trackers had as Items
+        let reg = |t, key, p, h: &str, id: &str, f| tv.reg_property(t, key, p, h, id, f);
+        reg(ColType::IconText, 1, "tier", &tr("Tier"), "tier", COLUMN_UNREMOVABLE)
+            .set_extra("icon");
+        let announce = reg(
             ColType::Text,
-            COL_ANNOUNCE as i32,
+            2,
+            "announce",
             &tr("Announce URL"),
             "announce-url",
             COLUMN_UNREMOVABLE | COLUMN_EDITABLE,
         );
         announce.set_editable(true);
-
-        let reg = |t, c: usize, h: &str, id: &str, f| {
-            tv.reg_column(t, c as i32, h, id, f);
-        };
         reg(
             ColType::NumGtZero,
-            COL_LAST_ANNOUNCE_PEER_COUNT,
+            5,
+            "last-announce-peer-count",
             &tr("Peers"),
             "last-announce-peer-count",
             0,
         );
-        reg(ColType::NumGtZero, COL_SEEDERCOUNT, &tr("Seeder Count"), "seeder-count", 0);
-        reg(ColType::NumGtZero, COL_LEECHERCOUNT, &tr("Leecher Count"), "leecher-count", 0);
+        reg(ColType::NumGtZero, 8, "seeder-count", &tr("Seeder Count"), "seeder-count", 0);
+        reg(ColType::NumGtZero, 9, "leecher-count", &tr("Leecher Count"), "leecher-count", 0);
         reg(
             ColType::NumGtZero,
-            COL_DOWNLOADERCOUNT,
+            13,
+            "downloader-count",
             &tr("Downloader Count"),
             "downloader-count",
             COLUMN_EXTRA,
         );
-        reg(ColType::Epoch, COL_LAST_ANNOUNCE_TIME, &tr("Last Announce"), "last-announce-time", 0);
-        reg(ColType::Text, COL_LAST_ANNOUNCE_RESULT, &tr("Last Result"), "last-result", 0);
-        reg(ColType::Text, COL_SCRAPE, &tr("Scrape URL"), "scrape-url", 0);
+        reg(ColType::Epoch, 6, "last-announce-time", &tr("Last Announce"), "last-announce-time", 0);
+        reg(ColType::Text, 11, "last-announce-result", &tr("Last Result"), "last-result", 0);
+        reg(ColType::Text, 3, "scrape", &tr("Scrape URL"), "scrape-url", 0);
         reg(
             ColType::Epoch,
-            COL_LAST_SCRAPE_TIME,
+            7,
+            "last-scrape-time",
             &tr("Last Scrape"),
             "last-scrape-time",
             COLUMN_EXTRA,
         );
-        reg(ColType::Text, COL_HOST, &tr("Host"), "host", COLUMN_EXTRA);
+        reg(ColType::Text, 10, "host", &tr("Host"), "host", COLUMN_EXTRA);
 
         let view = Rc::new(Self {
             tv: tv.clone(),
@@ -206,9 +233,9 @@ impl TrackersView {
         });
 
         let weak = Rc::downgrade(&view);
-        announce.set_edit(move |_, item: &Item, done, new_text| {
+        announce.set_edit(move |_, tracker: &TrackerObject, done, new_text| {
             if let Some(view) = weak.upgrade() {
-                view.announce_edit(item, done, new_text);
+                view.announce_edit(tracker, done, new_text);
             }
         });
 
@@ -227,8 +254,10 @@ impl TrackersView {
     /// Sends the announce URLs of the rows as the torrent's tracker list,
     /// ignoring updates from the server meanwhile
     fn send_tracker_list(self: &Rc<Self>) {
-        let trackers: Vec<(i64, String)> = item::items(&self.model.store)
-            .filter_map(|i| Some((i.int64(COL_TIER), i.string(COL_ANNOUNCE)?)))
+        let trackers: Vec<(i64, String)> = self
+            .model
+            .trackers()
+            .map(|t| (t.tier(), t.announce()))
             .filter(|(_, url)| !url.is_empty())
             .collect();
         let req = p::torrent_set(&[self.model.torrent_id()])
@@ -239,7 +268,7 @@ impl TrackersView {
     }
 
     /// Editing an announce URL replaces the tracker, or adds it for a new row
-    fn announce_edit(self: &Rc<Self>, item: &Item, done: bool, new_text: Option<&str>) {
+    fn announce_edit(self: &Rc<Self>, tracker: &TrackerObject, done: bool, new_text: Option<&str>) {
         if !done {
             self.model.set_accept(false);
             return;
@@ -249,19 +278,19 @@ impl TrackersView {
             return;
         };
 
-        item.set(COL_ANNOUNCE, new_text);
+        set_changed(tracker, "announce", new_text.to_string());
         self.send_tracker_list();
     }
 
     fn add_tracker(&self) {
-        let item = self.model.add_new();
-        self.tv.select_item(&item);
-        self.tv.start_editing(&item, &self.announce_column);
+        let tracker = self.model.add_new();
+        self.tv.select_item(&tracker);
+        self.tv.start_editing(&tracker, &self.announce_column);
     }
 
     fn delete_tracker(self: &Rc<Self>) {
-        for item in self.tv.selected_items::<Item>() {
-            if let Some(pos) = self.model.store.find(&item) {
+        for tracker in self.tv.selected_items::<TrackerObject>() {
+            if let Some(pos) = self.model.store.find(&tracker) {
                 self.model.store.remove(pos);
             }
         }

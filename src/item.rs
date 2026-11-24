@@ -318,18 +318,3 @@ impl Item {
 pub fn items(model: &impl IsA<gio::ListModel>) -> impl Iterator<Item = Item> + '_ {
     util::objects(model)
 }
-
-/// Removes the items whose serial column isn't current_serial. Returns how
-/// many were removed.
-pub fn remove_removed(store: &gio::ListStore, serial_column: usize, current_serial: i64) -> u32 {
-    util::remove_where(store, |item: &Item| item.int64(serial_column) != current_serial)
-}
-
-/// The first item whose (integer) column is id, and its position
-pub fn find_item(model: &impl IsA<gio::ListModel>, column: usize, id: i64) -> Option<(Item, u32)> {
-    let n = model.n_items();
-    (0..n).find_map(|i| {
-        let item = model.item(i).and_downcast::<Item>()?;
-        (item.int64(column) == id).then_some((item, i))
-    })
-}
