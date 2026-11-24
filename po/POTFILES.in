@@ -26,7 +26,8 @@ src/torrent_menu.rs
 src/torrent_model.rs
 src/torrent_view.rs
 src/trackers.rs
-src/tree_view.rs
+src/tree_view/sort.rs
+src/tree_view/value.rs
 src/ui/about-window.blp
 src/ui/destination-combo.blp
 src/ui/file-rename-dialog.blp
