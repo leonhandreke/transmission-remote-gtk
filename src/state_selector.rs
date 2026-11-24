@@ -180,13 +180,7 @@ mod imp {
             if let Some(s) = self.scrolled.borrow().as_ref() {
                 s.allocate(width, height, baseline, None);
             }
-            let mut child = self.obj().first_child();
-            while let Some(c) = child {
-                if let Some(p) = c.downcast_ref::<gtk::Popover>() {
-                    p.present();
-                }
-                child = c.next_sibling();
-            }
+            util::present_popovers(&*self.obj());
         }
 
         fn focus(&self, direction: gtk::DirectionType) -> bool {

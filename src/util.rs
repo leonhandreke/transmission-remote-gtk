@@ -150,8 +150,8 @@ pub fn popover_menu_popup(
         popover.insert_action_group(prefix, Some(actions));
     }
 
-    // A tree view presents its popovers. From the keyboard, point at the row
-    // with the focus if there is one.
+    // From the keyboard, point at the row of a tree view with the focus if
+    // there is one.
     if (x < 0.0 || y < 0.0)
         && let Some(tv) = parent.downcast_ref::<crate::tree_view::TreeView>()
         && let Some(bounds) = tv.focus_rect()
@@ -180,9 +180,9 @@ pub fn popover_menu_popup(
     popover.popup();
 
     // Most widgets don't present popovers they don't know about in their
-    // size_allocate, so the menu would keep the size it had before its items
-    // were fully set up (eg. accelerator labels). Re-present it for the
-    // first few frames.
+    // size_allocate (ours do, see present_popovers), so the menu would keep
+    // the size it had before its items were fully set up (eg. accelerator
+    // labels). Re-present it for the first few frames.
     let frames = Cell::new(0);
     popover.add_tick_callback(move |popover, _| {
         if popover.parent().is_some() && popover.is_visible() {
@@ -191,6 +191,19 @@ pub fn popover_menu_popup(
         frames.set(frames.get() + 1);
         if frames.get() < 3 { glib::ControlFlow::Continue } else { glib::ControlFlow::Break }
     });
+}
+
+/// Presents the popovers among the children of widget, for its
+/// size_allocate: a widget with context menus (popovers of it, see
+/// popover_menu_popup) has to, or they aren't positioned and sized.
+pub fn present_popovers(widget: &impl IsA<gtk::Widget>) {
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(p) = c.downcast_ref::<gtk::Popover>() {
+            p.present();
+        }
+        child = c.next_sibling();
+    }
 }
 
 /// Puts a new spinner, spinning, first in a box, in place of the one

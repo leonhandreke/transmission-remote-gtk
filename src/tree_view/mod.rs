@@ -36,6 +36,7 @@ use gtk::{gio, glib};
 
 use crate::prefs::Prefs;
 use crate::type_ahead::TypeAhead;
+use crate::util;
 
 pub use column::{
     COLUMN_EDITABLE, COLUMN_EXTRA, COLUMN_HIDE_FROM_TOP_MENU, COLUMN_UNREMOVABLE, ColType,
@@ -168,13 +169,7 @@ mod imp {
         // The context menus are popovers of the view
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             self.scrolled.allocate(width, height, baseline, None);
-            let mut child = self.obj().first_child();
-            while let Some(c) = child {
-                if let Some(p) = c.downcast_ref::<gtk::Popover>() {
-                    p.present();
-                }
-                child = c.next_sibling();
-            }
+            util::present_popovers(&*self.obj());
         }
 
         fn focus(&self, direction: gtk::DirectionType) -> bool {
