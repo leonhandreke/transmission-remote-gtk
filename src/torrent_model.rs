@@ -21,14 +21,13 @@ use gtk::gio;
 use gtk::glib;
 use gtk::glib::subclass::prelude::*;
 use gtk::prelude::*;
-use serde_json::Value;
 
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
-use crate::json::{Obj, get_f64, get_i64, get_obj, get_str, objects, value_as_i64};
+use crate::json::{Obj, get_str, objects};
 use crate::prefs::{self, Scope};
-use crate::protocol as p;
+use crate::protocol::{self as p, Torrent};
 use crate::util;
 
 pub const COL_ICON: usize = 0;
@@ -55,7 +54,7 @@ pub const COL_HAVE_VALID: usize = 20;
 pub const COL_RATIO: usize = 21;
 pub const COL_ADDED: usize = 22;
 pub const COL_ID: usize = 23;
-pub const COL_JSON: usize = 24;
+pub const COL_TORRENT: usize = 24;
 pub const COL_UPDATESERIAL: usize = 25;
 pub const COL_FLAGS: usize = 26;
 pub const COL_DOWNLOADDIR: usize = 27;
@@ -98,18 +97,18 @@ pub const UPDATE_STATE_CHANGE: u32 = 1 << 0;
 pub const UPDATE_PATH_CHANGE: u32 = 1 << 1;
 pub const UPDATE_ADDREMOVE: u32 = 1 << 2;
 
-/// A torrent is an Item with the columns above. The JSON column holds the
-/// torrent's object from the last update.
+/// A torrent is an Item with the columns above. The torrent column holds the
+/// torrent of the last update.
 pub type TorrentItem = Item;
 
 pub trait TorrentItemExt {
-    fn torrent_json(&self) -> Option<Rc<Obj>>;
+    fn torrent(&self) -> Option<Rc<Torrent>>;
     fn torrent_id(&self) -> i64;
 }
 
 impl TorrentItemExt for Item {
-    fn torrent_json(&self) -> Option<Rc<Obj>> {
-        self.json(COL_JSON)
+    fn torrent(&self) -> Option<Rc<Torrent>> {
+        self.torrent_value(COL_TORRENT)
     }
 
     fn torrent_id(&self) -> i64 {
@@ -135,7 +134,7 @@ fn new_torrent_item() -> TorrentItem {
     }
     values[COL_FLAGS] = Val::U32(0);
     values[COL_FILECOUNT] = Val::U32(0);
-    values[COL_JSON] = Val::Json(None);
+    values[COL_TORRENT] = Val::Torrent(None);
     Item::new(values)
 }
 
@@ -355,110 +354,95 @@ impl TorrentModel {
         client: &Client,
         serial: i64,
         item: &Item,
-        t: Rc<Obj>,
+        t: Rc<Torrent>,
         changed: &mut u32,
     ) {
-        let down_rate = get_i64(&t, p::FIELD_RATEDOWNLOAD);
-        let up_rate = get_i64(&t, p::FIELD_RATEUPLOAD);
         {
             let mut stats = self.imp().stats.borrow_mut();
-            stats.down_rate_total += down_rate;
-            stats.up_rate_total += up_rate;
+            stats.down_rate_total += t.rate_download;
+            stats.up_rate_total += t.rate_upload;
         }
 
-        let uploaded = get_i64(&t, p::FIELD_UPLOADEDEVER);
-        let downloaded = get_i64(&t, p::FIELD_DOWNLOADEDEVER);
-        let have_valid = get_i64(&t, p::FIELD_HAVEVALID);
-        let download_dir =
-            util::rm_trailing_slashes(get_str(&t, p::FIELD_DOWNLOAD_DIR).unwrap_or("")).to_string();
-        let id = p::torrent_get_id(&t);
-        let status = get_i64(&t, p::FIELD_STATUS);
-        let file_count = p::torrent_get_files(&t).len() as u32;
-        let new_flags = p::torrent_get_flags(&t, status, file_count as i64);
-        let status_string = p::torrent_get_status_string(status, new_flags);
-        let status_icon = p::torrent_get_status_icon(new_flags);
-        let empty = Obj::new();
-        let pf = get_obj(&t, p::FIELD_PEERSFROM).unwrap_or(&empty);
-        let tracker_stats = p::torrent_get_tracker_stats(&t);
+        let download_dir = util::rm_trailing_slashes(&t.download_dir).to_string();
+        let new_flags = t.flags();
 
         let last_flags = item.uint(COL_FLAGS);
         let last_download_dir = item.string(COL_DOWNLOADDIR);
 
         // like the sidebar's tracker filters (the "host" field is host:port,
         // without a scheme)
-        let first_tracker_host = objects(tracker_stats)
-            .next()
-            .and_then(|tr| get_str(tr, p::FIELD_ANNOUNCE))
-            .and_then(util::tracker_host);
+        let first_tracker_host =
+            t.tracker_stats.first().and_then(|tracker| util::tracker_host(&tracker.announce));
 
-        let pex = get_i64(pf, p::TPEERFROM_FROMPEX);
-        let dht = get_i64(pf, p::TPEERFROM_FROMDHT);
-        let trackers = get_i64(pf, p::TPEERFROM_FROMTRACKERS);
-        let ltep = get_i64(pf, p::TPEERFROM_FROMLTEP);
-        let resume = get_i64(pf, p::TPEERFROM_FROMRESUME);
-        let incoming = get_i64(pf, p::TPEERFROM_FROMINCOMING);
-        let lpd = p::peerfrom_get_lpd(pf);
+        let pf = &t.peers_from;
         let peer_sources = (new_flags & p::TORRENT_FLAG_ACTIVE != 0).then(|| {
-            let lpd = if lpd >= 0 { lpd.to_string() } else { "N/A".into() };
-            format!("{trackers} / {incoming} / {ltep} / {dht} / {pex} / {lpd} / {resume}")
+            let lpd = pf.from_lpd.map_or_else(|| "N/A".to_string(), |lpd| lpd.to_string());
+            format!(
+                "{} / {} / {} / {} / {} / {lpd} / {}",
+                pf.from_tracker,
+                pf.from_incoming,
+                pf.from_ltep,
+                pf.from_dht,
+                pf.from_pex,
+                pf.from_cache
+            )
         });
 
         let percent_done = if new_flags & p::TORRENT_FLAG_CHECKING != 0 {
-            p::torrent_get_recheck_progress(&t)
+            t.recheck_percent()
         } else {
-            p::torrent_get_percent_done(&t)
+            t.done_percent()
         };
 
         // seeders/leechers: the maximum of the trackers, downloads: the sum
-        let (mut seeders, mut leechers, mut downloads) = (0, 0, 0);
-        for tracker in objects(tracker_stats) {
-            seeders = seeders.max(get_i64(tracker, p::FIELD_SEEDERCOUNT));
-            leechers = leechers.max(get_i64(tracker, p::FIELD_LEECHERCOUNT));
-            downloads += get_i64(tracker, p::FIELD_DOWNLOADCOUNT);
-        }
+        let trackers = &t.tracker_stats;
+        let seeders = trackers.iter().map(|t| t.seeder_count).max().unwrap_or(0).max(0);
+        let leechers = trackers.iter().map(|t| t.leecher_count).max().unwrap_or(0).max(0);
+        let downloads: i64 = trackers.iter().map(|t| t.download_count).sum();
 
-        item.set(COL_ICON, status_icon);
-        item.set(COL_ADDED, get_i64(&t, p::FIELD_ADDED_DATE));
-        item.set(COL_FILECOUNT, file_count);
-        item.set(COL_DONE_DATE, get_i64(&t, p::FIELD_DONE_DATE));
-        item.set(COL_NAME, p::torrent_get_name(&t));
-        item.set(COL_ERROR, p::torrent_get_error(&t));
-        item.set(COL_SIZEWHENDONE, get_i64(&t, p::FIELD_SIZEWHENDONE));
+        let (uploaded, have_valid) = (t.uploaded_ever, t.have_valid);
+        item.set(COL_ICON, p::status_icon(new_flags));
+        item.set(COL_ADDED, t.added_date);
+        item.set(COL_FILECOUNT, t.files.len() as u32);
+        item.set(COL_DONE_DATE, t.done_date);
+        item.set(COL_NAME, t.name.as_str());
+        item.set(COL_ERROR, t.error);
+        item.set(COL_SIZEWHENDONE, t.size_when_done);
         item.set(COL_PERCENTDONE, percent_done);
-        item.set(COL_METADATAPERCENTCOMPLETE, p::torrent_get_metadata_percent_complete(&t));
-        item.set(COL_STATUS, status_string);
-        item.set(COL_DOWNSPEED, down_rate);
+        item.set(COL_METADATAPERCENTCOMPLETE, t.metadata_percent());
+        item.set(COL_STATUS, t.status_text(new_flags));
+        item.set(COL_DOWNSPEED, t.rate_download);
         item.set(COL_FLAGS, new_flags);
-        item.set(COL_UPSPEED, up_rate);
-        item.set(COL_ETA, get_i64(&t, p::FIELD_ETA));
+        item.set(COL_UPSPEED, t.rate_upload);
+        item.set(COL_ETA, t.eta);
         item.set(COL_UPLOADED, uploaded);
-        item.set(COL_DOWNLOADED, downloaded);
-        item.set(COL_TOTALSIZE, get_i64(&t, p::FIELD_TOTAL_SIZE));
-        item.set(COL_HAVE_UNCHECKED, get_i64(&t, p::FIELD_HAVEUNCHECKED));
+        item.set(COL_DOWNLOADED, t.downloaded_ever);
+        item.set(COL_TOTALSIZE, t.total_size);
+        item.set(COL_HAVE_UNCHECKED, t.have_unchecked);
         item.set(COL_HAVE_VALID, have_valid);
-        item.set(COL_FROMPEX, pex);
-        item.set(COL_FROMDHT, dht);
-        item.set(COL_FROMTRACKERS, trackers);
-        item.set(COL_FROMLTEP, ltep);
-        item.set(COL_FROMRESUME, resume);
-        item.set(COL_FROMINCOMING, incoming);
+        item.set(COL_FROMPEX, pf.from_pex);
+        item.set(COL_FROMDHT, pf.from_dht);
+        item.set(COL_FROMTRACKERS, pf.from_tracker);
+        item.set(COL_FROMLTEP, pf.from_ltep);
+        item.set(COL_FROMRESUME, pf.from_cache);
+        item.set(COL_FROMINCOMING, pf.from_incoming);
         item.set(COL_PEER_SOURCES, peer_sources);
-        item.set(COL_PEERS_CONNECTED, get_i64(&t, p::FIELD_PEERS_CONNECTED));
-        item.set(COL_PEERS_TO_US, get_i64(&t, p::FIELD_PEERS_SENDING_TO_US));
-        item.set(COL_PEERS_FROM_US, get_i64(&t, p::FIELD_PEERS_GETTING_FROM_US));
-        item.set(COL_WEB_SEEDS_TO_US, get_i64(&t, p::FIELD_WEB_SEEDS_SENDING_TO_US));
-        item.set(COL_QUEUE_POSITION, p::torrent_get_queue_position(&t));
-        item.set(COL_SEED_RATIO_LIMIT, get_f64(&t, p::FIELD_SEED_RATIO_LIMIT));
-        item.set(COL_SEED_RATIO_MODE, get_i64(&t, p::FIELD_SEED_RATIO_MODE));
-        item.set(COL_LASTACTIVE, get_i64(&t, p::FIELD_ACTIVITY_DATE));
+        item.set(COL_PEERS_CONNECTED, t.peers_connected);
+        item.set(COL_PEERS_TO_US, t.peers_sending_to_us);
+        item.set(COL_PEERS_FROM_US, t.peers_getting_from_us);
+        item.set(COL_WEB_SEEDS_TO_US, t.webseeds_sending_to_us);
+        item.set(COL_QUEUE_POSITION, t.queue_position.unwrap_or(-1));
+        item.set(COL_SEED_RATIO_LIMIT, t.seed_ratio_limit);
+        item.set(COL_SEED_RATIO_MODE, t.seed_ratio_mode);
+        item.set(COL_LASTACTIVE, t.activity_date);
         item.set(
             COL_RATIO,
             if uploaded > 0 && have_valid > 0 { uploaded as f64 / have_valid as f64 } else { 0.0 },
         );
         item.set(COL_DOWNLOADDIR, download_dir.as_str());
-        item.set(COL_BANDWIDTH_PRIORITY, get_i64(&t, p::FIELD_BANDWIDTH_PRIORITY));
-        item.set(COL_ID, id);
-        item.set(COL_JSON, t.clone());
+        item.set(COL_BANDWIDTH_PRIORITY, t.bandwidth_priority);
+        item.set(COL_ID, t.id);
+        item.set(COL_TORRENT, t.clone());
         item.set(COL_TRACKERHOST, first_tracker_host.unwrap_or_default());
 
         if last_download_dir.as_deref() != Some(download_dir.as_str()) {
@@ -499,7 +483,8 @@ impl TorrentModel {
         }) > 0
     }
 
-    pub fn update(&self, client: &Client, args: &Obj, mode: UpdateMode) -> Stats {
+    /// Updates the torrents from a torrent_get result
+    pub fn update(&self, client: &Client, result: Obj, mode: UpdateMode) -> Stats {
         let serial = client.serial();
         let mut changed = 0u32;
         let mut added = Vec::new();
@@ -510,9 +495,10 @@ impl TorrentModel {
             stats.up_rate_total = 0;
         }
 
-        for t in p::get_torrents(args).iter().filter_map(Value::as_object) {
-            let t = Rc::new(t.clone());
-            let id = p::torrent_get_id(&t);
+        let (torrents, removed) = p::torrents_of(result);
+        for t in torrents {
+            let t = Rc::new(t);
+            let id = t.id;
             let existing = self.find(id);
             match existing {
                 None => {
@@ -542,10 +528,8 @@ impl TorrentModel {
             if self.remove_stale(serial) {
                 changed |= UPDATE_ADDREMOVE;
             }
-        } else if mode != UpdateMode::First
-            && let Some(removed) = p::get_torrents_removed(args).filter(|r| !r.is_empty())
-        {
-            for id in removed.iter().map(value_as_i64) {
+        } else if mode != UpdateMode::First && !removed.is_empty() {
+            for id in removed {
                 // mark it, the stale ones are removed below
                 if let Some(item) = self.find(id) {
                     item.set(COL_UPDATESERIAL, -1i64);

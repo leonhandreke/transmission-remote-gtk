@@ -11,8 +11,7 @@ use gtk::prelude::*;
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
-use crate::json::{Obj, get_i64, get_str, objects};
-use crate::protocol as p;
+use crate::protocol::{self as p, Torrent};
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{
     COLUMN_EDITABLE, COLUMN_EXTRA, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView,
@@ -96,17 +95,17 @@ impl TrackersModel {
         item
     }
 
-    pub fn update(&self, serial: i64, t: &Obj, mode: UpdateMode) {
+    pub fn update(&self, serial: i64, t: &Torrent, mode: UpdateMode) {
         if mode == UpdateMode::First {
             self.clear();
-            self.torrent_id.set(p::torrent_get_id(t));
+            self.torrent_id.set(t.id);
             self.accept.set(true);
         } else if !self.accept.get() {
             return;
         }
 
-        for tracker in objects(p::torrent_get_tracker_stats(t)) {
-            let id = get_i64(tracker, p::FIELD_ID);
+        for tracker in &t.tracker_stats {
+            let id = tracker.id;
             let existing = if mode != UpdateMode::First {
                 item::find_item(&self.store, COL_ID, id).map(|(i, _)| i)
             } else {
@@ -121,20 +120,17 @@ impl TrackersModel {
             item.set(COL_ICON, "network-workgroup");
             item.set(COL_ID, id);
             item.set(COL_UPDATESERIAL, serial);
-            item.set(COL_TIER, get_i64(tracker, p::FIELD_TIER));
-            item.set(COL_ANNOUNCE, get_str(tracker, p::FIELD_ANNOUNCE));
-            item.set(COL_SCRAPE, get_str(tracker, p::FIELD_SCRAPE));
-            item.set(COL_HOST, get_str(tracker, p::FIELD_HOST));
-            item.set(COL_LAST_ANNOUNCE_RESULT, get_str(tracker, p::FIELD_LAST_ANNOUNCE_RESULT));
-            item.set(COL_LAST_ANNOUNCE_TIME, get_i64(tracker, p::FIELD_LAST_ANNOUNCE_TIME));
-            item.set(COL_LAST_SCRAPE_TIME, get_i64(tracker, p::FIELD_LAST_SCRAPE_TIME));
-            item.set(
-                COL_LAST_ANNOUNCE_PEER_COUNT,
-                get_i64(tracker, p::FIELD_LAST_ANNOUNCE_PEER_COUNT),
-            );
-            item.set(COL_LEECHERCOUNT, get_i64(tracker, p::FIELD_LEECHERCOUNT));
-            item.set(COL_SEEDERCOUNT, get_i64(tracker, p::FIELD_SEEDERCOUNT));
-            item.set(COL_DOWNLOADERCOUNT, get_i64(tracker, p::FIELD_DOWNLOADER_COUNT));
+            item.set(COL_TIER, tracker.tier);
+            item.set(COL_ANNOUNCE, tracker.announce.as_str());
+            item.set(COL_SCRAPE, tracker.scrape.as_str());
+            item.set(COL_HOST, tracker.host.as_str());
+            item.set(COL_LAST_ANNOUNCE_RESULT, tracker.last_announce_result.as_str());
+            item.set(COL_LAST_ANNOUNCE_TIME, tracker.last_announce_time);
+            item.set(COL_LAST_SCRAPE_TIME, tracker.last_scrape_time);
+            item.set(COL_LAST_ANNOUNCE_PEER_COUNT, tracker.last_announce_peer_count);
+            item.set(COL_LEECHERCOUNT, tracker.leecher_count);
+            item.set(COL_SEEDERCOUNT, tracker.seeder_count);
+            item.set(COL_DOWNLOADERCOUNT, tracker.downloader_count);
         }
 
         item::remove_removed(&self.store, COL_UPDATESERIAL, serial);

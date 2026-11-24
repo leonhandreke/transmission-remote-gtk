@@ -11,15 +11,13 @@ use std::rc::Rc;
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
-use serde_json::Value;
 
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
-use crate::json::{Obj, get_i64, get_str, value_as_i64};
 use crate::main_window::MainWindow;
 use crate::prefs::Prefs;
-use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL};
+use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL, Torrent};
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{ColType, TreeView};
 use crate::util;
@@ -116,17 +114,16 @@ impl FileNode {
     }
 
     /// The tree of the files of a torrent-get response
-    fn from_torrent(files: &[Value], wanted: &[Value], priorities: &[Value]) -> Self {
+    fn from_torrent(files: &[p::File], wanted: &[bool], priorities: &[i64]) -> Self {
         let mut top = Self::top();
         for (i, file) in files.iter().enumerate() {
-            let Some(file) = file.as_object() else { continue };
             top.insert(
-                get_str(file, p::TFILE_NAME).unwrap_or(""),
-                get_i64(file, p::TFILE_LENGTH),
-                get_i64(file, p::TFILE_BYTES_COMPLETED),
+                &file.name,
+                file.length,
+                file.bytes_completed,
                 i as i64,
-                wanted.get(i).map(value_as_i64).unwrap_or(0),
-                priorities.get(i).map(value_as_i64).unwrap_or(0),
+                wanted.get(i).copied().unwrap_or(false) as i64,
+                priorities.get(i).copied().unwrap_or(0),
             );
         }
         top
@@ -170,7 +167,7 @@ fn update_dir(dir: &Item) {
 
     dir.set(COL_SIZE, size);
     dir.set(COL_BYTESCOMPLETED, completed);
-    dir.set(COL_PROGRESS, p::file_get_progress(size, completed));
+    dir.set(COL_PROGRESS, p::file_progress(size, completed));
     dir.set(COL_WANTED, wanted);
     dir.set(COL_PRIORITY, priority);
 }
@@ -260,7 +257,7 @@ impl FilesModel {
                 item.set(COL_PRIORITY, TR_PRI_NORMAL);
             } else {
                 item.set(COL_BYTESCOMPLETED, node.bytes_completed);
-                item.set(COL_PROGRESS, p::file_get_progress(node.length, node.bytes_completed));
+                item.set(COL_PROGRESS, p::file_progress(node.length, node.bytes_completed));
                 item.set(COL_WANTED, node.enabled);
                 item.set(COL_PRIORITY, node.priority);
             }
@@ -345,24 +342,22 @@ impl FilesModel {
     fn item_update(
         &self,
         item: &Item,
-        file: &Obj,
-        wanted: &[Value],
-        priorities: &[Value],
+        file: &p::File,
+        wanted: &[bool],
+        priorities: &[i64],
         id: usize,
     ) {
-        let length = get_i64(file, p::TFILE_LENGTH);
-        let completed = get_i64(file, p::TFILE_BYTES_COMPLETED);
+        let (length, completed) = (file.length, file.bytes_completed);
         item.set(COL_SIZE, length);
-        item.set(COL_PROGRESS, p::file_get_progress(length, completed));
+        item.set(COL_PROGRESS, p::file_progress(length, completed));
         item.set(COL_BYTESCOMPLETED, completed);
 
         if self.accept.get() {
-            item.set(COL_WANTED, wanted.get(id).map(value_as_i64).unwrap_or(0));
-            item.set(COL_PRIORITY, priorities.get(id).map(value_as_i64).unwrap_or(0));
+            item.set(COL_WANTED, wanted.get(id).copied().unwrap_or(false) as i64);
+            item.set(COL_PRIORITY, priorities.get(id).copied().unwrap_or(0));
 
             // the names (of the file and its directories) change on a rename
-            let name = get_str(file, p::TFILE_NAME).unwrap_or("");
-            let mut path: Vec<&str> = name.split('/').collect();
+            let mut path: Vec<&str> = file.name.split('/').collect();
             if let Some(last) = path.pop() {
                 item.set(COL_NAME, last);
                 let mut parent = item.parent_item();
@@ -374,12 +369,10 @@ impl FilesModel {
         }
     }
 
-    pub fn update(self: &Rc<Self>, t: &Obj, mode: UpdateMode) {
-        let files = p::torrent_get_files(t);
+    pub fn update(self: &Rc<Self>, t: &Torrent, mode: UpdateMode) {
+        let (files, wanted, priorities) = (&t.files, &t.wanted, &t.priorities);
         let n_files = files.len();
-        let priorities = p::torrent_get_priorities(t);
-        let wanted = p::torrent_get_wanted(t);
-        let torrent_id = p::torrent_get_id(t);
+        let torrent_id = t.id;
 
         if mode == UpdateMode::First
             || torrent_id != self.torrent_id.get()
@@ -401,7 +394,7 @@ impl FilesModel {
                 // build the simple tree in a thread, then add it in the main loop
                 self.building.set(true);
                 let (files, wanted, priorities) =
-                    (files.to_vec(), wanted.to_vec(), priorities.to_vec());
+                    (files.clone(), wanted.clone(), priorities.clone());
                 let model = Rc::downgrade(self);
                 glib::spawn_future_local(async move {
                     let top = gio::spawn_blocking(move || {
@@ -423,7 +416,7 @@ impl FilesModel {
             }
         } else {
             for (i, file) in files.iter().enumerate() {
-                if let (Some(item), Some(file)) = (self.file(i), file.as_object()) {
+                if let Some(item) = self.file(i) {
                     self.item_update(&item, file, wanted, priorities, i);
                 }
             }

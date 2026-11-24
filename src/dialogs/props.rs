@@ -22,10 +22,9 @@ use crate::dialogs::json_widgets::JsonWidgets;
 use crate::format;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
-use crate::json::{Obj, get_bool, get_i64, get_str};
 use crate::main_window::MainWindow;
 use crate::prefs::{self, Scope};
-use crate::protocol as p;
+use crate::protocol::{self as p, Torrent};
 use crate::torrent_model as tm;
 use crate::torrent_model::UpdateMode;
 use crate::torrent_view;
@@ -107,7 +106,7 @@ mod imp {
         /// With show_details: the lists, the torrent shown and the handler
         /// updating them
         pub lists: OnceCell<DetailLists>,
-        pub last_json: RefCell<Option<Rc<Obj>>>,
+        pub last_torrent: RefCell<Option<Rc<Torrent>>>,
         pub update_handler: RefCell<Option<glib::SignalHandlerId>>,
     }
 
@@ -186,35 +185,34 @@ impl TorrentPropsDialog {
         if row_count > 1 {
             d.set_title(Some(&sprintf(&tr("Multiple (%d) torrent properties"), &[&row_count])));
         } else if let Some((t, _)) = &data {
-            d.set_title(Some(p::torrent_get_name(t)));
+            d.set_title(Some(&t.name));
         }
 
         d.set_transient_for(Some(win));
         d.on_response(|d, response| d.response_cb(response));
 
-        let empty = Rc::new(Obj::new());
-        let (json, item) = match &data {
+        let (torrent, item) = match &data {
             Some((t, i)) => (t.clone(), Some(i.clone())),
-            None => (empty, None),
+            None => (Rc::new(Torrent::default()), None),
         };
 
         let notebook = &imp.notebook;
         if show_details {
             let serial = client.serial();
             if let Some(item) = &item {
-                d.info_page_update(&json, item);
+                d.info_page_update(&torrent, item);
             }
 
             // after the information page
             let lists = DetailLists::new(win, client, "-dialog");
-            lists.update(&json, serial, UpdateMode::First);
+            lists.update(&torrent, serial, UpdateMode::First);
             let [trackers, files, peers] = lists.pages();
             for (position, (tv, title)) in [files, peers, trackers].into_iter().enumerate() {
                 let label = gtk::Label::new(Some(&title));
                 notebook.insert_page(tv, Some(&label), Some(position as u32 + 1));
             }
             imp.lists.set(lists).ok();
-            imp.last_json.replace(Some(json.clone()));
+            imp.last_torrent.replace(Some(torrent.clone()));
 
             let weak = d.downgrade();
             let handler = client.torrent_model().connect_update(move || {
@@ -227,7 +225,7 @@ impl TorrentPropsDialog {
             notebook.remove_page(Some(n));
         }
 
-        d.limits_page_load(&json);
+        d.limits_page_load(&torrent);
 
         let (width, height) = if show_details {
             let w = prefs.get_int(prefs::KEY_PROPS_DIALOG_WIDTH, Scope::Global);
@@ -273,45 +271,40 @@ impl TorrentPropsDialog {
         self.destroy();
     }
 
-    fn info_page_update(&self, t: &Obj, item: &Item) {
+    fn info_page_update(&self, t: &Torrent, item: &Item) {
         let imp = self.imp();
         let flags = item.uint(tm::COL_FLAGS);
         let error = item.int64(tm::COL_ERROR);
 
-        imp.privacy_lb.set_text(&if get_bool(t, p::FIELD_ISPRIVATE) {
+        imp.privacy_lb.set_text(&if t.is_private {
             tr("Private to this tracker -- DHT and PEX disabled")
         } else {
             tr("Public torrent")
         });
 
-        let creator = get_str(t, p::FIELD_CREATOR).unwrap_or("");
-        let date_created = get_i64(t, p::FIELD_DATE_CREATED);
-        let date = format::date_time(date_created);
-        let origin = if !creator.is_empty() && date_created > 0 {
-            sprintf(&tr("Created by %1$s on %2$s"), &[&creator, &date])
-        } else if date_created > 0 {
+        let creator = &t.creator;
+        let date = format::date_time(t.date_created);
+        let origin = if !creator.is_empty() && t.date_created > 0 {
+            sprintf(&tr("Created by %1$s on %2$s"), &[creator, &date])
+        } else if t.date_created > 0 {
             sprintf(&tr("Created on %1$s"), &[&date])
         } else if !creator.is_empty() {
-            sprintf(&tr("Created by %1$s"), &[&creator])
+            sprintf(&tr("Created by %1$s"), &[creator])
         } else {
             tr("N/A")
         };
         imp.origin_lb.set_text(&origin);
 
-        imp.comment_buffer.set_text(get_str(t, p::FIELD_COMMENT).unwrap_or(""));
-        imp.destination_lb.set_text(get_str(t, p::FIELD_DOWNLOAD_DIR).unwrap_or(""));
+        imp.comment_buffer.set_text(&t.comment);
+        imp.destination_lb.set_text(&t.download_dir);
         imp.state_lb.set_text(&item.string(tm::COL_STATUS).unwrap_or_default());
-        imp.date_started_lb.set_text(&format::date_time(get_i64(t, p::FIELD_ADDED_DATE)));
+        imp.date_started_lb.set_text(&format::date_time(t.added_date));
 
         let eta = item.int64(tm::COL_ETA);
         imp.eta_lb.set_text(&if eta > 0 { format::time_long(eta) } else { String::new() });
 
-        imp.hash_lb.set_text(get_str(t, p::FIELD_HASH_STRING).unwrap_or(""));
-        imp.error_lb.set_text(&if error != 0 {
-            get_str(t, p::FIELD_ERROR_STRING).unwrap_or("").to_string()
-        } else {
-            tr("No errors")
-        });
+        imp.hash_lb.set_text(&t.hash_string);
+        imp.error_lb.set_text(&if error != 0 { t.error_string.clone() } else { tr("No errors") });
 
         if flags & p::TORRENT_FLAG_ACTIVE != 0 {
             imp.last_activity_lb.set_text(&tr("Active now"));
@@ -325,8 +318,9 @@ impl TorrentPropsDialog {
         imp.have_lb.set_text(&format::size_or_none(item.int64(tm::COL_HAVE_VALID)));
     }
 
-    fn limits_page_load(&self, json: &Obj) {
+    fn limits_page_load(&self, torrent: &Torrent) {
         let imp = self.imp();
+        let json = &torrent.to_obj();
         let mut widgets = imp.widgets.borrow_mut();
 
         let fields: [(&gtk::Widget, &str); 7] = [
@@ -342,17 +336,17 @@ impl TorrentPropsDialog {
             widgets.add(w, json, key);
         }
 
-        if json.contains_key(p::FIELD_QUEUE_POSITION) {
+        if torrent.queue_position.is_some() {
             widgets.add(&imp.queue_position_spin.get(), json, p::FIELD_QUEUE_POSITION);
         } else {
             imp.queue_position_label.set_visible(false);
             imp.queue_position_spin.set_visible(false);
         }
 
-        if json.contains_key(p::FIELD_SEQUENTIAL_DOWNLOAD) {
+        if torrent.sequential_download.is_some() {
             widgets.add(&imp.sequential_download_check.get(), json, p::FIELD_SEQUENTIAL_DOWNLOAD);
             // the pieces of one torrent
-            let pieces = get_i64(json, p::FIELD_PIECE_COUNT);
+            let pieces = torrent.piece_count;
             if imp.target_ids.borrow().len() == 1 && pieces > 0 {
                 imp.sequential_from_piece_spin.set_range(0.0, (pieces - 1) as f64);
                 widgets.add(
@@ -372,10 +366,8 @@ impl TorrentPropsDialog {
             imp.sequential_from_piece_spin.set_visible(false);
         }
 
-        imp.bandwidth_priority_combo
-            .set_selected((get_i64(json, p::FIELD_BANDWIDTH_PRIORITY) + 1).max(0) as u32);
-        imp.seed_ratio_mode_combo
-            .set_selected(get_i64(json, p::FIELD_SEED_RATIO_MODE).max(0) as u32);
+        imp.bandwidth_priority_combo.set_selected((torrent.bandwidth_priority + 1).max(0) as u32);
+        imp.seed_ratio_mode_combo.set_selected(torrent.seed_ratio_mode.max(0) as u32);
         imp.seed_ratio_limit_spin.set_sensitive(imp.seed_ratio_mode_combo.selected() == 1);
     }
 
@@ -389,7 +381,7 @@ impl TorrentPropsDialog {
 
         let Some(lists) = imp.lists.get() else { return };
 
-        let last = imp.last_json.replace(data.as_ref().map(|(t, _)| t.clone()));
+        let last = imp.last_torrent.replace(data.as_ref().map(|(t, _)| t.clone()));
         if let Some((t, item)) = &data
             && !last.is_some_and(|l| Rc::ptr_eq(&l, t))
         {

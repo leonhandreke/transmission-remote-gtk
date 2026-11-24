@@ -23,7 +23,7 @@ use serde_json::json;
 
 use crate::json::{Obj, get_bool, get_f64, get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
-use crate::protocol::{self, Request};
+use crate::protocol::{self, Request, Torrent};
 use crate::rpc::{self, Config, Transport};
 use crate::torrent_model::{TorrentItem, TorrentItemExt, TorrentModel, UpdateMode};
 
@@ -253,9 +253,9 @@ impl Client {
 
     /// Looks up a torrent by its ID: its JSON object (from the last update)
     /// and item.
-    pub fn torrent_data(&self, id: i64) -> Option<(Rc<Obj>, TorrentItem)> {
+    pub fn torrent_data(&self, id: i64) -> Option<(Rc<Torrent>, TorrentItem)> {
         let item = self.torrent_model().find(id)?;
-        Some((item.torrent_json()?, item))
+        Some((item.torrent()?, item))
     }
 
     /// Reads the connection settings of the current profile, which becomes

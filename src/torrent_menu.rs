@@ -8,7 +8,6 @@ use gtk::{gio, glib};
 use crate::client::Client;
 use crate::format;
 use crate::i18n::tr;
-use crate::json::{get_bool, get_i64};
 use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::torrent_view;
@@ -29,10 +28,9 @@ pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::M
         menu.append_section(None, section);
     }
     let section = gio::Menu::new();
-    let limit = |name, title: &str, enabled_key, speed_key| {
-        let limit = current
-            .filter(|t| get_bool(t, enabled_key))
-            .map_or(-1, |t| get_i64(t, speed_key) as i32);
+    // the current limit (-1 for none), and the keys of the torrent_set
+    let limit = |name, title: &str, limit: Option<(bool, i64)>, enabled_key, speed_key| {
+        let limit = limit.filter(|(limited, _)| *limited).map_or(-1, |(_, l)| l as i32);
         torrent_set_action(&client, &actions, &ids, name, limit, move |req, v| {
             if v >= 0 {
                 req.set(speed_key, v);
@@ -44,16 +42,18 @@ pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::M
     section.append_item(&limit(
         "down-limit",
         &tr("Down Limit"),
+        current.map(|t| (t.download_limited, t.download_limit)),
         p::FIELD_DOWNLOAD_LIMITED,
         p::FIELD_DOWNLOAD_LIMIT,
     ));
     section.append_item(&limit(
         "up-limit",
         &tr("Up Limit"),
+        current.map(|t| (t.upload_limited, t.upload_limit)),
         p::FIELD_UPLOAD_LIMITED,
         p::FIELD_UPLOAD_LIMIT,
     ));
-    let priority = current.map_or(p::TR_PRI_UNSET, |t| get_i64(t, p::FIELD_BANDWIDTH_PRIORITY));
+    let priority = current.map_or(p::TR_PRI_UNSET, |t| t.bandwidth_priority);
     torrent_set_action(&client, &actions, &ids, "priority", priority as i32, |req, v| {
         req.set(p::FIELD_BANDWIDTH_PRIORITY, v);
     });

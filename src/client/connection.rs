@@ -297,7 +297,7 @@ impl Client {
 
         self.reset_fail_count();
         self.inc_serial();
-        self.torrent_model().update(self, &torrents, mode);
+        self.torrent_model().update(self, torrents, mode);
         self.emit_by_name::<()>("torrents-updated", &[&mode]);
 
         if mode != UpdateMode::Interaction {

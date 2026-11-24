@@ -12,7 +12,7 @@ use gtk::glib;
 use gtk::glib::subclass::prelude::*;
 use gtk::prelude::*;
 
-use crate::json::Obj;
+use crate::protocol::Torrent;
 
 /// A value of a column
 #[derive(Clone, Debug, Default)]
@@ -24,7 +24,7 @@ pub enum Val {
     U32(u32),
     F64(f64),
     Bool(bool),
-    Json(Option<Rc<Obj>>),
+    Torrent(Option<Rc<Torrent>>),
 }
 
 impl Val {
@@ -71,7 +71,7 @@ impl Val {
             (Val::U32(a), Val::U32(b)) => a == b,
             (Val::F64(a), Val::F64(b)) => a == b,
             (Val::Bool(a), Val::Bool(b)) => a == b,
-            (Val::Json(a), Val::Json(b)) => match (a, b) {
+            (Val::Torrent(a), Val::Torrent(b)) => match (a, b) {
                 (Some(a), Some(b)) => Rc::ptr_eq(a, b),
                 (None, None) => true,
                 _ => false,
@@ -130,9 +130,9 @@ impl From<bool> for Val {
     }
 }
 
-impl From<Rc<Obj>> for Val {
-    fn from(v: Rc<Obj>) -> Self {
-        Val::Json(Some(v))
+impl From<Rc<Torrent>> for Val {
+    fn from(v: Rc<Torrent>) -> Self {
+        Val::Torrent(Some(v))
     }
 }
 
@@ -223,9 +223,9 @@ impl Item {
         self.with(column, Val::as_f64)
     }
 
-    pub fn json(&self, column: usize) -> Option<Rc<Obj>> {
+    pub fn torrent_value(&self, column: usize) -> Option<Rc<Torrent>> {
         self.with(column, |v| match v {
-            Val::Json(j) => j.clone(),
+            Val::Torrent(t) => t.clone(),
             _ => None,
         })
     }

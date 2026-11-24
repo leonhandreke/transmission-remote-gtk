@@ -51,10 +51,6 @@ pub fn get_str<'a>(o: &'a Obj, key: &str) -> Option<&'a str> {
     o.get(key).and_then(Value::as_str)
 }
 
-pub fn get_array<'a>(o: &'a Obj, key: &str) -> &'a [Value] {
-    o.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[])
-}
-
 pub fn get_obj<'a>(o: &'a Obj, key: &str) -> Option<&'a Obj> {
     o.get(key).and_then(Value::as_object)
 }

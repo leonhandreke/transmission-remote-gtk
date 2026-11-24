@@ -1,56 +1,22 @@
 //! The Transmission RPC protocol (4.1 and later, see docs/rpc-spec.md of
-//! Transmission): the method names and keys, the requests, and getters for the
-//! fields of torrents, trackers, peers, files and the session. The wire format
-//! is in rpc.
+//! Transmission): the method names and keys, the requests, and the results,
+//! such as the torrents (see torrent.rs). The wire format is in rpc.
 
+use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::i18n::tr;
-use crate::json::{Obj, get_array, get_i64, get_obj, get_str, objects, value_as_f64, value_as_i64};
+use crate::json::{Obj, get_i64, get_obj, value_as_i64};
+
+mod torrent;
 
 pub use crate::rpc::Request;
-
-pub const FIELD_ID: &str = "id";
+pub use torrent::*;
 
 pub const FIELD_RECENTLY_ACTIVE: &str = "recently_active";
-pub const FIELD_TORRENTS: &str = "torrents";
-pub const FIELD_REMOVED: &str = "removed";
-pub const FIELD_LEFT_UNTIL_DONE: &str = "left_until_done";
-pub const FIELD_TOTAL_SIZE: &str = "total_size";
-pub const FIELD_DONE_DATE: &str = "done_date";
-pub const FIELD_ADDED_DATE: &str = "added_date";
-pub const FIELD_DATE_CREATED: &str = "date_created";
-pub const FIELD_TRACKER_STATS: &str = "tracker_stats";
-pub const FIELD_DOWNLOAD_DIR: &str = "download_dir";
-pub const FIELD_HASH_STRING: &str = "hash_string";
 pub const FIELD_NAME: &str = "name";
 pub const FIELD_PATH: &str = "path";
-pub const FIELD_SIZEWHENDONE: &str = "size_when_done";
-pub const FIELD_STATUS: &str = "status";
 pub const FIELD_MOVE: &str = "move";
-pub const FIELD_CREATOR: &str = "creator";
 pub const FIELD_LOCATION: &str = "location";
-pub const FIELD_RATEDOWNLOAD: &str = "rate_download";
-pub const FIELD_RATEUPLOAD: &str = "rate_upload";
-pub const FIELD_ETA: &str = "eta";
-pub const FIELD_UPLOADEDEVER: &str = "uploaded_ever";
-pub const FIELD_DOWNLOADEDEVER: &str = "downloaded_ever";
-pub const FIELD_CORRUPTEVER: &str = "corrupt_ever";
-pub const FIELD_HAVEVALID: &str = "have_valid";
-pub const FIELD_HAVEUNCHECKED: &str = "have_unchecked";
-pub const FIELD_PERCENTDONE: &str = "percent_done";
-pub const FIELD_PEERS: &str = "peers";
-pub const FIELD_PEERSFROM: &str = "peers_from";
-pub const FIELD_FILES: &str = "files";
-pub const FIELD_WANTED: &str = "wanted";
-pub const FIELD_WEB_SEEDS_SENDING_TO_US: &str = "webseeds_sending_to_us";
-pub const FIELD_PRIORITIES: &str = "priorities";
-pub const FIELD_COMMENT: &str = "comment";
-pub const FIELD_ISFINISHED: &str = "is_finished";
-pub const FIELD_ISPRIVATE: &str = "is_private";
-pub const FIELD_MAGNETLINK: &str = "magnet_link";
-pub const FIELD_ERROR: &str = "error";
-pub const FIELD_ERROR_STRING: &str = "error_string";
 pub const FIELD_BANDWIDTH_PRIORITY: &str = "bandwidth_priority";
 pub const FIELD_UPLOAD_LIMIT: &str = "upload_limit";
 pub const FIELD_UPLOAD_LIMITED: &str = "upload_limited";
@@ -61,12 +27,7 @@ pub const FIELD_SEED_RATIO_MODE: &str = "seed_ratio_mode";
 pub const FIELD_SEED_RATIO_LIMIT: &str = "seed_ratio_limit";
 pub const FIELD_PEER_LIMIT: &str = "peer_limit";
 pub const FIELD_FILE_DOWNLOAD_DIR: &str = "download_dir";
-pub const FIELD_PEERS_SENDING_TO_US: &str = "peers_sending_to_us";
-pub const FIELD_PEERS_GETTING_FROM_US: &str = "peers_getting_from_us";
-pub const FIELD_PEERS_CONNECTED: &str = "peers_connected";
 pub const FIELD_QUEUE_POSITION: &str = "queue_position";
-pub const FIELD_ACTIVITY_DATE: &str = "activity_date";
-pub const FIELD_METADATAPERCENTCOMPLETE: &str = "metadata_percent_complete";
 pub const FIELD_FILES_WANTED: &str = "files_wanted";
 pub const FIELD_FILES_UNWANTED: &str = "files_unwanted";
 pub const FIELD_FILES_PRIORITY_HIGH: &str = "priority_high";
@@ -74,27 +35,12 @@ pub const FIELD_FILES_PRIORITY_NORMAL: &str = "priority_normal";
 pub const FIELD_FILES_PRIORITY_LOW: &str = "priority_low";
 pub const FIELD_SEQUENTIAL_DOWNLOAD: &str = "sequential_download";
 pub const FIELD_SEQUENTIAL_DOWNLOAD_FROM_PIECE: &str = "sequential_download_from_piece";
-pub const FIELD_PIECE_COUNT: &str = "piece_count";
 /// The announce URLs, one per line, with an empty line between tiers
 pub const FIELD_TRACKER_LIST: &str = "tracker_list";
 pub const FIELD_TORRENT_ADDED: &str = "torrent_added";
 pub const FIELD_TORRENT_DUPLICATE: &str = "torrent_duplicate";
 pub const FIELD_FORMAT: &str = "format";
 pub const FORMAT_TABLE: &str = "table";
-
-pub const FIELD_TIER: &str = "tier";
-pub const FIELD_ANNOUNCE: &str = "announce";
-pub const FIELD_SCRAPE: &str = "scrape";
-pub const FIELD_LAST_ANNOUNCE_PEER_COUNT: &str = "last_announce_peer_count";
-pub const FIELD_LAST_ANNOUNCE_TIME: &str = "last_announce_time";
-pub const FIELD_LAST_SCRAPE_TIME: &str = "last_scrape_time";
-pub const FIELD_SEEDERCOUNT: &str = "seeder_count";
-pub const FIELD_LEECHERCOUNT: &str = "leecher_count";
-pub const FIELD_DOWNLOADCOUNT: &str = "download_count";
-pub const FIELD_HOST: &str = "host";
-pub const FIELD_LAST_ANNOUNCE_RESULT: &str = "last_announce_result";
-pub const FIELD_RECHECK_PROGRESS: &str = "recheck_progress";
-pub const FIELD_DOWNLOADER_COUNT: &str = "downloader_count";
 
 pub const METHOD_TORRENT_START: &str = "torrent_start";
 pub const METHOD_SESSION_GET: &str = "session_get";
@@ -143,54 +89,12 @@ pub const STATS_FILES_ADDED: &str = "files_added";
 pub const STATS_SESSION_COUNT: &str = "session_count";
 pub const STATS_SECONDS_ACTIVE: &str = "seconds_active";
 
-pub const TPEER_ADDRESS: &str = "address";
-pub const TPEER_CLIENT_NAME: &str = "client_name";
-pub const TPEER_PROGRESS: &str = "progress";
-pub const TPEER_RATE_TO_CLIENT: &str = "rate_to_client";
-pub const TPEER_RATE_TO_PEER: &str = "rate_to_peer";
-pub const TPEER_FLAGSTR: &str = "flag_str";
-
-pub const TPEERFROM_FROMPEX: &str = "from_pex";
-pub const TPEERFROM_FROMDHT: &str = "from_dht";
-pub const TPEERFROM_FROMTRACKERS: &str = "from_tracker";
-pub const TPEERFROM_FROMLTEP: &str = "from_ltep";
-pub const TPEERFROM_FROMRESUME: &str = "from_cache";
-pub const TPEERFROM_FROMINCOMING: &str = "from_incoming";
-pub const TPEERFROM_FROMLPD: &str = "from_lpd";
-
-pub const TFILE_LENGTH: &str = "length";
-pub const TFILE_BYTES_COMPLETED: &str = "bytes_completed";
-pub const TFILE_NAME: &str = "name";
-
-pub const TR_STATUS_STOPPED: i64 = 0;
-pub const TR_STATUS_CHECK_WAIT: i64 = 1;
-pub const TR_STATUS_CHECK: i64 = 2;
-pub const TR_STATUS_DOWNLOAD_WAIT: i64 = 3;
-pub const TR_STATUS_DOWNLOAD: i64 = 4;
-pub const TR_STATUS_SEED_WAIT: i64 = 5;
-pub const TR_STATUS_SEED: i64 = 6;
-
 /// Not in the protocol, just used in the UI
 pub const TR_PRI_UNSET: i64 = -3;
 pub const TR_PRI_MIXED: i64 = -2;
 pub const TR_PRI_LOW: i64 = -1;
 pub const TR_PRI_NORMAL: i64 = 0;
 pub const TR_PRI_HIGH: i64 = 1;
-
-pub const TORRENT_FLAG_ERROR: u32 = 1 << 0;
-pub const TORRENT_FLAG_COMPLETE: u32 = 1 << 1;
-pub const TORRENT_FLAG_INCOMPLETE: u32 = 1 << 2;
-pub const TORRENT_FLAG_SEEDING: u32 = 1 << 3;
-pub const TORRENT_FLAG_SEEDING_WAIT: u32 = 1 << 4;
-pub const TORRENT_FLAG_CHECKING: u32 = 1 << 5;
-pub const TORRENT_FLAG_WAITING_CHECK: u32 = 1 << 6;
-pub const TORRENT_FLAG_CHECKING_ANY: u32 = 1 << 7;
-pub const TORRENT_FLAG_DOWNLOADING: u32 = 1 << 8;
-pub const TORRENT_FLAG_DOWNLOADING_WAIT: u32 = 1 << 9;
-pub const TORRENT_FLAG_PAUSED: u32 = 1 << 10;
-pub const TORRENT_FLAG_QUEUED: u32 = 1 << 11;
-pub const TORRENT_FLAG_ACTIVE: u32 = 1 << 12;
-pub const TORRENT_FLAG_DOWNLOADING_METADATA: u32 = 1 << 13;
 
 /* session_get */
 /// Not asked for (it's deprecated), but filled in by the client with the
@@ -422,68 +326,12 @@ pub fn torrent_remove(ids: &[i64], remove_data: bool) -> Request {
     request(METHOD_TORRENT_REMOVE, Some(ids)).with(PARAM_DELETE_LOCAL_DATA, remove_data)
 }
 
-const TORRENT_GET_FIELDS: &[&str] = &[
-    FIELD_ETA,
-    FIELD_PEERS,
-    FIELD_PEERSFROM,
-    FIELD_FILES,
-    FIELD_PEERS_SENDING_TO_US,
-    FIELD_PEERS_GETTING_FROM_US,
-    FIELD_WEB_SEEDS_SENDING_TO_US,
-    FIELD_PEERS_CONNECTED,
-    FIELD_HAVEVALID,
-    FIELD_HAVEUNCHECKED,
-    FIELD_RATEUPLOAD,
-    FIELD_RATEDOWNLOAD,
-    FIELD_STATUS,
-    FIELD_ISFINISHED,
-    FIELD_ISPRIVATE,
-    FIELD_ADDED_DATE,
-    FIELD_DOWNLOADEDEVER,
-    FIELD_UPLOADEDEVER,
-    FIELD_CORRUPTEVER,
-    FIELD_SIZEWHENDONE,
-    FIELD_QUEUE_POSITION,
-    FIELD_ID,
-    FIELD_NAME,
-    FIELD_PERCENTDONE,
-    FIELD_COMMENT,
-    FIELD_TOTAL_SIZE,
-    FIELD_METADATAPERCENTCOMPLETE,
-    FIELD_LEFT_UNTIL_DONE,
-    FIELD_TRACKER_STATS,
-    FIELD_DATE_CREATED,
-    FIELD_DOWNLOAD_DIR,
-    FIELD_CREATOR,
-    FIELD_HASH_STRING,
-    FIELD_DONE_DATE,
-    FIELD_HONORS_SESSION_LIMITS,
-    FIELD_UPLOAD_LIMIT,
-    FIELD_UPLOAD_LIMITED,
-    FIELD_DOWNLOAD_LIMIT,
-    FIELD_DOWNLOAD_LIMITED,
-    FIELD_BANDWIDTH_PRIORITY,
-    FIELD_SEED_RATIO_LIMIT,
-    FIELD_SEED_RATIO_MODE,
-    FIELD_PEER_LIMIT,
-    FIELD_ACTIVITY_DATE,
-    FIELD_MAGNETLINK,
-    FIELD_ERROR,
-    FIELD_ERROR_STRING,
-    FIELD_WANTED,
-    FIELD_PRIORITIES,
-    FIELD_RECHECK_PROGRESS,
-    FIELD_SEQUENTIAL_DOWNLOAD,
-    FIELD_SEQUENTIAL_DOWNLOAD_FROM_PIECE,
-    FIELD_PIECE_COUNT,
-];
-
 /// A torrent_get, in the table format: arrays of values rather than
 /// objects, which repeat the keys for every torrent. rpc turns them back
 /// into objects.
 pub fn torrent_get(torrents: &Torrents) -> Request {
     let mut req = Request::new(METHOD_TORRENT_GET)
-        .with(PARAM_FIELDS, TORRENT_GET_FIELDS)
+        .with(PARAM_FIELDS, torrent_fields())
         .with(FIELD_FORMAT, FORMAT_TABLE);
     torrents.set_on(&mut req);
     req
@@ -501,12 +349,22 @@ pub fn torrent_add_metainfo(metainfo: &[u8], paused: bool) -> Request {
     Request::new(METHOD_TORRENT_ADD).with(PARAM_METAINFO, metainfo).with(PARAM_PAUSED, paused)
 }
 
-/// The torrent of a torrent_add result ({id, name, hash_string}), and
-/// whether it was there already
-pub fn torrent_added(result: &Obj) -> Option<(&Obj, bool)> {
-    get_obj(result, FIELD_TORRENT_ADDED)
+/// The torrent of a torrent_add result
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AddedTorrent {
+    pub id: i64,
+    pub name: String,
+}
+
+/// The torrent of a torrent_add result, and whether it was there already
+pub fn torrent_added(result: &Obj) -> Option<(AddedTorrent, bool)> {
+    let torrent = |key| {
+        get_obj(result, key).and_then(|t| serde_json::from_value(Value::Object(t.clone())).ok())
+    };
+    torrent(FIELD_TORRENT_ADDED)
         .map(|t| (t, false))
-        .or_else(|| get_obj(result, FIELD_TORRENT_DUPLICATE).map(|t| (t, true)))
+        .or_else(|| torrent(FIELD_TORRENT_DUPLICATE).map(|t| (t, true)))
 }
 
 /// Adds a file index to the array params[key], creating it if needed
@@ -532,170 +390,6 @@ pub fn tracker_list(trackers: &[(i64, String)]) -> String {
         last_tier = Some(*tier);
     }
     list
-}
-
-/* Torrents */
-
-pub fn torrent_get_id(t: &Obj) -> i64 {
-    get_i64(t, FIELD_ID)
-}
-
-pub fn torrent_get_name(t: &Obj) -> &str {
-    get_str(t, FIELD_NAME).unwrap_or("")
-}
-
-pub fn torrent_get_files(t: &Obj) -> &[Value] {
-    get_array(t, FIELD_FILES)
-}
-
-pub fn torrent_get_peers(t: &Obj) -> &[Value] {
-    get_array(t, FIELD_PEERS)
-}
-
-pub fn torrent_get_wanted(t: &Obj) -> &[Value] {
-    get_array(t, FIELD_WANTED)
-}
-
-pub fn torrent_get_priorities(t: &Obj) -> &[Value] {
-    get_array(t, FIELD_PRIORITIES)
-}
-
-pub fn torrent_get_tracker_stats(t: &Obj) -> &[Value] {
-    get_array(t, FIELD_TRACKER_STATS)
-}
-
-/// The ratio of a node holding an int or a double, times 100
-pub fn json_double_to_progress(v: Option<&Value>) -> f64 {
-    v.map(value_as_f64).unwrap_or(0.0) * 100.0
-}
-
-pub fn torrent_get_metadata_percent_complete(t: &Obj) -> f64 {
-    match t.get(FIELD_METADATAPERCENTCOMPLETE) {
-        Some(v) => json_double_to_progress(Some(v)),
-        None => 100.0,
-    }
-}
-
-pub fn torrent_get_percent_done(t: &Obj) -> f64 {
-    json_double_to_progress(t.get(FIELD_PERCENTDONE))
-}
-
-pub fn torrent_get_recheck_progress(t: &Obj) -> f64 {
-    json_double_to_progress(t.get(FIELD_RECHECK_PROGRESS))
-}
-
-pub fn torrent_get_is_finished(t: &Obj) -> bool {
-    get_i64(t, FIELD_LEFT_UNTIL_DONE) <= 0
-}
-
-pub fn torrent_get_error(t: &Obj) -> i64 {
-    get_i64(t, FIELD_ERROR)
-}
-
-pub fn torrent_get_queue_position(t: &Obj) -> i64 {
-    if t.contains_key(FIELD_QUEUE_POSITION) { get_i64(t, FIELD_QUEUE_POSITION) } else { -1 }
-}
-
-pub fn torrent_get_flags(t: &Obj, status: i64, file_count: i64) -> u32 {
-    let mut flags = 0;
-
-    if file_count > 0 && torrent_get_is_finished(t) {
-        flags |= TORRENT_FLAG_COMPLETE;
-    } else {
-        flags |= TORRENT_FLAG_INCOMPLETE;
-    }
-
-    match status {
-        TR_STATUS_STOPPED => flags |= TORRENT_FLAG_PAUSED,
-        TR_STATUS_CHECK_WAIT => flags |= TORRENT_FLAG_WAITING_CHECK | TORRENT_FLAG_CHECKING_ANY,
-        TR_STATUS_CHECK => flags |= TORRENT_FLAG_CHECKING | TORRENT_FLAG_CHECKING_ANY,
-        TR_STATUS_DOWNLOAD_WAIT => flags |= TORRENT_FLAG_DOWNLOADING_WAIT | TORRENT_FLAG_QUEUED,
-        TR_STATUS_DOWNLOAD => {
-            if flags & TORRENT_FLAG_COMPLETE == 0 {
-                flags |= TORRENT_FLAG_DOWNLOADING;
-            }
-            if file_count <= 0 {
-                flags |= TORRENT_FLAG_DOWNLOADING_METADATA;
-            }
-            flags |= TORRENT_FLAG_ACTIVE;
-        }
-        TR_STATUS_SEED_WAIT => flags |= TORRENT_FLAG_SEEDING_WAIT,
-        TR_STATUS_SEED => {
-            flags |= TORRENT_FLAG_SEEDING;
-            if get_i64(t, FIELD_PEERS_GETTING_FROM_US) != 0 {
-                flags |= TORRENT_FLAG_ACTIVE;
-            }
-        }
-        _ => {}
-    }
-
-    if torrent_get_error(t) > 0 {
-        flags |= TORRENT_FLAG_ERROR;
-    }
-
-    flags
-}
-
-pub fn torrent_get_status_icon(flags: u32) -> &'static str {
-    if flags & TORRENT_FLAG_ERROR != 0 {
-        "dialog-warning"
-    } else if flags & TORRENT_FLAG_DOWNLOADING_METADATA != 0 {
-        "edit-find"
-    } else if flags & TORRENT_FLAG_DOWNLOADING != 0 {
-        "go-down"
-    } else if flags & TORRENT_FLAG_PAUSED != 0 {
-        "media-playback-pause"
-    } else if flags & TORRENT_FLAG_SEEDING != 0 {
-        "go-up"
-    } else if flags & TORRENT_FLAG_CHECKING != 0 {
-        "view-refresh"
-    } else if flags & TORRENT_FLAG_DOWNLOADING_WAIT != 0 {
-        "media-seek-backward"
-    } else if flags & TORRENT_FLAG_SEEDING_WAIT != 0 {
-        "media-seek-forward"
-    } else {
-        "dialog-question"
-    }
-}
-
-pub fn torrent_get_status_string(value: i64, flags: u32) -> String {
-    let metadata = flags & TORRENT_FLAG_DOWNLOADING_METADATA != 0;
-    match value {
-        TR_STATUS_DOWNLOAD if metadata => tr("Metadata Downloading"),
-        TR_STATUS_DOWNLOAD => tr("Downloading"),
-        TR_STATUS_DOWNLOAD_WAIT => tr("Queued download"),
-        TR_STATUS_CHECK_WAIT => tr("Waiting To Check"),
-        TR_STATUS_CHECK => tr("Checking"),
-        TR_STATUS_SEED_WAIT => tr("Queued seed"),
-        TR_STATUS_SEED => tr("Seeding"),
-        TR_STATUS_STOPPED => tr("Paused"),
-        _ => tr("Unknown"),
-    }
-}
-
-pub fn torrent_has_tracker(t: &Obj, host: Option<&str>) -> bool {
-    objects(torrent_get_tracker_stats(t))
-        .any(|tracker| get_str(tracker, FIELD_ANNOUNCE).and_then(crate::util::tracker_host) == host)
-}
-
-pub fn get_torrents(args: &Obj) -> &[Value] {
-    get_array(args, FIELD_TORRENTS)
-}
-
-pub fn get_torrents_removed(args: &Obj) -> Option<&[Value]> {
-    args.get(FIELD_REMOVED).and_then(Value::as_array).map(Vec::as_slice)
-}
-
-/* Peers */
-
-pub fn peerfrom_get_lpd(pf: &Obj) -> i64 {
-    if pf.contains_key(TPEERFROM_FROMLPD) { get_i64(pf, TPEERFROM_FROMLPD) } else { -1 }
-}
-
-/* Files */
-
-pub fn file_get_progress(length: i64, completed: i64) -> f64 {
-    if length > 0 { ((completed as f64 / length as f64) * 100.0).min(100.0) } else { 0.0 }
 }
 
 /* Session */

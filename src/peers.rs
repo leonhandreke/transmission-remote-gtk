@@ -10,9 +10,8 @@ use gtk::prelude::*;
 
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
-use crate::json::{Obj, get_i64, get_str, objects};
 use crate::prefs::Prefs;
-use crate::protocol as p;
+use crate::protocol::Torrent;
 use crate::torrent_model::UpdateMode;
 use crate::tree_view::{ColType, TreeView};
 
@@ -56,7 +55,7 @@ impl PeersModel {
         self.store.remove_all();
     }
 
-    pub fn update(&self, tv: &TreeView, serial: i64, t: &Obj, mode: UpdateMode) {
+    pub fn update(&self, tv: &TreeView, serial: i64, t: &Torrent, mode: UpdateMode) {
         let do_host_lookup = tv.is_column_showing(COL_HOST as i32);
         let mut added = Vec::new();
 
@@ -64,8 +63,8 @@ impl PeersModel {
             self.clear();
         }
 
-        for peer in objects(p::torrent_get_peers(t)) {
-            let address = get_str(peer, p::TPEER_ADDRESS).unwrap_or("").to_string();
+        for peer in &t.peers {
+            let address = peer.address.clone();
             let existing = self.peers.borrow().get(&address).cloned();
             let item = match existing {
                 Some(item) => item,
@@ -73,7 +72,7 @@ impl PeersModel {
                     let item = new_peer_item();
                     item.set(COL_ICON, "network-workgroup");
                     item.set(COL_IP, address.as_str());
-                    item.set(COL_CLIENT, get_str(peer, p::TPEER_CLIENT_NAME));
+                    item.set(COL_CLIENT, peer.client_name.as_str());
                     self.peers.borrow_mut().insert(address.clone(), item.clone());
                     added.push(item.clone());
 
@@ -93,10 +92,10 @@ impl PeersModel {
                 }
             };
 
-            item.set(COL_FLAGS, get_str(peer, p::TPEER_FLAGSTR));
-            item.set(COL_PROGRESS, p::json_double_to_progress(peer.get(p::TPEER_PROGRESS)));
-            item.set(COL_DOWNSPEED, get_i64(peer, p::TPEER_RATE_TO_CLIENT));
-            item.set(COL_UPSPEED, get_i64(peer, p::TPEER_RATE_TO_PEER));
+            item.set(COL_FLAGS, peer.flag_str.as_str());
+            item.set(COL_PROGRESS, peer.progress * 100.0);
+            item.set(COL_DOWNSPEED, peer.rate_to_client);
+            item.set(COL_UPSPEED, peer.rate_to_peer);
             item.set(COL_UPDATESERIAL, serial);
         }
 

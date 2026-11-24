@@ -11,7 +11,6 @@ use gtk::{gdk, gio, glib};
 use crate::client::Client;
 use crate::i18n::tr;
 use crate::item::{self, Item, Val};
-use crate::json::{get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol as p;
 use crate::torrent_model::{self as tm, Stats, TorrentItemExt, TorrentModel};
@@ -297,13 +296,11 @@ impl StateSelector {
         let n_cat = imp.n_categories.get() as usize;
 
         for torrent in item::items(&model.store()) {
-            let Some(t) = torrent.torrent_json() else { continue };
+            let Some(t) = torrent.torrent() else { continue };
 
             if update_trackers {
-                for tracker in objects(p::torrent_get_tracker_stats(&t)) {
-                    let Some(host) = get_str(tracker, p::FIELD_ANNOUNCE)
-                        .and_then(util::tracker_host)
-                        .map(str::to_string)
+                for tracker in &t.tracker_stats {
+                    let Some(host) = util::tracker_host(&tracker.announce).map(str::to_string)
                     else {
                         continue;
                     };

@@ -9,9 +9,9 @@ use gtk::prelude::*;
 use crate::client::Client;
 use crate::files::{FilesModel, FilesView};
 use crate::i18n::tr;
-use crate::json::Obj;
 use crate::main_window::MainWindow;
 use crate::peers::{self, PeersModel};
+use crate::protocol::Torrent;
 use crate::torrent_model::UpdateMode;
 use crate::trackers::{TrackersModel, TrackersView};
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
@@ -65,7 +65,7 @@ impl DetailLists {
     }
 
     /// Shows the torrent t, from a torrent_get with serial
-    pub fn update(&self, t: &Obj, serial: i64, mode: UpdateMode) {
+    pub fn update(&self, t: &Torrent, serial: i64, mode: UpdateMode) {
         self.trackers_model.update(serial, t, mode);
         self.files_model.update(t, mode);
         self.peers_model.update(&self.peers_tv, serial, t, mode);

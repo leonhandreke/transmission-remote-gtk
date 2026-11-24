@@ -18,7 +18,7 @@ use crate::dialogs::{
 use crate::general_panel::GeneralPanel;
 use crate::i18n::{sprintf, tr};
 use crate::item::Item;
-use crate::json::{get_bool, get_str};
+use crate::json::get_bool;
 use crate::menu_bar::MenuBar;
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
@@ -372,7 +372,7 @@ impl MainWindow {
             return;
         }
         if let Some((t, _)) = self.client().torrent_data(id) {
-            self.clipboard().set_text(get_str(&t, p::FIELD_MAGNETLINK).unwrap_or(""));
+            self.clipboard().set_text(&t.magnet_link);
         }
     }
 
@@ -523,8 +523,8 @@ impl MainWindow {
 
         if criteria != 0 {
             if criteria & FILTER_FLAG_TRACKER != 0 {
-                let Some(json) = item.torrent_json() else { return false };
-                if !p::torrent_has_tracker(&json, imp.filter_selected_text.borrow().as_deref()) {
+                let Some(t) = item.torrent() else { return false };
+                if !t.has_tracker(imp.filter_selected_text.borrow().as_deref()) {
                     return false;
                 }
             } else if criteria & FILTER_FLAG_DIR != 0 {

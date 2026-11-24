@@ -115,11 +115,10 @@ pub fn dispatch_adds(win: &MainWindow, client: &Client, reqs: Vec<p::Request>) {
         for result in &results {
             match result {
                 Ok(r) => match p::torrent_added(r) {
-                    Some((t, false)) => ids.push(p::torrent_get_id(t)),
-                    Some((t, true)) => messages.push(sprintf(
-                        &tr("\"%s\" has already been added."),
-                        &[&p::torrent_get_name(t)],
-                    )),
+                    Some((t, false)) => ids.push(t.id),
+                    Some((t, true)) => {
+                        messages.push(sprintf(&tr("\"%s\" has already been added."), &[&t.name]))
+                    }
                     None => {}
                 },
                 Err(e) => messages.push(e.to_string()),

@@ -11,10 +11,9 @@ use crate::client::Client;
 use crate::format;
 use crate::i18n::{ntr, sprintf, tr};
 use crate::item::Item;
-use crate::json::get_str;
 use crate::prefs::{self, Scope};
 use crate::protocol::{
-    self as p, TORRENT_FLAG_CHECKING, TORRENT_FLAG_COMPLETE, TORRENT_FLAG_DOWNLOADING,
+    TORRENT_FLAG_CHECKING, TORRENT_FLAG_COMPLETE, TORRENT_FLAG_DOWNLOADING,
     TORRENT_FLAG_DOWNLOADING_WAIT, TORRENT_FLAG_PAUSED, TORRENT_FLAG_SEEDING,
     TORRENT_FLAG_SEEDING_WAIT, TORRENT_FLAG_WAITING_CHECK,
 };
@@ -206,10 +205,7 @@ impl RowValues {
             metadata_percent_complete: item.double(COL_METADATAPERCENTCOMPLETE),
             ratio: item.double(COL_RATIO),
             seed_ratio_limit: item.double(COL_SEED_RATIO_LIMIT),
-            error_string: item
-                .torrent_json()
-                .and_then(|j| get_str(&j, p::FIELD_ERROR_STRING).map(str::to_string))
-                .unwrap_or_default(),
+            error_string: item.torrent().map(|t| t.error_string.clone()).unwrap_or_default(),
         }
     }
 
