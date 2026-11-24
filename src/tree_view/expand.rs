@@ -1,11 +1,12 @@
 //! Expanding and collapsing the rows of a tree: all of them, and with the
 //! keys of GtkTreeView
 
+use gtk::gdk;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{gdk, glib};
 
 use super::TreeView;
+use crate::type_ahead::is_shortcut;
 
 impl TreeView {
     fn tree_model(&self) -> Option<gtk::TreeListModel> {
@@ -85,11 +86,8 @@ impl TreeView {
 
     /// Before the list's own keys (Shift+arrows extend the selection)
     pub(super) fn expand_key_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
-        let imp = self.imp();
-        let searching = !imp.search.borrow().is_empty()
-            && glib::monotonic_time() - imp.search_time.get() <= 1_000_000;
         // unless they're part of a search
-        if searching || self.tree_model().is_none() || Self::other_modifiers(state) {
+        if self.imp().type_ahead.is_typing() || self.tree_model().is_none() || is_shortcut(state) {
             return false;
         }
         self.expand_key(keyval, state)

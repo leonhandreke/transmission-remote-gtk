@@ -35,6 +35,7 @@ use gtk::subclass::prelude::*;
 use gtk::{gio, glib};
 
 use crate::prefs::Prefs;
+use crate::type_ahead::TypeAhead;
 
 pub use column::{
     COLUMN_EDITABLE, COLUMN_EXTRA, COLUMN_HIDE_FROM_TOP_MENU, COLUMN_UNREMOVABLE, ColType,
@@ -79,8 +80,7 @@ mod imp {
 
         /// The property of the rows that typing searches
         pub search_column: Cell<Option<&'static str>>,
-        pub search: RefCell<String>,
-        pub search_time: Cell<i64>,
+        pub type_ahead: TypeAhead,
 
         pub actions: gio::SimpleActionGroup,
         pub sorter_handler: RefCell<Option<glib::SignalHandlerId>>,
@@ -110,8 +110,7 @@ mod imp {
                 column_menus: Cell::new(true),
                 updating_sort: Cell::new(false),
                 search_column: Cell::new(None),
-                search: Default::default(),
-                search_time: Cell::new(0),
+                type_ahead: Default::default(),
                 actions: gio::SimpleActionGroup::new(),
                 sorter_handler: Default::default(),
                 start_edit: Default::default(),

@@ -40,6 +40,7 @@ mod torrent_object;
 mod torrent_view;
 mod trackers;
 mod tree_view;
+mod type_ahead;
 mod util;
 
 use gtk::prelude::*;

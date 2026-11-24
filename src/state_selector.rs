@@ -14,6 +14,7 @@ use crate::prefs::{self, Prefs, Scope};
 use crate::protocol as p;
 use crate::torrent_model::{self as tm, Stats, TorrentModel};
 use crate::torrent_object::TorrentObject;
+use crate::type_ahead::TypeAhead;
 use crate::util;
 
 pub const FILTER_FLAG_TRACKER: u32 = 1 << 14;
@@ -103,8 +104,7 @@ mod imp {
         /// The store, in sections (see build)
         pub sections: gtk::SortListModel,
         pub store: gio::ListStore,
-        pub search: RefCell<String>,
-        pub search_time: Cell<i64>,
+        pub type_ahead: TypeAhead,
 
         pub flag: Cell<u32>,
         pub show_dirs: Cell<bool>,
@@ -127,8 +127,7 @@ mod imp {
                 selection: gtk::SingleSelection::new(Some(sections.clone())),
                 sections,
                 store,
-                search: Default::default(),
-                search_time: Cell::new(0),
+                type_ahead: Default::default(),
                 flag: Cell::new(0),
                 show_dirs: Cell::new(false),
                 show_trackers: Cell::new(false),
@@ -546,26 +545,10 @@ impl StateSelector {
     /// with the typed text.
     fn key_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
         let imp = self.imp();
-        let Some(c) = keyval.to_unicode() else { return false };
-        if c.is_whitespace()
-            || c.is_control()
-            || state.intersects(
-                gdk::ModifierType::CONTROL_MASK
-                    | gdk::ModifierType::ALT_MASK
-                    | gdk::ModifierType::META_MASK
-                    | gdk::ModifierType::SUPER_MASK,
-            )
-        {
+        let Some(c) = TypeAhead::typed_char(keyval, state).filter(|c| !c.is_whitespace()) else {
             return false;
-        }
-        let now = glib::monotonic_time();
-        if now - imp.search_time.get() > 1_000_000 {
-            imp.search.borrow_mut().clear();
-        }
-        imp.search_time.set(now);
-        imp.search.borrow_mut().push(c);
-        let needle = glib::casefold(imp.search.borrow().as_str()).to_string();
-
+        };
+        let needle = imp.type_ahead.push(c);
         let found = util::objects::<StateRow>(&imp.selection)
             .position(|r| glib::casefold(r.name()).starts_with(&needle));
         if let Some(i) = found {
