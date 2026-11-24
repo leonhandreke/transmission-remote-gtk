@@ -198,7 +198,7 @@ impl TreeView {
 
         let section = gio::Menu::new();
         for desc in self.imp().columns.borrow().iter() {
-            if desc.flags.get() & COLUMN_HIDE_FROM_TOP_MENU == 0 {
+            if desc.flags & COLUMN_HIDE_FROM_TOP_MENU == 0 {
                 let item = gio::MenuItem::new(Some(&desc.header), None);
                 item.set_action_and_target_value(
                     Some(&format!("win.{SORT_COLUMN_ACTION}")),

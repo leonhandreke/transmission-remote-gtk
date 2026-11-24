@@ -103,8 +103,7 @@ impl CellState {
                     // like a GtkTreeView, a click selects the row, and a click
                     // on a selected row starts editing
                     let selected = self.list_item.upgrade().is_some_and(|li| li.is_selected());
-                    label.set_can_target(desc.editable.get() && selected);
-                    label.set_editable(desc.editable.get());
+                    label.set_can_target(selected);
                 } else if let Some(label) = self.widget.downcast_ref::<gtk::Label>() {
                     label.set_text(text.as_deref().unwrap_or(""));
                 }
@@ -161,7 +160,7 @@ impl TreeView {
                 child = bar.upcast();
             }
             _ => {
-                if desc.flags.get() & COLUMN_EDITABLE != 0 {
+                if desc.flags & COLUMN_EDITABLE != 0 {
                     let label = gtk::EditableLabel::new("");
                     widget = label.clone().upcast();
                     child = label.upcast();

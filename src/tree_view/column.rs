@@ -28,11 +28,14 @@ pub enum ColType {
     NumGtEqZero,
 }
 
-pub const COLUMN_SHOWING: u32 = 1 << 0;
-pub const COLUMN_UNREMOVABLE: u32 = 1 << 1;
-pub const COLUMN_EXTRA: u32 = 1 << 2;
-pub const COLUMN_HIDE_FROM_TOP_MENU: u32 = 1 << 3;
-pub const COLUMN_EDITABLE: u32 = 1 << 4;
+/// The user can't hide it
+pub const COLUMN_UNREMOVABLE: u32 = 1 << 0;
+/// Not shown unless the user shows it
+pub const COLUMN_EXTRA: u32 = 1 << 1;
+/// Not in the sort menu (see sort_menu)
+pub const COLUMN_HIDE_FROM_TOP_MENU: u32 = 1 << 2;
+/// Its text cells can be edited (see set_edit)
+pub const COLUMN_EDITABLE: u32 = 1 << 3;
 
 /// Called when the user toggles a "wanted" cell or clicks a priority cell
 pub type ActivateFn = Rc<dyn Fn(&glib::Object)>;
@@ -43,23 +46,25 @@ pub type EditFn = Rc<dyn Fn(&glib::Object, bool, Option<&str>)>;
 /// Compares two rows by a column, for sorting without reading properties
 pub type CompareFn = Rc<dyn Fn(&glib::Object, &glib::Object) -> Ordering>;
 
+/// A registered column
 pub struct ColumnDesc {
     /// What sorting by the column is saved as (see the top)
-    pub key: i32,
+    pub(super) key: i32,
     /// The property of the row objects it shows
-    pub property: &'static str,
+    pub(super) property: &'static str,
     /// The property of the icon name of an IconText column, the file ID of a
     /// FileIconText one
-    pub extra: Cell<Option<&'static str>>,
-    pub header: String,
-    pub id: String,
-    pub flags: Cell<u32>,
-    pub ctype: ColType,
-    pub activate: RefCell<Option<ActivateFn>>,
-    pub edit: RefCell<Option<EditFn>>,
+    pub(super) extra: Cell<Option<&'static str>>,
+    pub(super) header: String,
+    pub(super) id: String,
+    /// COLUMN_*
+    pub(super) flags: u32,
+    pub(super) ctype: ColType,
+    pub(super) activate: RefCell<Option<ActivateFn>>,
+    pub(super) edit: RefCell<Option<EditFn>>,
     /// How to sort by it, if not by comparing its property values
-    pub compare: RefCell<Option<CompareFn>>,
-    pub editable: Cell<bool>,
+    pub(super) compare: RefCell<Option<CompareFn>>,
+    /// The column of the column view while it's showing
     pub(super) column: RefCell<Option<gtk::ColumnViewColumn>>,
 }
 
@@ -98,12 +103,8 @@ impl ColumnDesc {
             }));
     }
 
-    pub fn set_editable(&self, editable: bool) {
-        self.editable.set(editable);
-    }
-
     pub(super) fn showing(&self) -> bool {
-        self.flags.get() & COLUMN_SHOWING != 0
+        self.column.borrow().is_some()
     }
 }
 
@@ -125,12 +126,11 @@ impl TreeView {
             extra: Cell::new(None),
             header: header.to_string(),
             id: id.to_string(),
-            flags: Cell::new(flags),
+            flags,
             ctype,
             activate: Default::default(),
             edit: Default::default(),
             compare: Default::default(),
-            editable: Cell::new(flags & COLUMN_EDITABLE != 0),
             column: Default::default(),
         });
         self.imp().columns.borrow_mut().push(desc.clone());
@@ -157,7 +157,6 @@ impl TreeView {
     fn hide_column(&self, desc: &ColumnDesc) {
         let Some(column) = desc.column.take() else { return };
         self.imp().column_view.remove_column(&column);
-        desc.flags.set(desc.flags.get() & !COLUMN_SHOWING);
     }
 
     fn column_action(&self, desc: &Rc<ColumnDesc>) -> gio::SimpleAction {
@@ -191,9 +190,7 @@ impl TreeView {
             let action = self.column_action(desc);
             let showing = desc.showing();
             action.set_state(&showing.to_variant());
-            action.set_enabled(
-                showing && desc.flags.get() & COLUMN_UNREMOVABLE == 0 && n_showing > 1,
-            );
+            action.set_enabled(showing && desc.flags & COLUMN_UNREMOVABLE == 0 && n_showing > 1);
 
             let Some(column) = desc.column.borrow().clone() else { continue };
 
@@ -276,7 +273,6 @@ impl TreeView {
 
         cv.insert_column(position, &column);
         *desc.column.borrow_mut() = Some(column);
-        desc.flags.set(desc.flags.get() | COLUMN_SHOWING);
     }
 
     pub fn remove_all_columns(&self) {

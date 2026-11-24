@@ -85,7 +85,7 @@ impl TreeView {
         match saved {
             None => {
                 let columns = self.imp().columns.borrow().clone();
-                for desc in columns.iter().filter(|d| d.flags.get() & COLUMN_EXTRA == 0) {
+                for desc in columns.iter().filter(|d| d.flags & COLUMN_EXTRA == 0) {
                     self.add_column_after(desc, -1, None);
                 }
             }

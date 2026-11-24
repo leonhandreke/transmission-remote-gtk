@@ -193,7 +193,6 @@ impl TrackersView {
             "announce-url",
             COLUMN_UNREMOVABLE | COLUMN_EDITABLE,
         );
-        announce.set_editable(true);
         reg(
             ColType::NumGtZero,
             5,
