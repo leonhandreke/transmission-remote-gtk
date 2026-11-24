@@ -1,0 +1,203 @@
+# Refactoring plan: reducing the port's technical debt
+
+The application was ported from C (GTK 3) to Rust (GTK 4), largely by an
+agent, and still carries the shape of the C code: a GtkListStore-like
+column model, JSON looked up by key everywhere, bit flags in plain
+integers, and one large window that did everything. This plan lists what
+is left to do, in the recommended order. Work happens on the
+`refactor/tech-debt` branch.
+
+## How to work
+
+- Small, confident steps, one commit each. Every commit must build with no
+  warnings: `cargo build`, `cargo clippy --all-targets` and `cargo test`
+  clean, and `cargo fmt` applied. Also check
+  `cargo build --features debug-snapshot` when touching the window or app.
+- Commit messages: a short imperative subject, then a paragraph on why,
+  ending with the `Co-Authored-By:` line of the model doing the work.
+- Keep `po/POTFILES.in` in sync when adding, moving or removing source
+  files that contain translatable strings (`tr(`, `ntr(`, `ctr(`).
+- **Finding dead code:** rustc doesn't report unused `pub` items. On a
+  clean tree, temporarily make everything `pub(crate)` and build:
+  `perl -pi -e 's/^(\s*)pub (fn|const|struct|enum|type|static|use) /$1pub(crate) $2 /' $(git ls-files 'src/*.rs' 'src/**/*.rs') && cargo build`.
+  Read the warnings, then `git checkout -- src` to revert. Never run that
+  checkout with uncommitted work.
+- **UI verification:** the `macos-ui-debugging` (and `linux-ui-debugging`)
+  skills launch the app against an isolated transmission-daemon and drive
+  it. Clicking through the UI is delegated to a subagent (Sonnet, in its own
+  worktree); code review is not delegated. Remove the worktree afterwards.
+- **Wire checks:** when typing a protocol response, compare the struct's
+  field types with what a real `transmission-daemon` (4.1+) returns: start
+  one in a scratch directory, add a torrent made with `transmission-create`
+  (with a tracker URL), POST the JSON-RPC request (handle the 409 session
+  ID handshake) and check each field's JSON type against the struct. This
+  was done for `Torrent`; see the commit "Read the torrents of torrent_get
+  into typed structs".
+- The user decided against adding tests for now (step 1 below). Don't add
+  test suites unless asked.
+
+## Where things are (after the refactoring so far)
+
+- `src/client/` — `mod.rs`: the client (preferences, transport, session,
+  torrent model, request dispatch); `connection.rs`: connecting, the update
+  timers, failure handling, `dispatch_interactive()` and friends, and the
+  signals the window follows (`connection-changed`, `torrents-updated`,
+  `request-failed`, `status-message`).
+- `src/rpc/` — JSON-RPC 2.0 over libsoup. `src/protocol/` — method names,
+  request keys and builders (`mod.rs`), the typed torrent (`torrent.rs`).
+- `src/json.rs` — the lenient `get_i64()`-style getters, still used for the
+  session, the preferences and a few small results.
+- `src/item.rs` — the untyped column `Item`. `src/torrent_model.rs`,
+  `src/files.rs`, `src/peers.rs`, `src/trackers.rs`, `src/state_selector.rs`
+  — models of Items with `COL_*` constants.
+- `src/tree_view.rs` — a GtkTreeView-like widget on GtkColumnView.
+- `src/main_window.rs` — the window: layout, wiring, filter, actions.
+- `src/details.rs` — the trackers/files/peers lists of a torrent, shared by
+  the window and the properties dialog.
+- `src/dialogs/` — dialogs; `dialog.rs` is a GtkDialog-like base class.
+- `src/ui/*.blp` — Blueprint UI files; `data/style.css` — the CSS.
+
+## Steps
+
+### 1. Tests for the model logic — skipped for now (user decision)
+
+`TorrentModel::update` (first/active/full modes, stale removal), the files
+tree in `FilesModel` (building, directories combining wanted/priority,
+renames), `AddOptions::request` and `shorten_download_dir` have no tests.
+They're nearly pure functions over data and would protect steps 3 and 4.
+
+### 2. Typed protocol data instead of JSON lookups — in progress
+
+Done: `Torrent` (with `PeersFrom`, `Peer`, `File`, `TrackerStat`) in
+`src/protocol/torrent.rs`; the torrent_get fields are derived from the
+struct (`torrent_fields()`); `AddedTorrent` for torrent_add results.
+
+Remaining:
+
+a. **Small results** — `session_stats` (`current_stats`,
+   `cumulative_stats`: `uploaded_bytes`, `downloaded_bytes`, `files_added`,
+   `session_count`, `seconds_active`; read in `src/dialogs/stats.rs`),
+   `port_test` (`port_is_open`, in `remote_prefs.rs`), `free_space`
+   (`size_bytes`, in `client/mod.rs`) and `blocklist_update`
+   (`blocklist_size`). Small `#[derive(Deserialize)] #[serde(default)]`
+   structs next to their request builders in `protocol/mod.rs`; drop the
+   `STATS_*` and similar key constants that become unused.
+
+b. **Session** — `Client::session` is a JSON object read with `get_*` in
+   `client/mod.rs`, `status_bar.rs`, `main_window.rs`,
+   `torrent_model.rs::shorten_download_dir`, `dialogs/destination_combo.rs`,
+   `dialogs/add.rs`, `dialogs/add_url.rs`, `torrent_view.rs` (seed ratio
+   limit) and `dialogs/remote_prefs.rs`. Make a `Session` struct whose fields
+   are the keys asked for (derive the session_get field list from it like
+   `torrent_fields()`, replacing `SESSION_GET_FIELDS` and most `SGET_*`
+   constants). Notes:
+   - `download_dir_free_space` isn't asked for; the client fills it in from
+     `free_space` (see `Client::set_session` and `update_session_after`).
+     Make it a client-side field (e.g. `Option<i64>` on the client or a
+     `#[serde(skip)]` field) rather than inserting into JSON.
+   - Optional fields decide what the remote preferences dialog shows
+     (queues, `cache_size_mib`, `blocklist_url`, `preferred_transports`,
+     `sequential_download`): use `Option<…>`.
+   - `remote_prefs.rs` loads its widgets by key with `JsonWidgets` and saves
+     them into the session_set params by the same keys. Keep that binding,
+     loading from `session.to_obj()` as `props.rs` does with
+     `Torrent::to_obj()`, or replace `JsonWidgets` with explicit typed
+     load/save if that reads better.
+   - Do the wire check against a real daemon before committing.
+
+### 3. Typed list items instead of the column store — the biggest gain
+
+`Item` copies GTK 3's GtkListStore: a `Vec<Val>` of any types, `COL_*`
+index constants (45 for a torrent), `item.int64(COL_X)` reads, a
+`column-changed::cN` signal per column, and `TreeView` columns registered
+by model column index (`reg_column(ColType, COL_X as i32, …)`), with sorting
+by column index (`Item::compare`) and type-ahead by column.
+
+Replace it with GObjects with properties (`#[derive(glib::Properties)]`):
+`TorrentObject` (holding `Rc<Torrent>` plus the derived values: flags,
+status text, icon, shortened directory, first tracker host, peer sources,
+update serial), `PeerObject`, `TrackerObject`, `FileObject` (with children
+and parent for the tree), and the state selector's row. Then:
+
+- views bind cells to properties (or `notify::<prop>`) instead of
+  `connect_column_changed(COL_X)`;
+- `TreeView` columns are registered with a property name (or a getter
+  closure) and a sort key, instead of a model column index;
+- `Val`, `new_*_item()`, `RowValues` in `torrent_view.rs`, `TorrentItemExt`
+  and most `COL_*` constants go away.
+
+Do it one model at a time, smallest first: state selector rows, peers,
+trackers, files, and the torrents last. The preferences' persisted tree
+view settings store the sort column as a model column index
+(`KEY_TV_SORT_COL` in `tree_view.rs::persist`/`restore_sort`); moving to
+names changes the config format, so map old indices or accept resetting
+the sort once.
+
+### 4. Split `tree_view.rs` (1,600 lines)
+
+After (or along with) step 3: separate the cell widgets (factories,
+editable labels, the wanted check box, the priority cell), the persistence
+of column layout and sorting to the preferences, and type-to-search. The
+type-to-search is duplicated almost verbatim in `state_selector.rs`
+(`key_pressed`), as is presenting popovers in `size_allocate` (both
+widgets' `WidgetImpl`): share them.
+
+### 5. The torrent filter as an enum
+
+`state_selector.rs` packs its tracker and directory filters into the same
+`u32` as the torrent status flags (`FILTER_FLAG_TRACKER = 1 << 14`,
+`FILTER_FLAG_DIR = 1 << 15`), and the window decodes that plus a "selected
+text" (`MainWindow::refilter`, `visible_func`, fields `filter_criteria`,
+`filter_selected_text`). Use
+`enum Filter { All, State(u32), Tracker(String), Directory(String) }`,
+returned by the selector. Optionally turn `TORRENT_FLAG_*`
+(`protocol/torrent.rs`) into a `bitflags` type.
+
+### 6. The preferences as the single source of truth for view settings
+
+The view toggles (sidebar, directory filters, tracker filters, directories
+first, torrent details) take two routes: the preferences dialog's
+check boxes call the state selector and the window directly
+(`dialogs/preferences.rs`: `view_states_toggled_cb` and friends, through
+`win.state_selector()` and `win.notebook_set_visible()`), while the menu's
+stateful actions write the preference and the window follows the actions'
+state (`MainWindow::connect_view_actions`, `menu_bar.rs::view_item_new`).
+Make the widgets follow preference changes only (`Prefs::connect_changed`),
+so the preferences dialog no longer needs the window.
+
+### 7. A `TorrentList` widget
+
+`MainWindow` (about 1,080 lines) is mostly wiring now. The last cohesive
+chunk in it is the torrent list: the tree view, its `CustomFilter` and
+`visible_func`, the search entry handling (`filter_*_cb`, `key_pressed`),
+the "No Results"/"Not Connected" overlay (`update_no_results`,
+`update_connection`'s stack) and the context menu. Make it a composite
+widget with a small API (selected IDs, refilter, resort). Saving the window
+size and pane positions, and the torrent added/completed notifications,
+can stay in the window.
+
+### Smaller items
+
+- **CI** — the workflow is `.github/workflows/c-cpp.yml`; rename it, and add
+  `cargo test` and `cargo clippy --all-targets -- -D warnings`.
+- **The `Dialog` base class** (`dialogs/dialog.rs`) reproduces GtkDialog's
+  response IDs. Most dialogs only need OK/Cancel buttons calling closures;
+  consider plain `gtk::Window`s with buttons.
+- **Typed errors** — `Client::parse_settings` and adding torrents return
+  `String` errors; small error enums would do.
+- **gettext** — `i18n.rs` calls gettext through hand-written FFI;
+  `gettext-rs` could replace it. Its C-style `sprintf` has to stay for the
+  existing translations.
+- **The About dialog** doesn't close with Escape on macOS (seen in UI
+  testing on the base commit too).
+
+## Not yet verified in the UI
+
+These commits were not clicked through (the check was stopped early):
+the connection refactor (`client/connection.rs`), the First Tracker column
+and torrent row status fixes, `DetailLists`, and the typed `Torrent`. Worth
+a subagent UI pass: connect/disconnect/reconnect, failures while connected
+(stop the daemon) and while connecting (bad port), periodic updates, the
+torrent context menu's limits and priority, remote preferences, removing
+and adding torrents, the details pages and the properties dialog, the
+First Tracker column and the sidebar's tracker filter.
