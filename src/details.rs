@@ -137,13 +137,14 @@ impl Details {
     }
 }
 
+/// The lists of a torrent's trackers, files and peers
 pub struct DetailLists {
-    pub trackers_model: Rc<TrackersModel>,
-    pub trackers_view: Rc<TrackersView>,
-    pub files_model: Rc<FilesModel>,
-    pub files_view: Rc<FilesView>,
-    pub peers_model: Rc<PeersModel>,
-    pub peers_tv: TreeView,
+    trackers_model: Rc<TrackersModel>,
+    trackers_view: Rc<TrackersView>,
+    files_model: Rc<FilesModel>,
+    files_view: Rc<FilesView>,
+    peers_model: Rc<PeersModel>,
+    peers_tv: TreeView,
 }
 
 impl DetailLists {
@@ -189,7 +190,7 @@ impl DetailLists {
     }
 
     /// Shows no torrent
-    pub fn clear(&self) {
+    fn clear(&self) {
         self.files_model.clear();
         self.trackers_model.clear();
         self.peers_model.clear();
