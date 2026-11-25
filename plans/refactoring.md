@@ -824,3 +824,52 @@ Not clicked through yet; check:
   (after the session refresh); the initial state with a server whose
   queues are off;
 - the remote preferences' minutes spin buttons stop at 59.
+
+### Fixes from the click-through of 2.1.0 (for 2.1.1)
+
+A click-through on Linux of a6a7c86 found these; fixed in commits
+4948625 to a166169, written without running the app:
+
+- **Space in the files list** (4948625, 9c78d7a): clicking a file's name
+  put the keyboard focus on its TreeExpander, and the column view kept it
+  in that column as the arrows moved it; an editable label (trackers,
+  the preferences' lists) takes the focus too. Keys from there bubble
+  through the cell, which has the rows' Space and Enter bindings but
+  isn't selectable or activatable, so they did nothing and never reached
+  the row. The view's capture-phase keys (`search.rs`) now take Space and
+  Shift+Space after the search (a search being typed still takes its
+  spaces) and toggle the focused row's selection with the list's
+  `list.select-item`, as the row's binding does. The expanders aren't
+  focusable any more, so the focus stays on the rows and Enter opens a
+  directory; their keys are the view's own already (`expand.rs`), and
+  Ctrl+Space no longer toggles a directory.
+- **The focus after connecting** (443846f): only the first connection
+  focused the torrent list; later ones kept the focus where it was, on
+  the server picker's button, or after the Connect button (hidden while
+  connecting) on its page's parent. Every connection now focuses the
+  list, unless a text field or a menu has the focus.
+- **The hidden sidebar's filter** (a166169): the C version applied it
+  whether the sidebar was shown or not. Now the list shows all torrents
+  while the sidebar is hidden (`MainWindow::update_filter`); the
+  sidebar keeps and saves its selection, and showing it brings the
+  filter back.
+
+Not clicked through yet; check:
+
+- Space (and Shift+Space) in the files list (also the add dialog's),
+  with the focus moved by clicking a name, another column, Ctrl+click and
+  Ctrl+Up/Down: it toggles the focused row's selection; typing "sub d"
+  quickly still selects only "sub dir"; Enter on a directory opens and
+  closes it; +, -, *, / and Shift+Left/Right still expand and collapse,
+  the expander's arrow on a click too; the focus rectangle is on the row;
+- Space in the trackers (focus on an announce URL), peers and the
+  preferences' lists, and the torrent list (both styles) as before;
+  Enter on an announce URL still edits it;
+- connecting from the server picker's menu and from the Connect button
+  (after disconnecting, and when starting disconnected): the torrent list
+  has the focus once connected (Down selects a torrent); a search typed
+  while connecting keeps the focus in the search entry;
+- hiding the sidebar with a state such as "Queue Down" selected: all
+  torrents show; showing it again filters by that state; after a restart
+  with the sidebar hidden, all torrents show, and showing the sidebar has
+  the state selected and filtering.
