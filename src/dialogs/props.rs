@@ -77,7 +77,7 @@ mod imp {
         #[template_child]
         pub state_lb: TemplateChild<gtk::Label>,
         #[template_child]
-        pub date_started_lb: TemplateChild<gtk::Label>,
+        pub added_lb: TemplateChild<gtk::Label>,
         #[template_child]
         pub eta_lb: TemplateChild<gtk::Label>,
         #[template_child]
@@ -291,15 +291,17 @@ impl TorrentPropsDialog {
         imp.comment_buffer.set_text(&t.comment);
         imp.destination_lb.set_text(&t.download_dir);
         imp.state_lb.set_text(&v.status);
-        imp.date_started_lb.set_text(&format::date_time(t.added_date));
+        imp.added_lb.set_text(&format::date_time(t.added_date));
 
+        // as in the general panel
         let eta = t.eta;
-        imp.eta_lb.set_text(&if eta > 0 { format::time_long(eta) } else { String::new() });
+        imp.eta_lb.set_text(&if eta > 0 { format::time_long(eta) } else { tr("N/A") });
 
         imp.hash_lb.set_text(&t.hash_string);
         imp.error_lb.set_text(&if t.error != 0 { t.error_string.clone() } else { tr("No errors") });
 
-        if v.flags & p::TORRENT_FLAG_ACTIVE != 0 {
+        // Transferring now, or when it last did (the activity date)
+        if t.rate_download > 0 || t.rate_upload > 0 {
             imp.last_activity_lb.set_text(&tr("Active now"));
         } else {
             imp.last_activity_lb.set_text(&format::date_time(t.activity_date));
