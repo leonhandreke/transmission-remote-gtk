@@ -74,6 +74,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           Entry profile_name_entry {
+            text: bind settings.profile-name bidirectional;
             changed => $name_changed_cb();
             hexpand: true;
 
@@ -137,6 +138,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           Entry hostname_entry {
+            text: bind settings.hostname bidirectional;
             hexpand: true;
 
             layout {
@@ -159,6 +161,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           SpinButton port_spin {
+            value: bind settings.port bidirectional;
             digits: 0;
 
             adjustment: Adjustment {
@@ -190,6 +193,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           Entry rpc_url_path_entry {
+            text: bind settings.rpc-url-path bidirectional;
             hexpand: true;
 
             layout {
@@ -212,6 +216,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           Entry username_entry {
+            text: bind settings.username bidirectional;
             hexpand: true;
 
             layout {
@@ -234,6 +239,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           PasswordEntry password_entry {
+            text: bind settings.password bidirectional;
             show-peek-icon: true;
             hexpand: true;
 
@@ -244,6 +250,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           CheckButton auto_connect_check {
+            active: bind settings.auto-connect bidirectional;
             label: _("Automatically connect");
             use-underline: true;
             hexpand: true;
@@ -257,6 +264,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           CheckButton ssl_check {
+            active: bind settings.ssl bidirectional;
             label: _("SSL");
             use-underline: true;
             hexpand: true;
@@ -270,6 +278,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           CheckButton ssl_validate_check {
+            active: bind settings.ssl-validate bidirectional;
             label: _("Validate SSL Certificate");
             use-underline: true;
             sensitive: bind ssl_check.active;
@@ -297,6 +306,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           SpinButton timeout_spin {
+            value: bind settings.timeout bidirectional;
             digits: 0;
 
             adjustment: Adjustment {
@@ -328,6 +338,7 @@ template $TrgPreferencesDialog: $TrgDialog {
           }
 
           SpinButton retries_spin {
+            value: bind settings.retries bidirectional;
             digits: 0;
 
             adjustment: Adjustment {
@@ -407,6 +418,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton update_active_only_check {
+        active: bind settings.update-active-only bidirectional;
         label: _("Update active torrents only");
         use-underline: true;
         hexpand: true;
@@ -420,11 +432,10 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton full_update_check {
+        active: bind settings.activeonly-fullsync-enabled bidirectional;
         label: _("Full update every (?) updates");
         use-underline: true;
         sensitive: bind update_active_only_check.active;
-        notify::sensitive => $full_update_dependency_cb();
-        notify::active => $full_update_dependency_cb();
         margin-start: 18;
 
         layout {
@@ -434,6 +445,9 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       SpinButton full_update_spin {
+        value: bind settings.activeonly-fullsync-every bidirectional;
+        // full updates only matter when updating active torrents only
+        sensitive: bind $both(settings.update-active-only, settings.activeonly-fullsync-enabled) as <bool>;
         digits: 0;
 
         adjustment: Adjustment {
@@ -465,6 +479,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       SpinButton update_interval_spin {
+        value: bind settings.update-interval bidirectional;
         digits: 0;
 
         adjustment: Adjustment {
@@ -496,6 +511,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       SpinButton session_update_interval_spin {
+        value: bind settings.session-update-interval bidirectional;
         digits: 0;
 
         adjustment: Adjustment {
@@ -530,6 +546,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton start_paused_check {
+        active: bind settings.start-paused bidirectional;
         label: _("Start paused");
         use-underline: true;
         hexpand: true;
@@ -543,6 +560,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton add_options_dialog_check {
+        active: bind settings.add-options-dialog bidirectional;
         label: _("Options dialog on add");
         use-underline: true;
         hexpand: true;
@@ -556,6 +574,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton delete_local_torrent_check {
+        active: bind settings.delete-local-torrent bidirectional;
         label: _("Delete local .torrent file after adding");
         use-underline: true;
         hexpand: true;
@@ -599,6 +618,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton show_state_selector_check {
+        active: bind settings.show-state-selector bidirectional;
         label: _("Sidebar");
         use-underline: true;
         hexpand: true;
@@ -612,6 +632,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton filter_dirs_check {
+        active: bind settings.filter-dirs bidirectional;
         label: _("Directory filters");
         use-underline: true;
         sensitive: bind show_state_selector_check.active;
@@ -626,6 +647,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton filter_trackers_check {
+        active: bind settings.filter-trackers bidirectional;
         label: _("Tracker filters");
         use-underline: true;
         sensitive: bind show_state_selector_check.active;
@@ -640,6 +662,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton directories_first_check {
+        active: bind settings.directories-first bidirectional;
         label: _("Directories first");
         use-underline: true;
         sensitive: bind show_state_selector_check.active;
@@ -654,6 +677,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton show_notebook_check {
+        active: bind settings.show-notebook bidirectional;
         label: _("Torrent Details");
         use-underline: true;
         hexpand: true;
@@ -683,6 +707,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton add_notify_check {
+        active: bind settings.add-notify bidirectional;
         label: _("Torrent added notifications");
         use-underline: true;
         hexpand: true;
@@ -696,6 +721,7 @@ template $TrgPreferencesDialog: $TrgDialog {
       }
 
       CheckButton complete_notify_check {
+        active: bind settings.complete-notify bidirectional;
         label: _("Torrent complete notifications");
         use-underline: true;
         hexpand: true;
@@ -776,3 +802,6 @@ template $TrgPreferencesDialog: $TrgDialog {
     ]
   }
 }
+
+// The settings (but the lists), which the widgets show
+$TrgLocalSettings settings {}

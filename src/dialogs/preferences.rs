@@ -1,16 +1,20 @@
 //! The local preferences: the connection profiles, updates, adding torrents and
 //! the view.
 //!
-//! The widgets of the template which show a preference are listed with the
-//! key and scope of the preference, and loaded and saved with them.
+//! The widgets of the template are bound to a settings object, which has a
+//! property for each preference shown (but the lists), named like its key.
+//! It's loaded from the preferences when the dialog opens and when another
+//! profile is selected, and saved to them on OK and before selecting another
+//! profile.
 //!
 //! The view settings (the sidebar, its options, the details) are previewed:
-//! their check boxes set the preference straight away, which the window
+//! the settings object's set the preference straight away, which the window
 //! follows, and they follow it (the menu's view items set it too). Closing
 //! without OK restores the values they had when the dialog opened.
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -19,6 +23,7 @@ use serde_json::{Value, json};
 
 use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialogs::settings::Closures;
 use crate::i18n::tr;
 use crate::json::{get_str, objects};
 use crate::macos;
@@ -27,6 +32,134 @@ use crate::tree_view::{
     COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView, row_object,
 };
 use crate::util;
+
+/* The settings the dialog shows (but the lists): a property for each
+ * preference, named like its key, which the template binds the widgets to */
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Bool,
+    Int,
+    Text,
+}
+
+/// The preferences, their types and scopes: the profile's (the one being
+/// edited) and the application's
+const SETTINGS: [(&str, Kind, Scope); 26] = [
+    (prefs::KEY_PROFILE_NAME, Kind::Text, Scope::Profile),
+    (prefs::KEY_HOSTNAME, Kind::Text, Scope::Profile),
+    (prefs::KEY_PORT, Kind::Int, Scope::Profile),
+    (prefs::KEY_RPC_URL_PATH, Kind::Text, Scope::Profile),
+    (prefs::KEY_USERNAME, Kind::Text, Scope::Profile),
+    (prefs::KEY_PASSWORD, Kind::Text, Scope::Profile),
+    (prefs::KEY_AUTO_CONNECT, Kind::Bool, Scope::Profile),
+    (prefs::KEY_SSL, Kind::Bool, Scope::Profile),
+    (prefs::KEY_SSL_VALIDATE, Kind::Bool, Scope::Profile),
+    (prefs::KEY_TIMEOUT, Kind::Int, Scope::Profile),
+    (prefs::KEY_RETRIES, Kind::Int, Scope::Profile),
+    (prefs::KEY_UPDATE_ACTIVE_ONLY, Kind::Bool, Scope::Profile),
+    (prefs::ACTIVEONLY_FULLSYNC_ENABLED, Kind::Bool, Scope::Profile),
+    (prefs::ACTIVEONLY_FULLSYNC_EVERY, Kind::Int, Scope::Profile),
+    (prefs::KEY_UPDATE_INTERVAL, Kind::Int, Scope::Profile),
+    (prefs::KEY_SESSION_UPDATE_INTERVAL, Kind::Int, Scope::Profile),
+    (prefs::KEY_START_PAUSED, Kind::Bool, Scope::Global),
+    (prefs::KEY_ADD_OPTIONS_DIALOG, Kind::Bool, Scope::Global),
+    (prefs::KEY_DELETE_LOCAL_TORRENT, Kind::Bool, Scope::Global),
+    (prefs::KEY_SHOW_STATE_SELECTOR, Kind::Bool, Scope::Global),
+    (prefs::KEY_FILTER_DIRS, Kind::Bool, Scope::Global),
+    (prefs::KEY_FILTER_TRACKERS, Kind::Bool, Scope::Global),
+    (prefs::KEY_DIRECTORIES_FIRST, Kind::Bool, Scope::Global),
+    (prefs::KEY_SHOW_NOTEBOOK, Kind::Bool, Scope::Global),
+    (prefs::KEY_ADD_NOTIFY, Kind::Bool, Scope::Global),
+    (prefs::KEY_COMPLETE_NOTIFY, Kind::Bool, Scope::Global),
+];
+
+/// The view settings (global), which are previewed (see the top)
+const VIEW_SETTINGS: [&str; 5] = [
+    prefs::KEY_SHOW_STATE_SELECTOR,
+    prefs::KEY_FILTER_DIRS,
+    prefs::KEY_FILTER_TRACKERS,
+    prefs::KEY_DIRECTORIES_FIRST,
+    prefs::KEY_SHOW_NOTEBOOK,
+];
+
+mod settings_imp {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct LocalSettings {
+        /// The values of SETTINGS, in their order
+        pub values: RefCell<Vec<glib::Value>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for LocalSettings {
+        const NAME: &'static str = "TrgLocalSettings";
+        type Type = super::LocalSettings;
+    }
+
+    impl ObjectImpl for LocalSettings {
+        fn properties() -> &'static [glib::ParamSpec] {
+            static PROPERTIES: OnceLock<Vec<glib::ParamSpec>> = OnceLock::new();
+            PROPERTIES.get_or_init(|| {
+                SETTINGS
+                    .iter()
+                    .map(|&(key, kind, _)| match kind {
+                        Kind::Bool => glib::ParamSpecBoolean::builder(key).build(),
+                        Kind::Int => glib::ParamSpecInt64::builder(key).build(),
+                        Kind::Text => {
+                            glib::ParamSpecString::builder(key).default_value(Some("")).build()
+                        }
+                    })
+                    .collect()
+            })
+        }
+
+        fn constructed(&self) {
+            self.parent_constructed();
+            let defaults = Self::properties().iter().map(|p| p.default_value().clone());
+            self.values.replace(defaults.collect());
+        }
+
+        // the IDs are the positions in SETTINGS, from 1
+        fn property(&self, id: usize, _pspec: &glib::ParamSpec) -> glib::Value {
+            self.values.borrow()[id - 1].clone()
+        }
+
+        fn set_property(&self, id: usize, value: &glib::Value, _pspec: &glib::ParamSpec) {
+            self.values.borrow_mut()[id - 1] = value.clone();
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct LocalSettings(ObjectSubclass<settings_imp::LocalSettings>);
+}
+
+impl LocalSettings {
+    /// Shows the preferences
+    fn load(&self, prefs: &Prefs) {
+        for (key, kind, scope) in SETTINGS {
+            match kind {
+                Kind::Bool => self.set_property(key, prefs.get_bool(key, scope)),
+                Kind::Int => self.set_property(key, prefs.get_int(key, scope)),
+                Kind::Text => {
+                    self.set_property(key, prefs.get_string(key, scope).unwrap_or_default())
+                }
+            }
+        }
+    }
+
+    fn save(&self, prefs: &Prefs) {
+        for (key, kind, scope) in SETTINGS {
+            match kind {
+                Kind::Bool => prefs.set_bool(key, self.property(key), scope),
+                Kind::Int => prefs.set_int(key, self.property(key), scope),
+                Kind::Text => prefs.set_string(key, &self.property::<String>(key), scope),
+            }
+        }
+    }
+}
 
 /* The items of the profile drop down: a GObject with a "name" property,
  * which the template binds */
@@ -313,44 +446,6 @@ impl PersistentTreeView {
     }
 }
 
-/// A widget showing a preference
-pub enum PrefWidget {
-    Simple { widget: gtk::Widget, key: &'static str, scope: Scope },
-    List(Rc<PersistentTreeView>),
-}
-
-impl PrefWidget {
-    fn refresh(&self, prefs: &Prefs) {
-        match self {
-            PrefWidget::Simple { widget, key, scope } => {
-                if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
-                    check.set_active(prefs.get_bool(key, *scope));
-                } else if let Some(spin) = widget.downcast_ref::<gtk::SpinButton>() {
-                    spin.set_value(prefs.get_int(key, *scope) as f64);
-                } else if let Some(e) = widget.dynamic_cast_ref::<gtk::Editable>() {
-                    e.set_text(&prefs.get_string(key, *scope).unwrap_or_default());
-                }
-            }
-            PrefWidget::List(ptv) => ptv.refresh(prefs),
-        }
-    }
-
-    fn save(&self, prefs: &Prefs) {
-        match self {
-            PrefWidget::Simple { widget, key, scope } => {
-                if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
-                    prefs.set_bool(key, check.is_active(), *scope);
-                } else if let Some(spin) = widget.downcast_ref::<gtk::SpinButton>() {
-                    prefs.set_int(key, spin.value_as_int() as i64, *scope);
-                } else if let Some(e) = widget.dynamic_cast_ref::<gtk::Editable>() {
-                    prefs.set_string(key, &e.text(), *scope);
-                }
-            }
-            PrefWidget::List(ptv) => ptv.save(prefs),
-        }
-    }
-}
-
 mod imp {
     use super::*;
 
@@ -368,68 +463,19 @@ mod imp {
         #[template_child]
         pub profile_store: TemplateChild<gio::ListStore>,
         #[template_child]
-        pub full_update_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub full_update_spin: TemplateChild<gtk::SpinButton>,
-        #[template_child]
         pub headers_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub destinations_box: TemplateChild<gtk::Box>,
         #[template_child]
-        pub profile_name_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub hostname_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub port_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub rpc_url_path_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub username_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub password_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub auto_connect_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub ssl_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub ssl_validate_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub timeout_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub retries_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub update_active_only_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub update_interval_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub session_update_interval_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub start_paused_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub add_options_dialog_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub delete_local_torrent_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub show_state_selector_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub filter_dirs_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub filter_trackers_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub directories_first_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub show_notebook_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub add_notify_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub complete_notify_check: TemplateChild<gtk::Widget>,
+        pub settings: TemplateChild<LocalSettings>,
 
         pub client: RefCell<Option<Client>>,
-        pub widgets: RefCell<Vec<PrefWidget>>,
+        /// The lists (custom headers, destinations)
+        pub lists: RefCell<Vec<Rc<PersistentTreeView>>>,
         /// The view settings when the dialog opened, restored unless it's
         /// closed with OK
         pub view_before: RefCell<Vec<(&'static str, bool)>>,
-        /// Its check boxes following the view settings
+        /// Its settings following the view preferences
         pub view_handlers: RefCell<Vec<glib::SignalHandlerId>>,
         pub populating: std::cell::Cell<bool>,
     }
@@ -442,8 +488,10 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             ProfileItem::ensure_type();
+            LocalSettings::ensure_type();
             klass.bind_template();
             klass.bind_template_instance_callbacks();
+            Closures::bind_template_callbacks(klass);
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -522,15 +570,6 @@ impl PreferencesDialog {
         }
     }
 
-    /// The full update interval only matters when updating active torrents
-    /// only and doing full updates
-    #[template_callback]
-    fn full_update_dependency_cb(check: &gtk::CheckButton, _pspec: &glib::ParamSpec) {
-        if let Some(d) = dlg(check) {
-            d.full_update_dependency();
-        }
-    }
-
     pub fn new(win: &impl IsA<gtk::Window>, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
@@ -542,67 +581,7 @@ impl PreferencesDialog {
         }
         d.profile_combo_populate();
 
-        let simple: Vec<(gtk::Widget, &'static str, Scope)> = vec![
-            (imp.profile_name_entry.get().upcast(), prefs::KEY_PROFILE_NAME, Scope::Profile),
-            (imp.hostname_entry.get().upcast(), prefs::KEY_HOSTNAME, Scope::Profile),
-            (imp.port_spin.get().upcast(), prefs::KEY_PORT, Scope::Profile),
-            (imp.rpc_url_path_entry.get().upcast(), prefs::KEY_RPC_URL_PATH, Scope::Profile),
-            (imp.username_entry.get().upcast(), prefs::KEY_USERNAME, Scope::Profile),
-            (imp.password_entry.get().upcast(), prefs::KEY_PASSWORD, Scope::Profile),
-            (imp.auto_connect_check.get().upcast(), prefs::KEY_AUTO_CONNECT, Scope::Profile),
-            (imp.ssl_check.get().upcast(), prefs::KEY_SSL, Scope::Profile),
-            (imp.ssl_validate_check.get().upcast(), prefs::KEY_SSL_VALIDATE, Scope::Profile),
-            (imp.timeout_spin.get().upcast(), prefs::KEY_TIMEOUT, Scope::Profile),
-            (imp.retries_spin.get().upcast(), prefs::KEY_RETRIES, Scope::Profile),
-            (
-                imp.update_active_only_check.get().upcast(),
-                prefs::KEY_UPDATE_ACTIVE_ONLY,
-                Scope::Profile,
-            ),
-            (
-                imp.full_update_check.get().upcast(),
-                prefs::ACTIVEONLY_FULLSYNC_ENABLED,
-                Scope::Profile,
-            ),
-            (imp.full_update_spin.get().upcast(), prefs::ACTIVEONLY_FULLSYNC_EVERY, Scope::Profile),
-            (imp.update_interval_spin.get().upcast(), prefs::KEY_UPDATE_INTERVAL, Scope::Profile),
-            (
-                imp.session_update_interval_spin.get().upcast(),
-                prefs::KEY_SESSION_UPDATE_INTERVAL,
-                Scope::Profile,
-            ),
-            (imp.start_paused_check.get().upcast(), prefs::KEY_START_PAUSED, Scope::Global),
-            (
-                imp.add_options_dialog_check.get().upcast(),
-                prefs::KEY_ADD_OPTIONS_DIALOG,
-                Scope::Global,
-            ),
-            (
-                imp.delete_local_torrent_check.get().upcast(),
-                prefs::KEY_DELETE_LOCAL_TORRENT,
-                Scope::Global,
-            ),
-            (
-                imp.show_state_selector_check.get().upcast(),
-                prefs::KEY_SHOW_STATE_SELECTOR,
-                Scope::Global,
-            ),
-            (imp.filter_dirs_check.get().upcast(), prefs::KEY_FILTER_DIRS, Scope::Global),
-            (imp.filter_trackers_check.get().upcast(), prefs::KEY_FILTER_TRACKERS, Scope::Global),
-            (
-                imp.directories_first_check.get().upcast(),
-                prefs::KEY_DIRECTORIES_FIRST,
-                Scope::Global,
-            ),
-            (imp.show_notebook_check.get().upcast(), prefs::KEY_SHOW_NOTEBOOK, Scope::Global),
-            (imp.add_notify_check.get().upcast(), prefs::KEY_ADD_NOTIFY, Scope::Global),
-            (imp.complete_notify_check.get().upcast(), prefs::KEY_COMPLETE_NOTIFY, Scope::Global),
-        ];
-        for (widget, key, scope) in simple {
-            let wd = PrefWidget::Simple { widget, key, scope };
-            wd.refresh(&d.prefs());
-            imp.widgets.borrow_mut().push(wd);
-        }
+        imp.settings.load(&d.prefs());
 
         d.add_persistent_list(
             &imp.headers_box,
@@ -619,7 +598,6 @@ impl PreferencesDialog {
             (prefs::KEY_DESTINATIONS_SUBKEY_DIR, &tr("Directory")),
         );
 
-        d.full_update_dependency();
         d.preview_view_prefs();
 
         d.on_response(|d, response| {
@@ -640,7 +618,7 @@ impl PreferencesDialog {
             if let Some(client) = d.imp().client.borrow().as_ref() {
                 client.reload_dir_aliases();
             }
-            d.imp().widgets.borrow_mut().clear();
+            d.imp().lists.borrow_mut().clear();
             d.destroy();
         });
 
@@ -657,8 +635,9 @@ impl PreferencesDialog {
 
     fn refresh_all(&self) {
         let prefs = self.prefs();
-        for wd in self.imp().widgets.borrow().iter() {
-            wd.refresh(&prefs);
+        self.imp().settings.load(&prefs);
+        for list in self.imp().lists.borrow().iter() {
+            list.refresh(&prefs);
         }
     }
 
@@ -667,46 +646,34 @@ impl PreferencesDialog {
         if prefs.profile().is_none() {
             return;
         }
-        for wd in self.imp().widgets.borrow().iter() {
-            wd.save(&prefs);
+        self.imp().settings.save(&prefs);
+        for list in self.imp().lists.borrow().iter() {
+            list.save(&prefs);
         }
     }
 
-    /// The view settings' check boxes set and follow their preferences (see
-    /// the top)
+    /// The view settings set and follow their preferences (see the top)
     fn preview_view_prefs(&self) {
         let imp = self.imp();
         let prefs = self.prefs();
-        let checks = [
-            (&imp.show_state_selector_check, prefs::KEY_SHOW_STATE_SELECTOR),
-            (&imp.filter_dirs_check, prefs::KEY_FILTER_DIRS),
-            (&imp.filter_trackers_check, prefs::KEY_FILTER_TRACKERS),
-            (&imp.directories_first_check, prefs::KEY_DIRECTORIES_FIRST),
-            (&imp.show_notebook_check, prefs::KEY_SHOW_NOTEBOOK),
-        ];
-        for (check, key) in checks {
+        for key in VIEW_SETTINGS {
             imp.view_before.borrow_mut().push((key, prefs.get_bool(key, Scope::Global)));
             let p = prefs.clone();
-            check.connect_toggled(move |check| {
+            imp.settings.connect_notify_local(Some(key), move |settings, _| {
                 // not when it follows the preference
-                if p.get_bool(key, Scope::Global) != check.is_active() {
-                    p.set_bool(key, check.is_active(), Scope::Global);
+                let value = settings.property::<bool>(key);
+                if p.get_bool(key, Scope::Global) != value {
+                    p.set_bool(key, value, Scope::Global);
                 }
             });
-            let weak = check.downgrade();
+            let weak = imp.settings.downgrade();
             let id = prefs.connect_changed(move |prefs, changed| {
-                if let (Some(check), true) = (weak.upgrade(), changed == Some(key)) {
-                    check.set_active(prefs.get_bool(key, Scope::Global));
+                if let (Some(settings), true) = (weak.upgrade(), changed == Some(key)) {
+                    settings.set_property(key, prefs.get_bool(key, Scope::Global));
                 }
             });
             imp.view_handlers.borrow_mut().push(id);
         }
-    }
-
-    fn full_update_dependency(&self) {
-        let imp = self.imp();
-        let check = &imp.full_update_check;
-        imp.full_update_spin.set_sensitive(check.is_sensitive() && check.is_active());
     }
 
     /// This is the application's Settings window on macOS, which has a fixed
@@ -761,9 +728,8 @@ impl PreferencesDialog {
         let first = ptv.add_column("first", col1.0, col1.1);
         ptv.set_add_select(first);
         ptv.add_column("second", col2.0, col2.1);
-        let wd = PrefWidget::List(ptv.clone());
-        wd.refresh(&self.prefs());
-        self.imp().widgets.borrow_mut().push(wd);
+        ptv.refresh(&self.prefs());
+        self.imp().lists.borrow_mut().push(ptv.clone());
         ptv.widget.set_vexpand(true);
         bx.append(&ptv.widget);
     }
