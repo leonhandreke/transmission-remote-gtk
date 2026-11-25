@@ -1,11 +1,14 @@
 //! TrgDialog: a window with a content area and a row of buttons, which
-//! respond with a response ID like GtkDialog (deprecated in GTK 4.10) did.
+//! respond like GtkDialog (deprecated in GTK 4.10) did, but with only the
+//! two answers the dialogs tell apart.
 //!
 //! In a template, children go into the content area, and children of type
 //! "action" ([action] in Blueprint) into the row of buttons, which respond
-//! through the dialog.* actions: "dialog.accept" responds with
-//! Response::Accept, and so on. They're separate actions, so a response can be disabled (and its
-//! button made insensitive) with action_set_enabled().
+//! through the actions "dialog.ok" (Response::Ok: OK, Add, Move...) and
+//! "dialog.cancel" (Response::Cancel: Cancel, Close). Closing the window
+//! (also with Escape) responds with Response::Cancel. They're actions so a
+//! response can be disabled (and its button made insensitive) with
+//! action_set_enabled().
 
 use std::cell::Cell;
 
@@ -13,24 +16,17 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib};
 
-/// How a dialog was answered, like GtkDialog's response IDs
+/// How a dialog was answered
 #[derive(Clone, Copy, Debug, PartialEq, Eq, glib::Enum)]
 #[enum_type(name = "TrgDialogResponse")]
 pub enum Response {
-    Accept,
+    /// Confirmed: the dialog's changes or request are to be applied
     Ok,
+    /// Cancelled or closed
     Cancel,
-    Close,
-    /// The window was closed
-    DeleteEvent,
 }
 
-const RESPONSE_ACTIONS: &[(&str, Response)] = &[
-    ("accept", Response::Accept),
-    ("cancel", Response::Cancel),
-    ("ok", Response::Ok),
-    ("close", Response::Close),
-];
+const RESPONSE_ACTIONS: &[(&str, Response)] = &[("ok", Response::Ok), ("cancel", Response::Cancel)];
 
 const GUI_PAD: i32 = 6;
 const GUI_PAD_BIG: i32 = 12;
@@ -99,11 +95,11 @@ mod imp {
     impl WidgetImpl for Dialog {}
 
     impl WindowImpl for Dialog {
-        /// Closing the window is a DELETE_EVENT response, like GtkDialog. The
-        /// handlers usually destroy the window themselves.
+        /// Closing the window cancels it. The handlers usually destroy the
+        /// window themselves.
         fn close_request(&self) -> glib::Propagation {
             let obj = self.obj().clone();
-            super::TrgDialogExt::response(&obj, Response::DeleteEvent);
+            super::TrgDialogExt::response(&obj, Response::Cancel);
             if self.destroyed.get() {
                 return glib::Propagation::Stop;
             }

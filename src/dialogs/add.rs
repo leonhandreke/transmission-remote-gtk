@@ -325,7 +325,7 @@ impl TorrentAddDialog {
 
     fn response_cb(&self, response: Response) {
         let imp = self.imp();
-        if response == Response::Accept
+        if response == Response::Ok
             && let Some(win) = imp.win.upgrade()
         {
             let dest = imp.dest_combo.borrow().clone().unwrap();

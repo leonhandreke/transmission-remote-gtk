@@ -61,7 +61,7 @@ impl TorrentAddUrlDialog {
     #[template_callback]
     fn url_entry_changed(entry: &gtk::Entry) {
         if let Some(d) = util::ancestor::<TorrentAddUrlDialog>(entry) {
-            d.action_set_enabled("dialog.accept", entry.text_length() > 0);
+            d.action_set_enabled("dialog.ok", entry.text_length() > 0);
         }
     }
 
@@ -71,7 +71,7 @@ impl TorrentAddUrlDialog {
         *imp.client.borrow_mut() = Some(client.clone());
         imp.win.set(Some(win));
 
-        d.action_set_enabled("dialog.accept", false);
+        d.action_set_enabled("dialog.ok", false);
 
         // a URL or magnet link in the clipboard
         let entry = imp.url_entry.get();
@@ -88,7 +88,7 @@ impl TorrentAddUrlDialog {
         d.set_transient_for(Some(win));
         d.on_response(|d, response| {
             let imp = d.imp();
-            if response == Response::Accept {
+            if response == Response::Ok {
                 let client = imp.client.borrow().clone().unwrap();
                 let text = imp.url_entry.text().to_string();
                 let win = imp.win.upgrade();

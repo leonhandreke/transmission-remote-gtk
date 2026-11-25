@@ -63,7 +63,7 @@ impl FileRenameDialog {
     #[template_callback]
     fn name_changed(entry: &gtk::Entry) {
         if let Some(d) = util::ancestor::<FileRenameDialog>(entry) {
-            d.action_set_enabled("dialog.accept", entry.text_length() > 0);
+            d.action_set_enabled("dialog.ok", entry.text_length() > 0);
         }
     }
 
@@ -90,7 +90,7 @@ impl FileRenameDialog {
         } else {
             // this really shouldn't happen since the files view checks the
             // number of selected files before allowing rename
-            d.action_set_enabled("dialog.accept", false);
+            d.action_set_enabled("dialog.ok", false);
             imp.name_entry.set_sensitive(false);
             sprintf(&tr("INTERNAL ERROR: Rename %d files not supported"), &[&count])
         };
@@ -100,7 +100,7 @@ impl FileRenameDialog {
 
         d.on_response(|d, response| {
             let imp = d.imp();
-            if response == Response::Accept {
+            if response == Response::Ok {
                 let name = imp.name_entry.text();
                 let path = imp.orig_path.borrow().clone().unwrap_or_default();
                 let req = p::torrent_rename_path(&[imp.torrent_id.get()], &path, &name);

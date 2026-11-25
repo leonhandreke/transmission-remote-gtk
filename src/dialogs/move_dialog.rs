@@ -73,12 +73,12 @@ impl TorrentMoveDialog {
         let weak = d.downgrade();
         combo.connect_changed(move |combo| {
             if let Some(d) = weak.upgrade() {
-                d.action_set_enabled("dialog.accept", combo.has_text());
+                d.action_set_enabled("dialog.ok", combo.has_text());
             }
         });
         imp.grid.attach(&combo, 1, 0, 1, 1);
         imp.location_label.set_mnemonic_widget(Some(&combo));
-        d.action_set_enabled("dialog.accept", combo.has_text());
+        d.action_set_enabled("dialog.ok", combo.has_text());
         *imp.location_combo.borrow_mut() = Some(combo);
 
         let count = ids.len();
@@ -99,7 +99,7 @@ impl TorrentMoveDialog {
 
         d.on_response(|d, response| {
             let imp = d.imp();
-            if response == Response::Accept {
+            if response == Response::Ok {
                 let combo = imp.location_combo.borrow().clone().unwrap();
                 let req = p::torrent_set_location(
                     &imp.ids.borrow(),
