@@ -109,6 +109,11 @@ def make_app(args):
     shutil.copy2(args.svg, icons)
     (contents / "PkgInfo").write_text("APPL????")
 
+    # The executable only has the linker's signature, which covers the
+    # Info.plist embedded in it (see build.rs), so the bundle as a whole
+    # wouldn't verify: sign it (ad hoc), sealing its resources.
+    codesign(app)
+
     # Let ninja know the bundle is up to date.
     os.utime(app)
 
