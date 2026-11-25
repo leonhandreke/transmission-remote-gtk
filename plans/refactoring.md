@@ -299,6 +299,26 @@ template `src/ui/torrent-list.blp`), a template child of the main window
   the client's model (and the sidebar following it) can still change:
   `refilter` and `update_no_results` return when the entry is gone.
 
+### 8. A `Details` widget
+
+The details notebook below the torrent list (the General page,
+`GeneralPanel`, and the trackers/files/peers pages, `DetailLists`) is part
+of the main window's template, and the window fills and clears it: it
+shows the selected torrent (`update_selected_torrent_notebook`), clears it
+(`torrent_scrub`), sets its sensitivity on connecting and disconnecting,
+appends the lists' pages in `construct()` and persists their layouts in
+`save_window_state()`. Make it one composite widget, like `TorrentList` in
+step 7, with its own Blueprint template, that fills and clears itself: the
+window only gives it the client, the selected torrent with the update mode,
+and the connection state, and asks it to persist. The menu bar's torrent
+actions, enabled while a torrent is selected, stay the window's. The
+properties dialog's lists (their own config suffix) keep working.
+
+Keep the behaviour: which page shows, the notebook following the "torrent
+details" view preference, the vpaned's position saved and restored, the
+lists' columns and sorting (config ids unchanged), the files tree built in
+a thread for big torrents, keyboard focus and the lists' context menus.
+
 ### Smaller items — done or decided
 
 - **CI** — the workflow is `.github/workflows/build.yml` (was `c-cpp.yml`;
