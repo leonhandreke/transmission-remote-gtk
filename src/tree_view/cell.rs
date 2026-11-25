@@ -230,6 +230,11 @@ impl TreeView {
         let mut expander = None;
         if desc.ctype == ColType::FileIconText && self.tree_model().is_some() {
             let e = gtk::TreeExpander::new();
+            // the keyboard focus stays on the row, as in the other columns:
+            // in the expander the row's Enter (opening a directory) didn't
+            // reach the row, as its cell takes the key; the view has the
+            // expander's keys itself (expand.rs)
+            e.set_focusable(false);
             e.set_child(Some(&child));
             child = e.clone().upcast();
             expander = Some(e);
