@@ -24,6 +24,17 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="2.1.1" date="2026-11-26">
+      <description>
+        <p>This release fixes problems found after 2.1.0.</p>
+        <ul>
+          <li>The macOS application bundle is signed as a whole, so its signature verifies</li>
+          <li>Space selects the focused row again in the details' lists</li>
+          <li>The torrent list gets the keyboard focus on every connection</li>
+          <li>All torrents are shown while the sidebar is hidden</li>
+        </ul>
+      </description>
+    </release>
     <release version="2.1.0" date="2026-11-25">
       <description>
         <p>This release is a rewrite in Rust for GTK 4, which talks to Transmission 4.1 and later with its JSON-RPC 2.0 API.</p>
