@@ -290,7 +290,8 @@ impl TorrentModel {
             t.tracker_stats.first().and_then(|tracker| util::tracker_host(&tracker.announce));
 
         let pf = &t.peers_from;
-        let peer_sources = if new_flags & p::TORRENT_FLAG_ACTIVE != 0 {
+        // of the connected peers, while it's running
+        let peer_sources = if matches!(t.status, p::TR_STATUS_DOWNLOAD | p::TR_STATUS_SEED) {
             let lpd = pf.from_lpd.map_or_else(|| "N/A".to_string(), |lpd| lpd.to_string());
             format!(
                 "{} / {} / {} / {} / {} / {lpd} / {}",

@@ -255,16 +255,20 @@ impl Torrent {
                 if !has_metadata {
                     flags |= TORRENT_FLAG_DOWNLOADING_METADATA;
                 }
-                flags |= TORRENT_FLAG_ACTIVE;
             }
             TR_STATUS_SEED_WAIT => flags |= TORRENT_FLAG_SEEDING_WAIT,
-            TR_STATUS_SEED => {
-                flags |= TORRENT_FLAG_SEEDING;
-                if self.peers_getting_from_us != 0 {
-                    flags |= TORRENT_FLAG_ACTIVE;
-                }
-            }
+            TR_STATUS_SEED => flags |= TORRENT_FLAG_SEEDING,
             _ => {}
+        }
+
+        // Transferring or checking, as Transmission's own clients count
+        // active torrents
+        if self.peers_sending_to_us > 0
+            || self.peers_getting_from_us > 0
+            || self.webseeds_sending_to_us > 0
+            || self.status == TR_STATUS_CHECK
+        {
+            flags |= TORRENT_FLAG_ACTIVE;
         }
 
         if self.error > 0 {
