@@ -11,11 +11,10 @@ use gtk::{CompositeTemplate, gdk, gio, glib};
 use crate::add_torrents::{self, AddOptions};
 use crate::client::Client;
 use crate::client::ConnectionState;
-use crate::details::DetailLists;
+use crate::details::Details;
 use crate::dialogs::{
     self, preferences::PreferencesDialog, remote_prefs::RemotePrefsDialog, stats::StatsDialog,
 };
-use crate::general_panel::GeneralPanel;
 use crate::i18n::{sprintf, tr};
 use crate::menu_bar::MenuBar;
 use crate::prefs::{self, Prefs, Scope};
@@ -33,7 +32,6 @@ pub struct Parts {
     toolbar: Toolbar,
     menu_bar: MenuBar,
     state_selector: StateSelector,
-    details: DetailLists,
 }
 
 mod imp {
@@ -51,11 +49,9 @@ mod imp {
         #[template_child]
         pub vpaned: TemplateChild<gtk::Paned>,
         #[template_child]
-        pub notebook: TemplateChild<gtk::Notebook>,
-        #[template_child]
         pub torrent_list: TemplateChild<TorrentList>,
         #[template_child]
-        pub gen_details: TemplateChild<GeneralPanel>,
+        pub details: TemplateChild<Details>,
         #[template_child]
         pub status_bar: TemplateChild<StatusBar>,
 
@@ -75,7 +71,7 @@ mod imp {
         type ParentType = gtk::ApplicationWindow;
 
         fn class_init(klass: &mut Self::Class) {
-            GeneralPanel::ensure_type();
+            Details::ensure_type();
             StatusBar::ensure_type();
             TorrentList::ensure_type();
             klass.bind_template();
@@ -136,6 +132,10 @@ impl MainWindow {
 
     fn torrent_list(&self) -> TorrentList {
         self.imp().torrent_list.get()
+    }
+
+    fn details(&self) -> Details {
+        self.imp().details.get()
     }
 
     /// The window's own keys, before the focus widget and the app's
@@ -211,20 +211,19 @@ impl MainWindow {
         self.menu_bar().model()
     }
 
-    fn update_selected_torrent_notebook(&self, mode: UpdateMode, id: i64) {
-        let client = self.client();
-        let serial = client.serial();
-        let data = if id >= 0 { client.find_torrent(id) } else { None };
+    /// The first selected torrent, as of the torrent list's last
+    /// selection-changed
+    fn selected_torrent(&self) -> Option<TorrentObject> {
+        let id = self.selected_torrent_id();
+        if id >= 0 { self.client().find_torrent(id) } else { None }
+    }
 
-        match data {
-            Some(obj) => {
-                let t = obj.torrent();
-                self.menu_bar().torrent_actions_sensitive(true);
-                self.imp().gen_details.update(&t, &obj.values());
-                self.parts().details.update(&t, serial, mode);
-            }
-            None => self.torrent_scrub(),
-        }
+    /// Shows the selected torrent (selected, or updated as mode says) in the
+    /// details. The torrent actions are enabled while there's one.
+    fn show_selected_torrent(&self, mode: UpdateMode) {
+        let torrent = self.selected_torrent();
+        self.menu_bar().torrent_actions_sensitive(torrent.is_some());
+        self.details().set_torrent(torrent.as_ref(), mode);
     }
 
     fn torrent_event_notification(
@@ -282,8 +281,7 @@ impl MainWindow {
         let states_pos = if dragged { pos } else { 0 };
         prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, Scope::Global);
 
-        let parts = self.parts();
-        parts.details.persist();
+        self.details().persist();
         self.torrent_list().persist();
         prefs.save();
 
@@ -299,11 +297,7 @@ impl MainWindow {
     }
 
     fn copy_magnet_link(&self) {
-        let id = self.selected_torrent_id();
-        if id < 0 {
-            return;
-        }
-        if let Some(obj) = self.client().find_torrent(id) {
+        if let Some(obj) = self.selected_torrent() {
             self.clipboard().set_text(&obj.torrent().magnet_link);
         }
     }
@@ -435,7 +429,7 @@ impl MainWindow {
 
         self.torrent_list().refilter_and_resort();
 
-        self.update_selected_torrent_notebook(mode, self.selected_torrent_id());
+        self.show_selected_torrent(mode);
         imp.status_bar.update(&self.torrent_model().stats(), &client);
 
         // files to add once connected
@@ -453,22 +447,14 @@ impl MainWindow {
         util::error_dialog(Some(self), msg);
     }
 
-    fn torrent_scrub(&self) {
-        let imp = self.imp();
-        self.parts().details.clear();
-        imp.gen_details.clear();
-        self.menu_bar().torrent_actions_sensitive(false);
-    }
-
     /// The client connected, disconnected, or started connecting
     fn connection_changed(&self) {
         let imp = self.imp();
         let client = self.client();
         let state = client.connection_state();
 
-        let connected = state == ConnectionState::Connected;
-        self.parts().details.set_sensitive(connected);
-        imp.gen_details.set_sensitive(connected);
+        // sensitive while connected, cleared once disconnected
+        self.details().set_connection(state);
 
         let status_bar = &imp.status_bar;
         match state {
@@ -484,7 +470,7 @@ impl MainWindow {
             ConnectionState::Disconnected => {
                 // not added when connecting failed
                 imp.args.take();
-                self.torrent_scrub();
+                self.menu_bar().torrent_actions_sensitive(false);
                 self.state_selector().disconnect();
                 status_bar.reset();
             }
@@ -605,7 +591,7 @@ impl MainWindow {
         let show = |win: &Self, prefs: &Prefs| {
             let shown = |key| prefs.get_bool(key, Scope::Global);
             win.state_selector().set_visible(shown(prefs::KEY_SHOW_STATE_SELECTOR));
-            win.imp().notebook.set_visible(shown(prefs::KEY_SHOW_NOTEBOOK));
+            win.details().set_visible(shown(prefs::KEY_SHOW_NOTEBOOK));
         };
         show(self, prefs);
         let weak = self.downgrade();
@@ -674,10 +660,7 @@ impl MainWindow {
         list.set_client(&client);
         let tv = list.tree_view();
         let selector = StateSelector::new(&client, &model);
-        let details = DetailLists::new(&client, "");
-        for (tv, title) in details.pages() {
-            imp.notebook.append_page(tv, Some(&gtk::Label::new(Some(&title))));
-        }
+        self.details().set_client(&client);
 
         // Everything the menus and toolbar can do is a "win." action. The menu
         // bar adds the stateful view actions (check and radio items).
@@ -685,16 +668,15 @@ impl MainWindow {
         let menu_bar = MenuBar::new(self, &prefs, &tv);
         let toolbar = Toolbar::new(&prefs);
 
-        let parts =
-            Parts { toolbar: toolbar.clone(), menu_bar, state_selector: selector.clone(), details };
+        let parts = Parts { toolbar: toolbar.clone(), menu_bar, state_selector: selector.clone() };
         if imp.parts.set(parts).is_err() {
             unreachable!("a window is constructed once");
         }
 
         let weak = self.downgrade();
-        list.connect_selection_changed(move |list| {
+        list.connect_selection_changed(move |_| {
             if let Some(win) = weak.upgrade() {
-                win.update_selected_torrent_notebook(UpdateMode::First, list.selected_id());
+                win.show_selected_torrent(UpdateMode::First);
             }
         });
         let weak = self.downgrade();
@@ -754,9 +736,6 @@ impl MainWindow {
         });
         // the restored filter
         list.set_filter(selector.filter());
-
-        // the lists are enabled once connected (connection_changed)
-        self.parts().details.set_sensitive(false);
 
         imp.status_bar.set_client(&client);
         let weak = self.downgrade();

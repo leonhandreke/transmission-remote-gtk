@@ -1,19 +1,141 @@
-//! The lists of a torrent's details: its trackers, files and peers, which
-//! update from its JSON. They're pages of the main window's notebook (after
-//! the General page) and of the properties dialog.
+//! The details of a torrent. `Details` is the notebook below the torrent
+//! list, which shows the selected torrent: the General page and the lists.
+//! `DetailLists` are the lists of its trackers, files and peers, which update
+//! from its JSON; the properties dialog shows them too.
 
+use std::cell::OnceCell;
 use std::rc::Rc;
 
 use gtk::prelude::*;
+use gtk::subclass::prelude::*;
+use gtk::{CompositeTemplate, glib};
 
-use crate::client::Client;
+use crate::client::{Client, ConnectionState};
 use crate::files::{FilesModel, FilesView};
+use crate::general_panel::GeneralPanel;
 use crate::i18n::tr;
 use crate::peers::{self, PeersModel};
 use crate::protocol::Torrent;
 use crate::torrent_model::UpdateMode;
+use crate::torrent_object::TorrentObject;
 use crate::trackers::{TrackersModel, TrackersView};
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
+
+mod imp {
+    use super::*;
+
+    #[derive(CompositeTemplate, Default)]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/details.ui")]
+    pub struct Details {
+        #[template_child]
+        pub notebook: TemplateChild<gtk::Notebook>,
+        #[template_child]
+        pub general: TemplateChild<GeneralPanel>,
+
+        pub client: OnceCell<Client>,
+        pub lists: OnceCell<DetailLists>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Details {
+        const NAME: &'static str = "TrgDetails";
+        type Type = super::Details;
+        type ParentType = gtk::Widget;
+
+        fn class_init(klass: &mut Self::Class) {
+            GeneralPanel::ensure_type();
+            klass.bind_template();
+            klass.set_layout_manager_type::<gtk::BinLayout>();
+        }
+
+        fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
+            obj.init_template();
+        }
+    }
+
+    impl ObjectImpl for Details {
+        fn dispose(&self) {
+            self.dispose_template();
+        }
+    }
+
+    impl WidgetImpl for Details {}
+}
+
+glib::wrapper! {
+    pub struct Details(ObjectSubclass<imp::Details>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl Details {
+    /// Shows the details of the client's torrents. The lists are
+    /// insensitive until it's connected, see set_connection().
+    pub fn set_client(&self, client: &Client) {
+        let imp = self.imp();
+        imp.client.set(client.clone()).expect("the client is set once");
+        let lists = DetailLists::new(client, "");
+        for (tv, title) in lists.pages() {
+            imp.notebook.append_page(tv, Some(&gtk::Label::new(Some(&title))));
+        }
+        lists.set_sensitive(false);
+        if imp.lists.set(lists).is_err() {
+            unreachable!("the lists are made once");
+        }
+    }
+
+    fn client(&self) -> &Client {
+        self.imp().client.get().expect("the client is set by set_client()")
+    }
+
+    fn lists(&self) -> &DetailLists {
+        self.imp().lists.get().expect("the lists are made by set_client()")
+    }
+
+    /// The General page, which is gone once the details are disposed (the
+    /// torrents can change after that: the model is the client's)
+    fn general(&self) -> Option<GeneralPanel> {
+        self.imp().general.try_get()
+    }
+
+    /// Shows the torrent (selected, or updated as mode says), or nothing
+    pub fn set_torrent(&self, torrent: Option<&TorrentObject>, mode: UpdateMode) {
+        let Some(obj) = torrent else {
+            self.clear();
+            return;
+        };
+        let t = obj.torrent();
+        if let Some(general) = self.general() {
+            general.update(&t, &obj.values());
+        }
+        self.lists().update(&t, self.client().serial(), mode);
+    }
+
+    fn clear(&self) {
+        self.lists().clear();
+        if let Some(general) = self.general() {
+            general.clear();
+        }
+    }
+
+    /// The details are sensitive while connected, and show nothing once
+    /// disconnected
+    pub fn set_connection(&self, state: ConnectionState) {
+        let connected = state == ConnectionState::Connected;
+        self.lists().set_sensitive(connected);
+        if let Some(general) = self.general() {
+            general.set_sensitive(connected);
+        }
+        if state == ConnectionState::Disconnected {
+            self.clear();
+        }
+    }
+
+    /// Saves the lists' column layout and sorting
+    pub fn persist(&self) {
+        self.lists().persist();
+    }
+}
 
 pub struct DetailLists {
     pub trackers_model: Rc<TrackersModel>,

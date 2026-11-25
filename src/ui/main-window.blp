@@ -1,7 +1,7 @@
 using Gtk 4.0;
 // The skeleton of the main window. Its parts that need the client or the
 // models when they're created are added by TrgMainWindow: the toolbar, the
-// state selector, the lists and the drop target.
+// state selector and the drop target.
 template $TrgMainWindow: ApplicationWindow {
   title: _("Transmission Remote");
   // Fits a 1024x600 screen: GNOME's top bar leaves 568 px, and with
@@ -39,16 +39,7 @@ template $TrgMainWindow: ApplicationWindow {
         end-child: $TrgTorrentList torrent_list {};
       };
 
-      end-child: Notebook notebook {
-        ScrolledWindow {
-          $TrgGeneralPanel gen_details {}
-        }
-
-        [tab]
-        Label {
-          label: _("General");
-        }
-      };
+      end-child: $TrgDetails details {};
     }
 
     $TrgStatusBar status_bar {

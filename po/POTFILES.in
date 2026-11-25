@@ -32,6 +32,7 @@ src/tree_view/sort.rs
 src/tree_view/value.rs
 src/ui/about-window.blp
 src/ui/destination-combo.blp
+src/ui/details.blp
 src/ui/file-rename-dialog.blp
 src/ui/files-tree-view.blp
 src/ui/general-panel.blp
