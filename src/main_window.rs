@@ -19,7 +19,7 @@ use crate::i18n::{sprintf, tr};
 use crate::menu_bar::MenuBar;
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol as p;
-use crate::state_selector::StateSelector;
+use crate::state_selector::{Filter, StateSelector};
 use crate::status_bar::StatusBar;
 use crate::toolbar::Toolbar;
 use crate::torrent_list::TorrentList;
@@ -603,6 +603,16 @@ impl MainWindow {
         request("pause-all", connected, |_| p::torrent_pause(None));
     }
 
+    /// The torrent list shows the torrents of the sidebar's filter, or all
+    /// of them while the sidebar is hidden, which would leave no clue why
+    /// some are missing (after a restart, say). The sidebar keeps its
+    /// selection, so showing it brings the filter back.
+    fn update_filter(&self) {
+        let selector = self.state_selector();
+        let filter = if selector.is_visible() { selector.filter() } else { Filter::All };
+        self.torrent_list().set_filter(filter);
+    }
+
     /// Shows the sidebar and the details as the preferences say, and
     /// follows them: the menu's view items and the preferences dialog set
     /// them. (The sidebar follows its own options, the torrent view the
@@ -610,7 +620,12 @@ impl MainWindow {
     fn follow_view_prefs(&self, prefs: &Prefs) {
         let show = |win: &Self, prefs: &Prefs| {
             let shown = |key| prefs.get_bool(key, Scope::Global);
-            win.state_selector().set_visible(shown(prefs::KEY_SHOW_STATE_SELECTOR));
+            let selector = win.state_selector();
+            let states = shown(prefs::KEY_SHOW_STATE_SELECTOR);
+            if selector.is_visible() != states {
+                selector.set_visible(states);
+                win.update_filter();
+            }
             win.details().set_visible(shown(prefs::KEY_SHOW_NOTEBOOK));
         };
         show(self, prefs);
@@ -748,14 +763,14 @@ impl MainWindow {
         });
         self.add_controller(keys);
 
-        let weak = list.downgrade();
-        selector.connect_filter_changed(move |selector| {
-            if let Some(list) = weak.upgrade() {
-                list.set_filter(selector.filter());
+        let weak = self.downgrade();
+        selector.connect_filter_changed(move |_| {
+            if let Some(win) = weak.upgrade() {
+                win.update_filter();
             }
         });
         // the restored filter
-        list.set_filter(selector.filter());
+        self.update_filter();
 
         imp.status_bar.set_client(&client);
         let weak = self.downgrade();
