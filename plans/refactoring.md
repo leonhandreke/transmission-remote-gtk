@@ -76,7 +76,13 @@ is left to do, in the recommended order. Work happens on the
 - `src/state_selector.rs` — the sidebar; each `StateRow` has a `Filter`
   (`All`, `State(flags)`, `Tracker(host)`, `Directory(dir)`), and
   `StateSelector::filter()` is the selected row's.
-- `src/main_window.rs` — the window: layout, wiring, filter, actions.
+- `src/main_window.rs` — the window: layout, wiring, actions, saving its
+  size and panes, notifications.
+- `src/torrent_list.rs` (`TrgTorrentList`, `src/ui/torrent-list.blp`) — the
+  torrent list: the tree view (`torrent_view.rs`), its filter by the
+  sidebar's `Filter` and the search text, the search entry (defined in the
+  list's template, shown in the window's toolbar), "Not Connected" and "No
+  Results" over the list, and the context menu (`torrent_menu.rs`).
 - The view settings (sidebar, its directory/tracker filters and order, the
   details, the style) live in the preferences: the menu's stateful actions
   (`menu_bar.rs`) and the preferences dialog only set them, and the widgets
@@ -160,7 +166,7 @@ properties that changed; the update sets the `serial` property last, which
 always notifies, and which `TorrentRow` (the Transmission styles) watches.
 Code that goes through all the torrents reads `obj.values()` and
 `obj.torrent()` directly, not the properties: the filter
-(`MainWindow::visible_func`), sorting, the stats, the sidebar's counting.
+(`TorrentList::visible_func`), sorting, the stats, the sidebar's counting.
 `Client::find_torrent(id)` replaced `torrent_data()`.
 
 Why typed sorting (measured in a throwaway test, release build, 5000
@@ -256,16 +262,40 @@ Now:
   preferences, which the main window saves on quit. For the same reason
   `save_window_state()` closes an open preferences dialog first.
 
-### 7. A `TorrentList` widget — next
+### 7. A `TorrentList` widget — done
 
-`MainWindow` (about 1,060 lines) is mostly wiring now. The last cohesive
-chunk in it is the torrent list: the tree view, its `CustomFilter` and
-`visible_func`, the search entry handling (`filter_*_cb`, `key_pressed`),
-the "No Results"/"Not Connected" overlay (`update_no_results`,
-`update_connection`'s stack) and the context menu. Make it a composite
-widget with a small API (selected IDs, refilter, resort). Saving the window
-size and pane positions, and the torrent added/completed notifications,
-can stay in the window.
+The torrent list is a composite widget, `TorrentList` (`src/torrent_list.rs`,
+template `src/ui/torrent-list.blp`), a template child of the main window
+(the `hpaned`'s end child). `main_window.rs` went from 1,062 to 879 lines.
+
+- Its template has the overlay with "Not Connected" (and its stack:
+  connect, edit profiles, connecting) and "No Results", the context menu's
+  sections (`torrent_actions_menu`, `torrent_queue_menu`), and the search
+  entry as a separate top-level object: the window puts it in its toolbar
+  (`list.search_entry()`), makes it capture the window's keys, and focuses
+  it on Ctrl/Cmd+K and F (`focus_search()`) from its `key_pressed`, which
+  keeps forwarding the app's shortcuts to text fields. The entry's signals
+  are connected in code (`setup_search`), not as template callbacks: the
+  entry isn't inside the list, so a callback couldn't find it.
+- `set_client()` makes the tree view (config id "TrgTorrentTreeView", as
+  before) and its filter. The API: `set_filter(Filter)` (the window passes
+  the sidebar's on `filter-changed`), `refilter_and_resort()` (after each
+  update), `set_connection(state, profile_name)` (sensitivity, "Not
+  Connected", "No Results"), `set_queues_enabled()`, `selected_id()`,
+  `selected_ids()`, `first_selected()`, `persist()`, `tree_view()` (for
+  the View menu's sort menu), and the signals `selection-changed` and
+  `row-activated`.
+- `selected_id()` is the first selected torrent's ID as of the last
+  `selection-changed`, which the list emits on the selection's
+  selection-changed and when items-changed changes the first selected
+  torrent (the window used to keep that ID; `MainWindow::selected_torrent_id`
+  now reads it from the list).
+- `torrent_menu::popup` takes the client, the tree view and the current
+  torrent's ID instead of the window; the properties and move dialogs take
+  the selected IDs instead of the tree view.
+- The list disposes its template, which clears its template children while
+  the client's model (and the sidebar following it) can still change:
+  `refilter` and `update_no_results` return when the entry is gone.
 
 ### Smaller items
 
@@ -394,3 +424,29 @@ Open observations from that pass, not investigated:
   gives the trackers new IDs).
 - The Delete key alone didn't remove a torrent in the test (Cmd+Backspace
   did); possibly only the test tool's key mapping.
+
+After step 7 (commits 49a14ad to 8f59a41), not clicked through yet;
+check:
+
+- the window looks as before: the search entry at the right of the
+  toolbar, the torrent list beside the sidebar, "Not Connected" (Connect,
+  Edit Profiles… without a host, the spinner while connecting) and "No
+  Results" over the list, clipped to it when the list is narrow;
+- which widget has the focus on startup, as on the base commit;
+- typing anywhere in the window starts a search (not in a text field, the
+  sidebar or the details' lists, which type ahead), keeping the first
+  character; Ctrl/Cmd+K and Ctrl/Cmd+F focus the entry; Escape clears it,
+  and a second Escape returns the focus to the torrent list; Delete in the
+  entry edits the text and doesn't remove torrents;
+- the search and the sidebar's filters together, and "No Results" only
+  while connected with search text and nothing matching;
+- the selection: the details and the general panel follow it, also when
+  the selected torrent is filtered out or removed; double click or Enter
+  opens the properties (of all selected torrents); the remove dialogs'
+  name and count; the move dialog's title;
+- the context menu with the pointer and the keyboard (Shift+F10/Menu), its
+  queue items only while the server has queues, its limits and priority
+  radio items showing the first selected torrent's values;
+- the list insensitive while disconnected and connecting, sensitive once
+  connected; the torrent list's columns, widths and sorting surviving a
+  restart; the View > Sort menu.
