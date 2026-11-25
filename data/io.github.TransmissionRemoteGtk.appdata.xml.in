@@ -24,6 +24,18 @@
     </screenshot>
   </screenshots>
   <releases>
+    <release version="2.1.0" date="2026-11-25">
+      <description>
+        <p>This release is a rewrite in Rust for GTK 4, which talks to Transmission 4.1 and later with its JSON-RPC 2.0 API.</p>
+        <ul>
+          <li>The application is called Transmission Remote, also on macOS, where it follows the platform's menus and shortcuts</li>
+          <li>The sidebar's "Active" counts the torrents that are transferring, like Transmission</li>
+          <li>The First Tracker column shows the tracker's host again</li>
+          <li>Closing the preferences without OK undoes their preview</li>
+          <li>The torrent properties change only the settings that were edited, also for several torrents</li>
+        </ul>
+      </description>
+    </release>
     <release version="1.7.1" date="2026-03-13">
       <description>
         <p>This release is a minor bug fix for an issue where the client can't receive data properly if Transmission does not send valid JSON.</p>

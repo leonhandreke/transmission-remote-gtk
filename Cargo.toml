@@ -1,6 +1,6 @@
 [package]
 name = "transmission-remote-gtk"
-version = "1.7.1"
+version = "2.1.0"
 edition = "2024"
 rust-version = "1.92"
 license = "GPL-2.0-or-later"

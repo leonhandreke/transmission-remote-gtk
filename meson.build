@@ -1,7 +1,7 @@
 project(
   'transmission-remote-gtk',
   license: 'GPL2+',
-  version: '1.7.1',
+  version: '2.1.0',
   meson_version: '>= 0.60.0',
   default_options: ['buildtype=debugoptimized'],
 )
