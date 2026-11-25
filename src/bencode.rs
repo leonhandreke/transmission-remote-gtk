@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::add_torrents::AddError;
 use crate::files::FileNode;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -155,12 +156,15 @@ pub fn parse_torrent_data(data: &[u8]) -> Option<TorrentFile> {
     Some(TorrentFile { top_node })
 }
 
-pub fn parse_torrent_file(filename: &str) -> Result<Option<TorrentFile>, String> {
+/// The files of a .torrent file. None if it doesn't exist or isn't a
+/// torrent; an error if it can't be read.
+pub fn parse_torrent_file(filename: &str) -> Result<Option<TorrentFile>, AddError> {
     if !std::path::Path::new(filename).is_file() {
         gtk::glib::g_message!("trg", "{} does not exist", filename);
         return Ok(None);
     }
-    let data = std::fs::read(filename).map_err(|e| e.to_string())?;
+    let data = std::fs::read(filename)
+        .map_err(|source| AddError::Read { path: filename.to_string(), source })?;
     Ok(parse_torrent_data(&data))
 }
 

@@ -297,7 +297,7 @@ impl TorrentAddDialog {
                 if std::path::Path::new(file_name).is_file() {
                     match bencode::parse_torrent_file(file_name) {
                         Err(e) => {
-                            util::error_dialog(win.as_ref(), &e);
+                            util::error_dialog(win.as_ref(), &e.to_string());
                             imp.filenames.borrow_mut().clear();
                             return;
                         }
