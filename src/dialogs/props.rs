@@ -3,7 +3,10 @@
 //! The torrent list is passed into here, which this gets the selection from.
 //! If there are multiple selections, the first populates the fields. The IDs
 //! are taken when the dialog is created, in case the selection changes before
-//! clicking OK. Then the values of the widgets are sent with the IDs.
+//! clicking OK. The limits page's widgets are bound to a settings object
+//! holding that torrent; on OK, the settings that changed are sent with the
+//! IDs, so with several torrents, those of the others that weren't changed
+//! stay as they are.
 //!
 //! In the Transmission styles, a single torrent also has pages of
 //! information, files, peers and trackers, which keep themselves up to date.
@@ -18,7 +21,7 @@ use gtk::{CompositeTemplate, glib};
 use crate::client::Client;
 use crate::details::DetailLists;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
-use crate::dialogs::json_widgets::JsonWidgets;
+use crate::dialogs::settings::settings_object;
 use crate::format;
 use crate::i18n::{sprintf, tr};
 use crate::main_window::MainWindow;
@@ -26,7 +29,24 @@ use crate::prefs::{self, Scope};
 use crate::protocol::{self as p, Torrent};
 use crate::torrent_model::UpdateMode;
 use crate::torrent_object::{TorrentObject, TorrentValues};
-use crate::util;
+
+settings_object! {
+    /// The settings of the limits page, the fields of a torrent
+    pub struct TorrentSettings("TrgTorrentSettings", Torrent) in mod settings_imp {
+        honors_session_limits: bool,
+        bandwidth_priority: i64,
+        queue_position: Option<i64>,
+        download_limited: bool,
+        download_limit: i64,
+        upload_limited: bool,
+        upload_limit: i64,
+        seed_ratio_mode: i64,
+        seed_ratio_limit: f64,
+        peer_limit: i64,
+        sequential_download: Option<bool>,
+        sequential_download_from_piece: i64,
+    }
+}
 
 mod imp {
     use super::*;
@@ -39,27 +59,13 @@ mod imp {
         #[template_child]
         pub info_page: TemplateChild<gtk::Grid>,
         #[template_child]
+        pub settings: TemplateChild<TorrentSettings>,
+        #[template_child]
         pub bandwidth_priority_combo: TemplateChild<gtk::DropDown>,
-        #[template_child]
-        pub seed_ratio_mode_combo: TemplateChild<gtk::DropDown>,
-        #[template_child]
-        pub seed_ratio_limit_spin: TemplateChild<gtk::SpinButton>,
         #[template_child]
         pub queue_position_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub queue_position_spin: TemplateChild<gtk::SpinButton>,
-        #[template_child]
-        pub honors_session_limits_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub download_limited_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub download_limit_spin: TemplateChild<gtk::SpinButton>,
-        #[template_child]
-        pub upload_limited_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub upload_limit_spin: TemplateChild<gtk::SpinButton>,
-        #[template_child]
-        pub peer_limit_spin: TemplateChild<gtk::SpinButton>,
         #[template_child]
         pub sequential_download_check: TemplateChild<gtk::CheckButton>,
         #[template_child]
@@ -98,7 +104,6 @@ mod imp {
         pub client: RefCell<Option<Client>>,
         pub win: glib::WeakRef<MainWindow>,
         pub target_ids: RefCell<Vec<i64>>,
-        pub widgets: RefCell<JsonWidgets>,
         pub show_details: Cell<bool>,
         /// With show_details: the lists, the torrent shown and the handler
         /// updating them
@@ -114,6 +119,7 @@ mod imp {
         type ParentType = Dialog;
 
         fn class_init(klass: &mut Self::Class) {
+            TorrentSettings::ensure_type();
             klass.bind_template();
             klass.bind_template_instance_callbacks();
         }
@@ -149,19 +155,9 @@ glib::wrapper! {
 #[gtk::template_callbacks]
 impl TorrentPropsDialog {
     /// The ratio limit is for "Stop seeding at ratio"
-    #[template_callback]
-    fn seed_ratio_mode_changed_cb(dd: &gtk::DropDown, _pspec: &glib::ParamSpec) {
-        if let Some(d) = util::ancestor::<TorrentPropsDialog>(dd) {
-            d.imp().seed_ratio_limit_spin.set_sensitive(dd.selected() == 1);
-        }
-    }
-
-    /// The first piece is for sequential downloads
-    #[template_callback]
-    fn sequential_download_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(d) = util::ancestor::<TorrentPropsDialog>(check) {
-            d.imp().sequential_from_piece_spin.set_sensitive(check.is_active());
-        }
+    #[template_callback(function)]
+    fn stops_at_ratio(seed_ratio_mode: i64) -> bool {
+        seed_ratio_mode == 1
     }
 
     /// The properties of the torrents ids, the selected ones
@@ -251,16 +247,14 @@ impl TorrentPropsDialog {
             }
         }
 
+        // the settings that changed, if any
         if response == Response::Ok {
-            let mut req = p::torrent_set(&imp.target_ids.borrow())
-                .with(p::FIELD_SEED_RATIO_MODE, imp.seed_ratio_mode_combo.selected())
-                .with(
-                    p::FIELD_BANDWIDTH_PRIORITY,
-                    imp.bandwidth_priority_combo.selected() as i64 - 1,
-                );
-            imp.widgets.borrow().save(req.params_mut());
-
-            self.client().dispatch_interactive(req);
+            let changes = imp.settings.changes();
+            if !changes.is_empty() {
+                let mut req = p::torrent_set(&imp.target_ids.borrow());
+                req.params_mut().extend(changes);
+                self.client().dispatch_interactive(req);
+            }
         }
 
         self.destroy();
@@ -315,55 +309,32 @@ impl TorrentPropsDialog {
 
     fn limits_page_load(&self, torrent: &Torrent) {
         let imp = self.imp();
-        let json = &torrent.to_obj();
-        let mut widgets = imp.widgets.borrow_mut();
 
-        let fields: [(&gtk::Widget, &str); 7] = [
-            (imp.honors_session_limits_check.upcast_ref(), p::FIELD_HONORS_SESSION_LIMITS),
-            (imp.download_limited_check.upcast_ref(), p::FIELD_DOWNLOAD_LIMITED),
-            (imp.download_limit_spin.upcast_ref(), p::FIELD_DOWNLOAD_LIMIT),
-            (imp.upload_limited_check.upcast_ref(), p::FIELD_UPLOAD_LIMITED),
-            (imp.upload_limit_spin.upcast_ref(), p::FIELD_UPLOAD_LIMIT),
-            (imp.seed_ratio_limit_spin.upcast_ref(), p::FIELD_SEED_RATIO_LIMIT),
-            (imp.peer_limit_spin.upcast_ref(), p::FIELD_PEER_LIMIT),
-        ];
-        for (w, key) in fields {
-            widgets.add(w, json, key);
+        let has_queue = torrent.queue_position.is_some();
+        imp.queue_position_label.set_visible(has_queue);
+        imp.queue_position_spin.set_visible(has_queue);
+
+        // the first piece of one torrent
+        let has_sequential = torrent.sequential_download.is_some();
+        let pieces = torrent.piece_count;
+        let has_from_piece = has_sequential && imp.target_ids.borrow().len() == 1 && pieces > 0;
+        imp.sequential_download_check.set_visible(has_sequential);
+        imp.sequential_from_piece_label.set_visible(has_from_piece);
+        imp.sequential_from_piece_spin.set_visible(has_from_piece);
+        if has_from_piece {
+            imp.sequential_from_piece_spin.set_range(0.0, (pieces - 1) as f64);
         }
 
-        if torrent.queue_position.is_some() {
-            widgets.add(&imp.queue_position_spin.get(), json, p::FIELD_QUEUE_POSITION);
-        } else {
-            imp.queue_position_label.set_visible(false);
-            imp.queue_position_spin.set_visible(false);
-        }
+        imp.settings.load(torrent.clone());
 
-        if torrent.sequential_download.is_some() {
-            widgets.add(&imp.sequential_download_check.get(), json, p::FIELD_SEQUENTIAL_DOWNLOAD);
-            // the pieces of one torrent
-            let pieces = torrent.piece_count;
-            if imp.target_ids.borrow().len() == 1 && pieces > 0 {
-                imp.sequential_from_piece_spin.set_range(0.0, (pieces - 1) as f64);
-                widgets.add(
-                    &imp.sequential_from_piece_spin.get(),
-                    json,
-                    p::FIELD_SEQUENTIAL_DOWNLOAD_FROM_PIECE,
-                );
-                imp.sequential_from_piece_spin
-                    .set_sensitive(imp.sequential_download_check.is_active());
-            } else {
-                imp.sequential_from_piece_label.set_visible(false);
-                imp.sequential_from_piece_spin.set_visible(false);
-            }
-        } else {
-            imp.sequential_download_check.set_visible(false);
-            imp.sequential_from_piece_label.set_visible(false);
-            imp.sequential_from_piece_spin.set_visible(false);
-        }
-
-        imp.bandwidth_priority_combo.set_selected((torrent.bandwidth_priority + 1).max(0) as u32);
-        imp.seed_ratio_mode_combo.set_selected(torrent.seed_ratio_mode.max(0) as u32);
-        imp.seed_ratio_limit_spin.set_sensitive(imp.seed_ratio_mode_combo.selected() == 1);
+        // TR_PRI_LOW to TR_PRI_HIGH, in the order of the drop-down
+        imp.settings
+            .bind_property("bandwidth-priority", &*imp.bandwidth_priority_combo, "selected")
+            .transform_to(|_, priority: i64| Some((priority - p::TR_PRI_LOW).max(0) as u32))
+            .transform_from(|_, selected: u32| Some(selected as i64 + p::TR_PRI_LOW))
+            .bidirectional()
+            .sync_create()
+            .build();
     }
 
     fn models_updated(&self) {

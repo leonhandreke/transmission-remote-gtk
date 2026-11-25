@@ -206,14 +206,6 @@ pub fn file_progress(length: i64, completed: i64) -> f64 {
 }
 
 impl Torrent {
-    /// Its fields as a JSON object, for widgets that load them by their keys
-    pub fn to_obj(&self) -> Obj {
-        match serde_json::to_value(self) {
-            Ok(Value::Object(o)) => o,
-            _ => Obj::new(),
-        }
-    }
-
     /// Its progress in percent
     pub fn done_percent(&self) -> f64 {
         self.percent_done * 100.0

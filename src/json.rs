@@ -16,15 +16,6 @@ pub fn value_as_i64(v: &Value) -> i64 {
     }
 }
 
-/// Floating point value of a JSON node, like json_node_get_double()
-pub fn value_as_f64(v: &Value) -> f64 {
-    match v {
-        Value::Number(n) => n.as_f64().unwrap_or(0.0),
-        Value::Bool(b) => *b as i64 as f64,
-        _ => 0.0,
-    }
-}
-
 pub fn value_as_bool(v: &Value) -> bool {
     match v {
         Value::Bool(b) => *b,
@@ -33,19 +24,7 @@ pub fn value_as_bool(v: &Value) -> bool {
     }
 }
 
-/* The values of an object (0, false or None when missing) */
-
-pub fn get_i64(o: &Obj, key: &str) -> i64 {
-    o.get(key).map(value_as_i64).unwrap_or(0)
-}
-
-pub fn get_f64(o: &Obj, key: &str) -> f64 {
-    o.get(key).map(value_as_f64).unwrap_or(0.0)
-}
-
-pub fn get_bool(o: &Obj, key: &str) -> bool {
-    o.get(key).map(value_as_bool).unwrap_or(false)
-}
+/* The values of an object (None when missing) */
 
 pub fn get_str<'a>(o: &'a Obj, key: &str) -> Option<&'a str> {
     o.get(key).and_then(Value::as_str)

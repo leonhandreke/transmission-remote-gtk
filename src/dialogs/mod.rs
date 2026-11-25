@@ -8,7 +8,6 @@ pub mod add_url;
 pub mod destination_combo;
 pub mod dialog;
 pub mod file_rename;
-pub mod json_widgets;
 pub mod move_dialog;
 pub mod preferences;
 pub mod props;
