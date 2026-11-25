@@ -15,6 +15,8 @@ mod transport;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::i18n::{sprintf, tr};
+
 pub use transport::{Config, Transport};
 
 pub use crate::json::Obj;
@@ -69,13 +71,13 @@ pub enum Error {
     #[error("{0}")]
     Transport(String),
     /// The server responded with an unexpected HTTP status
-    #[error("{}", crate::i18n::sprintf(&crate::i18n::tr("Request failed with HTTP code: %d"), &[&.0]))]
+    #[error("{}", status_message(*.0))]
     Status(u16),
     /// A 409 without a session ID, so likely not Transmission
     #[error("No \"{SESSION_ID_HEADER}\" header sent, is this the right host?")]
     NoSessionId,
     /// A Transmission older than 4.1, without JSON-RPC 2.0
-    #[error("{}", crate::i18n::tr("This application supports Transmission 4.1 and later."))]
+    #[error("{}", unsupported_message())]
     Unsupported,
     /// The response isn't what it should be
     #[error("{0}")]
@@ -91,6 +93,16 @@ pub enum Error {
         /// Method specific information (error.data.result)
         result: Option<Box<Obj>>,
     },
+}
+
+// The messages are translated in functions: xgettext doesn't extract the
+// strings of attributes
+fn status_message(code: u16) -> String {
+    sprintf(&tr("Request failed with HTTP code: %d"), &[&code])
+}
+
+fn unsupported_message() -> String {
+    tr("This application supports Transmission 4.1 and later.")
 }
 
 impl Error {
