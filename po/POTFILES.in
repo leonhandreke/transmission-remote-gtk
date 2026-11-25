@@ -12,13 +12,15 @@ src/dialogs/preferences.rs
 src/dialogs/props.rs
 src/dialogs/remote_prefs.rs
 src/files.rs
+src/format.rs
 src/general_panel.rs
 src/i18n.rs
+src/main.rs
 src/main_window.rs
 src/menu_bar.rs
 src/peers.rs
 src/prefs.rs
-src/protocol.rs
+src/protocol/torrent.rs
 src/rpc/mod.rs
 src/state_selector.rs
 src/status_bar.rs
@@ -30,6 +32,7 @@ src/torrent_view.rs
 src/trackers.rs
 src/tree_view/sort.rs
 src/tree_view/value.rs
+src/util.rs
 src/ui/about-window.blp
 src/ui/destination-combo.blp
 src/ui/details.blp
@@ -49,4 +52,3 @@ src/ui/torrent-list.blp
 src/ui/torrent-move-dialog.blp
 src/ui/torrent-props-dialog.blp
 src/ui/trackers-tree-view.blp
-src/util.rs
