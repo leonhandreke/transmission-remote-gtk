@@ -64,7 +64,9 @@ is left to do, in the recommended order. Work happens on the
   (`persist`, `setup_columns`, `restore_sort`); `rows.rs`: finding rows for
   context menus (`item_at`, `point_in_header`, `focus_rect`,
   `context_menu_for_rows`, `mark_row_widget`); `expand.rs`: the files
-  tree's expand/collapse (all, and the keys); `search.rs`: type-ahead;
+  tree's expand/collapse (all, and the keys); `search.rs`: type-ahead,
+  and the view's keys (one capture-phase controller: the expand keys, then
+  the search);
   `value.rs`: `Val` (a string, i64 or f64 property) and `format_value()`.
 - `src/type_ahead.rs` — `TypeAhead` (the typed text and its timing) and
   `is_shortcut()`, shared by the tree view and the state selector.
@@ -95,7 +97,9 @@ is left to do, in the recommended order. Work happens on the
   properties dialog shows too.
 - `src/dialogs/` — dialogs; `dialog.rs` is a GtkDialog-like base class
   (the layout, Escape, and the `dialog.ok`/`dialog.cancel` actions, which
-  respond with `Response::Ok`/`Response::Cancel`); `settings.rs` has the
+  respond with `Response::Ok`/`Response::Cancel`; and `add_app_shortcuts`,
+  the `app.` actions' accelerators, as the dialogs don't belong to the
+  application); `settings.rs` has the
   `settings_object!` macro (a GObject whose properties are fields of a
   struct, which the settings dialogs bind their widgets to) and `Closures`,
   the templates' closure functions (`$either`, `$both`).
@@ -440,11 +444,10 @@ What was done (the three dialogs went from 1,661 to 1,496 lines, plus the
 - Gone: `JsonWidgets` (`dialogs/json_widgets.rs`), `PrefWidget`, 69 widget
   template children, `Session::to_obj()`, `Torrent::to_obj()`, the JSON
   getters only they used, and the unused `SGET_*`/`FIELD_*` constants.
-- Noticed, left as it was: the alternate times' minutes spin buttons go up
-  to 69 (`upper: 69` in `remote-prefs-dialog.blp`; 60 to 69 add an hour
-  and more); `po/POTFILES.in` lists `src/protocol.rs`, which no
-  longer exists; its translatable strings are in `src/protocol/torrent.rs`,
-  which isn't listed.
+- Noticed, fixed later: the alternate times' minutes spin buttons went up
+  to 69 (60 to 69 added an hour and more; 59 since c5d5ae5);
+  `po/POTFILES.in` listed `src/protocol.rs`, which no longer exists, and
+  not `src/protocol/torrent.rs` (32f275d).
 
 ### Smaller items — done or decided
 
@@ -580,8 +583,8 @@ check:
   the dialog is open updates its check box, and OK keeps it; switching
   profiles in the dialog, then Close, restores them too;
 - closing the main window (or Ctrl+Q / Cmd+Q while it has the focus; from
-  the dialog, that closes the dialog) while the dialog is open with an
-  unconfirmed change: after a restart the old value shows.
+  the dialog, that did nothing; since 1f593bb it quits, see below) while the dialog is open with an unconfirmed change:
+  after a restart the old value shows.
 
 Observations from that pass, investigated after step 7:
 
@@ -732,3 +735,92 @@ the dialogs offscreen (no window shown); check in the app:
   the menu following, restored on Close/Escape, kept on OK); the macOS
   Settings window still fixed-size and tall enough; the headers and
   destinations lists as before.
+
+### Fixes from the click-through after step 9
+
+A click-through on Linux (GTK 4, the `linux-ui-debugging` harness) found
+these; fixed in commits a5e46d9 to c5d5ae5, written without running the
+app:
+
+- **Type-ahead with a space** (a5e46d9): typing "sub d" in the files list
+  selected "sub dir", but the space also reached the row with the keyboard
+  focus, whose binding toggled its selection (two rows selected), and the
+  focus stayed on the row clicked before. The tree view's keys are one
+  capture-phase controller now (`search.rs`): the expand/collapse keys,
+  then the search, before the rows' bindings. A leading space isn't a
+  search (it selects the focused row as before); once a search is being
+  typed (`TypeAhead::is_typing`, less than a second since the last key)
+  spaces are search text, as are the expand keys (+, -, *, /). A found row
+  gets the focus too (`scroll_to` with `ListScrollFlags::FOCUS | SELECT`;
+  GTK moves the keyboard focus only if it's in the list, otherwise just
+  the list's focus row), also in the sidebar and for `select_item` (the
+  trackers' Add, the preferences' lists). The controller leaves the keys
+  to a cell being edited (a `gtk::Text` has the focus) and to the view's
+  context menus.
+- **Ctrl+Q (Cmd+Q) in a dialog** (1f593bb): the app's accelerators only
+  work in the application's windows, and the dialogs aren't (on purpose:
+  on macOS the menu bar's `win.` actions follow the application's active
+  window, so they'd be disabled while a dialog had the focus). Each
+  `TrgDialog` and the About dialog have a capture-phase shortcut controller
+  with the `app.` actions' accelerators (`dialog::add_app_shortcuts`):
+  Quit, and on macOS Close Window (Cmd+W) and Minimize (Cmd+M), which act on
+  the focused window, and Preferences (Cmd+comma) if GTK sets it. The main
+  window's `win.` shortcuts don't reach the dialogs. `app.quit` closes the
+  main window (not `windows().first()`), which saves its state, closing an
+  open preferences dialog first (restoring an unconfirmed view preview),
+  and quits when destroyed.
+- **The torrent context menu's queue items** — no change: they're added
+  at each popup from `TorrentList`'s `queues_enabled`, which
+  `MainWindow::session_updated` sets whenever the session's
+  `download_queue_enabled || seed_queue_enabled` changes (both start
+  true, as do the menu bar and the sidebar's queue rows, so a first
+  session with queues off removes them). The session comes with every
+  session refresh, and right after the remote preferences' OK (in the
+  session_set's batch); a change made outside the app shows with the next
+  refresh. Both queues off hides them; one on keeps them.
+- **The startup focus** (b17089a): on main too, nothing chose it, so GTK
+  gave it to the first widget that could take it, the toolbar's server
+  picker, as the torrent list is insensitive until connected. The first
+  connection now focuses the list (`MainWindow::focus_torrent_list`),
+  unless a text field (a search typed while connecting) or a menu has the
+  focus; later connections do if the focus widget went away (hidden, like
+  the Connect button, or insensitive).
+- **The alternate times' minutes** go up to 59 (c5d5ae5).
+
+Not clicked through yet; check:
+
+- the files list (and the add dialog's): click a row, type "sub d"
+  quickly: only "sub dir" is selected and has the focus (Down moves to
+  the row after it, Shift+Down extends from it); a space after a pause
+  (over a second) toggles the focused row's selection as before (Ctrl+click
+  style); +, -, * and / expand and collapse when not typing a search, and
+  are search text right after a typed character; the peers list by host;
+  the sidebar: typing selects and focuses the state (arrows continue
+  from there), spaces ignored;
+- editing a cell (trackers' announce URL, the preferences' lists): typing
+  letters and spaces edits the text, also right after typing a search in
+  that list and pressing Enter; the context menus' keyboard handling with
+  a menu open (no search starts);
+- the trackers' Add and the preferences' lists' Add/Up/Down: the row is
+  selected (and shown) as before, and the keyboard focus doesn't jump
+  into the list from the buttons;
+- Ctrl+Q (Cmd+Q) from each dialog (local and remote preferences,
+  properties, add, add URL, move, rename, statistics, About): the app quits
+  and saves its state; from the preferences dialog with an unconfirmed
+  View change, the old value shows after a restart; Ctrl+Q while the main
+  window has the focus as before; the main window's shortcuts (Ctrl+C,
+  Delete, F9, Ctrl+O...) don't act from a dialog (Delete and Ctrl+C edit
+  its text fields); on macOS: Cmd+W closes and Cmd+M minimizes the focused
+  dialog, the menu bar's items keep working while a dialog has the focus
+  (e.g. View > Sidebar with the preferences open), and Cmd+Q from the
+  menu and the keyboard quits with a dialog focused;
+- the startup focus: once connected, the torrent list has it (Down selects
+  a torrent, Enter opens its properties); typing during connecting goes to
+  the search entry and keeps the focus there; starting disconnected and
+  clicking Connect, or connecting from the server picker, focuses the
+  list too;
+- the context menu's queue items after turning both queues off and on in
+  the remote preferences (right away after OK) and on the daemon directly
+  (after the session refresh); the initial state with a server whose
+  queues are off;
+- the remote preferences' minutes spin buttons stop at 59.
