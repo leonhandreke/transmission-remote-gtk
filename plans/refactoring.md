@@ -353,6 +353,39 @@ What was done (`main_window.rs` went from 879 to 858 lines):
   page is then gone, and `set_torrent` and `set_connection` skip it
   (`Details::general()`), should the torrents change after that.
 
+### 9. The settings dialogs with data binding
+
+The goal: the remote preferences (`dialogs/remote_prefs.rs`,
+`ui/remote-prefs-dialog.blp`) and the properties dialog's limits page
+(`dialogs/props.rs`) list `(widget, key)` pairs and load and save them with
+`JsonWidgets` (`dialogs/json_widgets.rs`) from `Session::to_obj()` and
+`Torrent::to_obj()`; the local preferences (`dialogs/preferences.rs`) do the
+same with `PrefWidget` and the preferences' keys and scopes. Each setting is
+named in the Blueprint file, a `#[template_child]` field and the table.
+Instead, give each dialog a settings GObject whose properties are the
+settings, and bind the widgets to it in Blueprint (`active: bind
+settings.dht-enabled bidirectional;`), dropping the template children and
+tables that only served loading and saving. No libadwaita (user decision).
+
+Approach, one dialog per commit:
+
+- The remote preferences first: a settings object generated from the
+  `Session` fields with a macro (like `torrent_values!`), made from the
+  client's session; OK sends a `session_set` with only the fields that
+  changed. The odd cases (the alternate times as hours and minutes, the
+  days of the week as check boxes, the encryption and transports
+  drop-downs) bind with transform functions; the sensitivities that depend
+  on two settings with closures.
+- Then the properties dialog's limits page, from the `Torrent` fields.
+- Then the local preferences: the profile's settings, the global ones, and
+  the view settings (previewed as step 6 made them, restored on Close),
+  also when switching profiles in the dialog.
+- Remove `JsonWidgets`, `PrefWidget` and what becomes dead.
+
+Keep the behaviour otherwise: what loads, what's saved and when (OK or
+Close), the sensitivity dependencies, the optional rows' visibility, the
+macOS fixed-size Settings window.
+
 ### Smaller items — done or decided
 
 - **CI** — the workflow is `.github/workflows/build.yml` (was `c-cpp.yml`;
