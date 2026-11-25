@@ -15,6 +15,27 @@ use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW};
 use crate::util;
 
+/// Why a torrent couldn't be added
+#[derive(Debug)]
+pub enum AddError {
+    /// The .torrent file couldn't be read
+    Read { path: String, source: std::io::Error },
+}
+
+// Not with thiserror: xgettext doesn't find the strings in attributes
+impl std::fmt::Display for AddError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            AddError::Read { path, source } => {
+                let message = sprintf(&tr("Unable to open torrent file: %s"), &[path]);
+                write!(f, "{message} ({source})")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AddError {}
+
 /// How torrents are added
 #[derive(Debug, Default, Clone)]
 pub struct AddOptions {
@@ -42,11 +63,12 @@ impl AddOptions {
 
     /// The request adding a file, URL or magnet link. None (with a message)
     /// if the file doesn't exist; an error if it can't be read.
-    fn request(&self, target: &str) -> Result<Option<p::Request>, String> {
+    fn request(&self, target: &str) -> Result<Option<p::Request>, AddError> {
         let mut req = if util::is_magnet(target) || util::is_url(target) {
             p::torrent_add_url(target, self.paused)
         } else if Path::new(target).is_file() {
-            let metainfo = std::fs::read(target).map_err(|e| e.to_string())?;
+            let metainfo = std::fs::read(target)
+                .map_err(|source| AddError::Read { path: target.to_string(), source })?;
             if self.delete_local {
                 let _ = std::fs::remove_file(target);
             }
@@ -92,7 +114,7 @@ pub fn add_torrents(win: &MainWindow, client: &Client, targets: &[String], optio
         match options.request(target) {
             Ok(Some(req)) => reqs.push(req),
             Ok(None) => {}
-            Err(e) => errors.push(e),
+            Err(e) => errors.push(e.to_string()),
         }
     }
     if !errors.is_empty() {

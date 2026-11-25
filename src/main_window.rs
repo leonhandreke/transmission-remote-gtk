@@ -329,12 +329,12 @@ impl MainWindow {
 
     /// Connects to the profile with index, or the current one for -1
     pub fn connect_profile(&self, index: i32) {
-        if let Err(msg) = self.client().connect_to_profile(index) {
+        if let Err(e) = self.client().connect_to_profile(index) {
             // open the preferences once the (modal) error is dismissed
             let weak = self.downgrade();
             util::error_dialog_full(
                 Some(self),
-                &msg,
+                &e.to_string(),
                 Some(Box::new(move || {
                     if let Some(win) = weak.upgrade() {
                         win.open_local_prefs();

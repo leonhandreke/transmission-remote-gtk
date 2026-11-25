@@ -19,6 +19,7 @@ use gtk::glib;
 use gtk::glib::prelude::*;
 use gtk::glib::subclass::prelude::*;
 
+use crate::i18n::tr;
 use crate::json::{get_str, objects};
 use crate::prefs::{self, Prefs, Scope};
 use crate::protocol::{self, Request, Session};
@@ -40,6 +41,26 @@ pub enum ConnectionState {
     Connecting,
     Connected,
 }
+
+/// Why the connection settings of a profile can't be used
+#[derive(Debug)]
+pub enum SettingsError {
+    NoHostname,
+    /// The URL made of the host, port and path isn't valid (GLib's message)
+    BadUrl(String),
+}
+
+// Not with thiserror: xgettext doesn't find the strings in attributes
+impl std::fmt::Display for SettingsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            SettingsError::NoHostname => f.write_str(&tr("No hostname set")),
+            SettingsError::BadUrl(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for SettingsError {}
 
 mod imp {
     use super::*;
@@ -239,7 +260,7 @@ impl Client {
 
     /// Reads the connection settings of the current profile, which becomes
     /// the connection.
-    pub fn parse_settings(&self) -> Result<(), String> {
+    pub fn parse_settings(&self) -> Result<(), SettingsError> {
         let prefs = self.prefs();
         prefs.set_connection(prefs.profile());
         let transport = &self.imp().transport;
@@ -250,14 +271,14 @@ impl Client {
         let path = prefs.get_string(prefs::KEY_RPC_URL_PATH, Scope::Connection).unwrap_or_default();
 
         if host.is_empty() {
-            return Err("Bad hostname.".into());
+            return Err(SettingsError::NoHostname);
         }
 
         let ssl = prefs.get_bool(prefs::KEY_SSL, Scope::Connection);
 
         let url = format!("{}://{host}:{port}{path}", if ssl { "https" } else { "http" });
         if let Err(e) = glib::Uri::parse(&url, glib::UriFlags::NONE) {
-            return Err(e.message().to_string());
+            return Err(SettingsError::BadUrl(e.message().to_string()));
         }
 
         let mut headers = Vec::new();

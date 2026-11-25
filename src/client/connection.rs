@@ -12,7 +12,7 @@ use gtk::glib;
 use gtk::glib::prelude::*;
 use gtk::glib::subclass::prelude::*;
 
-use super::{Client, ConnectionState, Error, Response};
+use super::{Client, ConnectionState, Error, Response, SettingsError};
 use crate::i18n::{sprintf, tr};
 use crate::prefs::{self, Scope};
 use crate::protocol as p;
@@ -33,7 +33,7 @@ impl Client {
 
     /// Connects to the profile with index, or the current one for -1. An
     /// error if its settings are bad.
-    pub fn connect_to_profile(&self, index: i32) -> Result<(), String> {
+    pub fn connect_to_profile(&self, index: i32) -> Result<(), SettingsError> {
         let prefs = self.prefs().clone();
         let current = prefs.profile();
         let profile =
