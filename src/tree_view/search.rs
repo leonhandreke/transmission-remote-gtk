@@ -8,14 +8,14 @@ use gtk::{gdk, glib};
 
 use super::value::Val;
 use super::{TreeView, row_object};
-use crate::type_ahead::TypeAhead;
+use crate::type_ahead::{TypeAhead, is_shortcut};
 
 impl TreeView {
     /// The view's keys, in the capture phase: before the list's own, which
     /// take Space (to select the row with the focus) and Shift+arrows (to
     /// extend the selection). Expanding and collapsing rows first, then the
     /// search; while a search is being typed, every key it takes (a space
-    /// too) is search text.
+    /// too) is search text. Otherwise Space selects the row with the focus.
     pub(super) fn setup_keys(&self) {
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -23,7 +23,9 @@ impl TreeView {
         keys.connect_key_pressed(move |_, keyval, _, state| match weak.upgrade() {
             Some(tv)
                 if !tv.focus_takes_keys()
-                    && (tv.expand_key_pressed(keyval, state) || tv.key_pressed(keyval, state)) =>
+                    && (tv.expand_key_pressed(keyval, state)
+                        || tv.key_pressed(keyval, state)
+                        || tv.space_pressed(keyval, state)) =>
             {
                 glib::Propagation::Stop
             }
@@ -86,5 +88,23 @@ impl TreeView {
         let needle = imp.type_ahead.push(c);
         self.search(&needle);
         true
+    }
+
+    /// Space (with Shift too) toggles the selection of the row with the
+    /// focus, as the row's own binding does. Also when the focus is in one
+    /// of its cells, such as the files' expander or an editable label: the
+    /// cells have the binding too, but as they aren't selectable it does
+    /// nothing there, and the row never gets the key.
+    fn space_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
+        if !matches!(keyval, gdk::Key::space | gdk::Key::KP_Space) || is_shortcut(state) {
+            return false;
+        }
+        let (Some(focus), Some(li)) = (self.focus_widget(), self.focus_list_item()) else {
+            return false;
+        };
+        // the list's action, found from the focus widget up
+        focus
+            .activate_action("list.select-item", Some(&(li.position(), true, false).to_variant()))
+            .is_ok()
     }
 }

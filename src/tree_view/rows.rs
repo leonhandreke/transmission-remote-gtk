@@ -123,10 +123,15 @@ impl TreeView {
         focus.compute_bounds(self)
     }
 
+    /// The list item (of a cell, in a column view) of the row with the
+    /// keyboard focus
+    pub(super) fn focus_list_item(&self) -> Option<gtk::ListItem> {
+        let focus = self.focus_widget()?;
+        find_marked(&focus).or_else(|| list_item_for(Some(focus), self.upcast_ref()))
+    }
+
     /// The row (a GtkTreeListRow of a tree) with the keyboard focus
     pub(super) fn focus_row(&self) -> Option<glib::Object> {
-        let focus = self.focus_widget()?;
-        let li = find_marked(&focus).or_else(|| list_item_for(Some(focus), self.upcast_ref()))?;
-        li.item()
+        self.focus_list_item()?.item()
     }
 }
