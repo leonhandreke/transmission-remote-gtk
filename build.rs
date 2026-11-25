@@ -5,7 +5,8 @@
 //! in libc.
 //!
 //! A plain `cargo build` works for development: the translations are then
-//! compiled into the build directory, and the data of GTK's prefix is used.
+//! used from the build directory (where they're always compiled, for the
+//! tests), and the data of GTK's prefix is used.
 
 use std::env;
 use std::fs;
@@ -69,7 +70,7 @@ fn resources(ui_dir: &Path) {
     );
 }
 
-/// Translations for running from the build directory
+/// Translations for running from the build directory, and for the tests
 fn compile_translations(out_dir: &Path) -> PathBuf {
     let locale_dir = out_dir.join("locale");
     println!("cargo:rerun-if-changed=po/LINGUAS");
@@ -108,10 +109,9 @@ fn config(out_dir: &Path) {
         println!("cargo:rerun-if-env-changed={var}");
     }
 
-    let locale_dir = match env::var("TRG_LOCALEDIR") {
-        Ok(dir) => dir,
-        Err(_) => compile_translations(out_dir).display().to_string(),
-    };
+    // Always compiled: the tests use them, also in builds for installing
+    let build_locale_dir = compile_translations(out_dir).display().to_string();
+    let locale_dir = env::var("TRG_LOCALEDIR").unwrap_or(build_locale_dir);
     let data_dir = env::var("TRG_DATADIR").unwrap_or_else(|_| format!("{}/share", gtk_prefix()));
 
     println!("cargo:rustc-env=TRG_PACKAGE_NAME={PACKAGE_NAME}");
