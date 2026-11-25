@@ -162,9 +162,10 @@ impl App {
     }
 
     fn startup_main(&self) {
-        // "app.quit" (File -> Quit, Ctrl+Q) closes the window, rather than
-        // quitting straight away, so that it can save its state.
-        self.add_simple_action("quit", |app| match app.windows().first() {
+        // "app.quit" (File -> Quit, Ctrl+Q, also in the dialogs) closes the
+        // main window, rather than quitting straight away, so that it can
+        // save its state; closing it quits.
+        self.add_simple_action("quit", |app| match app.main_window() {
             Some(w) => w.close(),
             None => app.quit(),
         });

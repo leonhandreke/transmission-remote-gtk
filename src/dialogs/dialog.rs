@@ -14,7 +14,7 @@ use std::cell::Cell;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{gdk, glib};
+use gtk::{gdk, gio, glib};
 
 /// How a dialog was answered
 #[derive(Clone, Copy, Debug, PartialEq, Eq, glib::Enum)]
@@ -85,6 +85,7 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             self.obj().setup();
+            super::add_app_shortcuts(self.obj().upcast_ref());
         }
 
         fn dispose(&self) {
@@ -172,6 +173,37 @@ impl Dialog {
         self.set_child(Some(&bx));
         self.add_css_class("dialog");
     }
+}
+
+/// The application's shortcuts ("app." actions: Quit; on macOS also Close
+/// Window and Minimize) in a dialog. A window only has them while it belongs
+/// to the application, and the dialogs don't: on macOS, the menu bar's
+/// "win." actions follow the application's active window, so they'd be
+/// disabled while a dialog of the application has the focus. The main
+/// window's shortcuts ("win." actions) aren't for the dialogs.
+pub fn add_app_shortcuts(window: &gtk::Window) {
+    let Some(app) = gio::Application::default().and_downcast::<gtk::Application>() else {
+        return;
+    };
+    let controller = gtk::ShortcutController::new();
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    for name in app.list_actions() {
+        for accel in app.accels_for_action(&format!("app.{name}")) {
+            let Some(trigger) = gtk::ShortcutTrigger::parse_string(&accel) else { continue };
+            let weak = app.downgrade();
+            let name = name.clone();
+            let action = gtk::CallbackAction::new(move |_, _| {
+                let Some(app) = weak.upgrade() else { return glib::Propagation::Proceed };
+                if !app.lookup_action(&name).is_some_and(|a| a.is_enabled()) {
+                    return glib::Propagation::Proceed;
+                }
+                app.activate_action(&name, None);
+                glib::Propagation::Stop
+            });
+            controller.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
+        }
+    }
+    window.add_controller(controller);
 }
 
 /// The methods of a dialog, for its subclasses
