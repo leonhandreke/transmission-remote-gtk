@@ -59,8 +59,6 @@ mod imp {
         pub parts: OnceCell<Parts>,
         pub queues_enabled: Cell<bool>,
         pub state_saved: Cell<bool>,
-        // whether it has connected since the start
-        pub connected_once: Cell<bool>,
         // the sidebar's default width (0 until it's first shown), not saved
         pub states_default_pos: Cell<i32>,
         pub args: RefCell<Option<Vec<String>>>,
@@ -484,16 +482,17 @@ impl MainWindow {
         }
     }
 
-    /// Once connected (the list is insensitive until then), the torrent list
-    /// gets the focus, so the arrows move in it: at the start, GTK gave it
-    /// to the first widget that could take it, the toolbar's server picker;
-    /// later, unless another widget has it (the Connect button that had it
-    /// is hidden now). Not while a text field or a menu has it.
+    /// Each connection (the list is insensitive until then) gives the
+    /// torrent list the focus, so the arrows move in it: at the start GTK
+    /// gave it to the first widget that could take it, the toolbar's server
+    /// picker, which also keeps it after choosing a profile in its menu;
+    /// after the Connect button of "Not Connected" it's on the hidden page's
+    /// parent. Not while a text field (a search typed while connecting) or
+    /// a menu has it.
     fn focus_torrent_list(&self) {
-        let first = !self.imp().connected_once.replace(true);
-        let focus = RootExt::focus(self).filter(|f| f.is_mapped() && f.is_sensitive());
-        let keep = focus.is_some_and(|f| {
-            !first || f.is::<gtk::Text>() || f.ancestor(gtk::Popover::static_type()).is_some()
+        let keep = RootExt::focus(self).is_some_and(|f| {
+            f.is_mapped()
+                && (f.is::<gtk::Text>() || f.ancestor(gtk::Popover::static_type()).is_some())
         });
         if !keep {
             self.torrent_list().grab_focus();
