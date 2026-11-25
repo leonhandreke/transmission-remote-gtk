@@ -46,8 +46,8 @@ is left to do, in the recommended order. Work happens on the
 - `src/rpc/` — JSON-RPC 2.0 over libsoup. `src/protocol/` — method names,
   request keys, builders and small results (`mod.rs`), the typed torrent
   (`torrent.rs`) and session (`session.rs`).
-- `src/json.rs` — the lenient `get_i64()`-style getters, for the preferences
-  file and `JsonWidgets`.
+- `src/json.rs` — the lenient `value_as_i64()`-style getters, for the
+  preferences file and the responses.
 - The list models hold GObjects with properties: `TorrentObject`
   (`torrent_object.rs`, in the `TorrentModel` of `torrent_model.rs`),
   `StateRow` (`state_selector.rs`), `PeerObject` (`peers.rs`),
@@ -95,7 +95,10 @@ is left to do, in the recommended order. Work happens on the
   properties dialog shows too.
 - `src/dialogs/` — dialogs; `dialog.rs` is a GtkDialog-like base class
   (the layout, Escape, and the `dialog.ok`/`dialog.cancel` actions, which
-  respond with `Response::Ok`/`Response::Cancel`).
+  respond with `Response::Ok`/`Response::Cancel`); `settings.rs` has the
+  `settings_object!` macro (a GObject whose properties are fields of a
+  struct, which the settings dialogs bind their widgets to) and `Closures`,
+  the templates' closure functions (`$either`, `$both`).
 - `src/ui/*.blp` — Blueprint UI files; `data/style.css` — the CSS.
 
 ## Steps
@@ -116,9 +119,9 @@ fields of torrent_get and session_get are derived from the structs
 `SessionStats`, `PortTest`, `BlocklistUpdate`, `AddedTorrent` and a private
 `FreeSpace`, parsed with `protocol::parse()`. Each was wire-checked against
 Transmission 4.1.4. What's left in `src/json.rs` serves the preferences file
-(profiles, destinations, custom headers) and `JsonWidgets`, which binds
-dialog widgets to request keys (loaded from `Torrent::to_obj()` and
-`Session::to_obj()`).
+(profiles, destinations, custom headers) and the responses. (`JsonWidgets`,
+which bound dialog widgets to request keys, loaded from `Torrent::to_obj()`
+and `Session::to_obj()`, went in step 9.)
 
 ### 3. Typed list items instead of the column store — done
 
@@ -353,7 +356,7 @@ What was done (`main_window.rs` went from 879 to 858 lines):
   page is then gone, and `set_torrent` and `set_connection` skip it
   (`Details::general()`), should the torrents change after that.
 
-### 9. The settings dialogs with data binding
+### 9. The settings dialogs with data binding — done
 
 The goal: the remote preferences (`dialogs/remote_prefs.rs`,
 `ui/remote-prefs-dialog.blp`) and the properties dialog's limits page
@@ -367,7 +370,7 @@ settings, and bind the widgets to it in Blueprint (`active: bind
 settings.dht-enabled bidirectional;`), dropping the template children and
 tables that only served loading and saving. No libadwaita (user decision).
 
-Approach, one dialog per commit:
+Approach, one dialog per commit (as planned):
 
 - The remote preferences first: a settings object generated from the
   `Session` fields with a macro (like `torrent_values!`), made from the
@@ -385,6 +388,63 @@ Approach, one dialog per commit:
 Keep the behaviour otherwise: what loads, what's saved and when (OK or
 Close), the sensitivity dependencies, the optional rows' visibility, the
 macOS fixed-size Settings window.
+
+What was done (the three dialogs went from 1,661 to 1,496 lines, plus the
+166 of `settings.rs`; the Blueprint files gained 82 lines of bindings):
+
+- **The settings objects** are top-level objects of the dialogs' Blueprint
+  files (`$TrgRemoteSettings settings {}`) and template children, so the
+  widgets bind to them by ID: Blueprint only allows flags like
+  `bidirectional` on a single lookup, so `bind template.settings.x
+  bidirectional` doesn't compile. Their types are registered in
+  `class_init` (`ensure_type()`).
+- `settings_object!` (`dialogs/settings.rs`) defines one from fields of a
+  struct, like `torrent_values!`: `RemoteSettings` holds a `Session`,
+  `TorrentSettings` a `Torrent`. Each listed `field: Type` is the property
+  "field" (with dashes); an `Option<T>` field is a T property (the default
+  when None, Some once set), through the `Setting` trait. `load()` shows a
+  struct (notifying every property) and `changes()` returns the listed
+  fields that differ from it, as JSON named like the fields (serde's names,
+  the protocol's keys).
+- `LocalSettings` (`dialogs/preferences.rs`) isn't made by the macro: its
+  properties are the preferences in the `SETTINGS` table (key, type,
+  scope), named like their keys; `load(prefs)` and `save(prefs)` read and
+  write all of them as `PrefWidget` did, so saving still writes every value
+  (and emits `pref-changed` for each). The view settings preview and follow
+  their preferences through its properties (`preview_view_prefs`); the
+  lists (headers, destinations) are refreshed and saved beside it.
+- Conversions: bindings with transform functions in Rust (`bind_property`
+  with `transform_to`/`transform_from`) for the encryption and transports
+  drop-downs (string or list ↔ position), the alternate times (minutes ↔
+  hours and minutes spin buttons; each reads the other part from the
+  settings, `settings::source_property`), the days' check boxes (a bit
+  each) and the torrent's bandwidth priority drop-down (priority + 1).
+  GBinding's default transforms cover i64 ↔ a spin button's f64 and i64 ↔
+  a drop-down's u32 (the seed ratio mode). Sensitivities depending on two
+  settings are closure bindings (`$either(...)`, `$both(...)`,
+  `$stops_at_ratio(...)`); those on one check box stay bindings to it.
+  Rows hidden without the server's support (transports, queue position,
+  sequential download) and the blocklist's entry count stay set in code.
+- **Behaviour changes:** the remote preferences' OK sends only the settings
+  that changed, and nothing if none did (no session_set, so no session
+  refresh either); it used to send all of them, plus the encryption. The
+  properties' OK likewise: with several torrents, only what was edited is
+  set on all of them, rather than every limit of the first torrent
+  (including its queue position, which moved them all there). Nothing
+  relied on resending: values the server normalizes (like a directory's
+  trailing slash) now just aren't sent back. A value the widget clamps
+  (out of a spin button's range) isn't written back to the settings, so
+  it's sent or saved only once edited; before, the clamped value was sent
+  or saved. A fractional value typed into an integer spin button is
+  truncated by the binding, where `value_as_int()` rounded.
+- Gone: `JsonWidgets` (`dialogs/json_widgets.rs`), `PrefWidget`, 69 widget
+  template children, `Session::to_obj()`, `Torrent::to_obj()`, the JSON
+  getters only they used, and the unused `SGET_*`/`FIELD_*` constants.
+- Noticed, left as it was: the alternate times' minutes spin buttons go up
+  to 69 (`upper: 69` in `remote-prefs-dialog.blp`; 60 to 69 add an hour
+  and more); `po/POTFILES.in` lists `src/protocol.rs`, which no
+  longer exists; its translatable strings are in `src/protocol/torrent.rs`,
+  which isn't listed.
 
 ### Smaller items — done or decided
 
@@ -638,3 +698,37 @@ After step 8 (commits 67518a7 to 9bf8e76), not clicked through yet; check:
   top and renaming;
 - the keyboard: Tab into the notebook's tabs and the lists, the lists'
   type-ahead, and that typing elsewhere still starts a search.
+
+After step 9 (commits 7059eba to 90f441a), not clicked through yet; the
+widgets' bindings and conversions were checked in a throwaway run building
+the dialogs offscreen (no window shown); check in the app:
+
+- the remote preferences show the server's values on every page (also
+  the encryption, transports, alternate begin/end times and days, the
+  blocklist's entry count); the transports row hidden with a server
+  without them; the alternate limits insensitive unless "Alternate speed
+  limits active" or "Alternate time range" is checked, and the times and
+  days insensitive without the time range; the other spin buttons and
+  entries following their check boxes;
+- changing a few settings of each kind (a check box, a spin button, an
+  entry, the encryption, the transports, a begin hour and an end minute, a
+  day) then OK: the RPC log's session_set has exactly those (the times in
+  minutes, the days as bits) and the server has them on reopening; OK
+  without changes sends nothing; Close and Escape send nothing; Port test
+  and blocklist Update still work and update their labels;
+- the properties' limits page: the first torrent's values, the seed ratio
+  limit sensitive only for "Stop seeding at ratio", the queue position and
+  sequential rows shown as before (from piece: one torrent only, with its
+  piece count as the maximum, sensitive while "Download sequentially" is
+  checked); OK sends only what changed (RPC log), also with several
+  torrents (each keeps its other limits and queue position); the
+  bandwidth priority's three values;
+- the local preferences: each field loads and saves (OK, then reopen;
+  after a restart), the Full update spin button sensitive only with both
+  "Update active torrents only" and "Full update every" checked, SSL
+  validation following SSL; switching profiles saves the edited one and
+  shows the other's fields (the name in the drop-down following the name
+  entry), New and Delete; the View check boxes as after step 6 (preview,
+  the menu following, restored on Close/Escape, kept on OK); the macOS
+  Settings window still fixed-size and tall enough; the headers and
+  destinations lists as before.
