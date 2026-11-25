@@ -14,6 +14,7 @@
     <file preprocess="xml-stripblanks">torrent-props-dialog.ui</file>
     <file preprocess="xml-stripblanks">torrent-add-dialog.ui</file>
     <file preprocess="xml-stripblanks">main-window.ui</file>
+    <file preprocess="xml-stripblanks">torrent-list.ui</file>
     <file preprocess="xml-stripblanks">files-tree-view.ui</file>
     <file preprocess="xml-stripblanks">trackers-tree-view.ui</file>
     <file preprocess="xml-stripblanks">destination-combo.ui</file>
