@@ -543,12 +543,14 @@ impl StateSelector {
         }
     }
 
-    /// Selects the row at position, and shows it
-    fn select(&self, position: u32) {
-        let imp = self.imp();
-        imp.selection.set_selected(position);
-        if let Some(lv) = imp.list_view.borrow().as_ref() {
-            let _ = lv.activate_action("list.scroll-to-item", Some(&position.to_variant()));
+    /// Selects the row at position, shows it and moves the focus there
+    fn select_and_focus(&self, position: u32) {
+        if let Some(lv) = self.imp().list_view.borrow().as_ref() {
+            lv.scroll_to(
+                position,
+                gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT,
+                None,
+            );
         }
     }
 
@@ -563,7 +565,7 @@ impl StateSelector {
         let found = util::objects::<StateRow>(&imp.selection)
             .position(|r| glib::casefold(r.name()).starts_with(&needle));
         if let Some(i) = found {
-            self.select(i as u32);
+            self.select_and_focus(i as u32);
         }
         true
     }

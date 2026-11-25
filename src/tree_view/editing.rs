@@ -74,7 +74,9 @@ impl TreeView {
             Some(label) => queue_start_editing(&label),
             None => {
                 *self.imp().start_edit.borrow_mut() = Some((item.downgrade(), Rc::downgrade(desc)));
-                self.scroll_to(self.find_position(item));
+                if let Some(position) = self.find_position(item) {
+                    self.scroll_to(position, gtk::ListScrollFlags::NONE);
+                }
             }
         }
     }

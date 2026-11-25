@@ -107,7 +107,7 @@ impl TreeView {
         true
     }
 
-    fn focus_widget(&self) -> Option<gtk::Widget> {
+    pub(super) fn focus_widget(&self) -> Option<gtk::Widget> {
         let focus = self.root()?.focus()?;
         focus.is_ancestor(self).then_some(focus)
     }

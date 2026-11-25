@@ -230,8 +230,7 @@ impl TreeView {
 
         self.setup_sorting();
         self.setup_column_actions();
-        self.setup_type_ahead();
-        self.setup_expand_keys();
+        self.setup_keys();
     }
 
     pub fn connect_row_activated<F: Fn(&Self, u32) + 'static>(
@@ -319,34 +318,22 @@ impl TreeView {
         (0..model.n_items()).find(|&i| model.item(i).and_then(row_object).as_ref() == Some(item))
     }
 
-    fn list_base(&self) -> Option<gtk::Widget> {
+    /// Shows the row at position; with flags, also selects it (only it)
+    /// and moves the focus there
+    fn scroll_to(&self, position: u32, flags: gtk::ListScrollFlags) {
         let imp = self.imp();
-        if let Some(lv) = imp.list_view.borrow().as_ref()
-            && lv.parent().is_some()
-        {
-            return Some(lv.clone().upcast());
-        }
-        // the rows of a column view are in a GtkListView
-        let mut child = imp.column_view.first_child();
-        while let Some(c) = child {
-            if c.is::<gtk::ListView>() {
-                return Some(c);
+        match imp.list_view.borrow().as_ref().filter(|lv| lv.parent().is_some()) {
+            Some(lv) => lv.scroll_to(position, flags, None),
+            None => {
+                imp.column_view.scroll_to(position, None::<&gtk::ColumnViewColumn>, flags, None)
             }
-            child = c.next_sibling();
-        }
-        None
-    }
-
-    fn scroll_to(&self, position: Option<u32>) {
-        if let (Some(list), Some(position)) = (self.list_base(), position) {
-            let _ = list.activate_action("list.scroll-to-item", Some(&position.to_variant()));
         }
     }
 
-    /// Selects only the row at position, and shows it
+    /// Selects only the row at position, shows it and moves the focus there
+    /// (the keyboard focus, if it's in the list)
     fn select_and_focus(&self, position: u32) {
-        self.imp().selection.select_item(position, true);
-        self.scroll_to(Some(position));
+        self.scroll_to(position, gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT);
     }
 
     /// Shows the rows with factory in a GtkListView instead of the columns,
