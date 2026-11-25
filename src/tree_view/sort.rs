@@ -105,6 +105,9 @@ impl TreeView {
         let desc = self.find_key(imp.sort_column.get());
         let column = desc.and_then(|d| d.column.borrow().clone());
         imp.updating_sort.set(true);
+        // Setting a column doesn't update the header of the one before
+        // (GTK 4.20), clearing does
+        imp.column_view.sort_by_column(None, imp.sort_order.get());
         imp.column_view.sort_by_column(column.as_ref(), imp.sort_order.get());
         imp.updating_sort.set(false);
     }
