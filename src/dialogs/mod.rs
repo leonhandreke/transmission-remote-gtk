@@ -13,6 +13,7 @@ pub mod move_dialog;
 pub mod preferences;
 pub mod props;
 pub mod remote_prefs;
+pub mod settings;
 pub mod stats;
 
 /// The open window of type T, for the dialogs there's only one of, or else

@@ -91,14 +91,6 @@ impl Session {
         serde_json::from_value(Value::Object(result)).map_err(|e| Error::Decode(e.to_string()))
     }
 
-    /// Its fields as a JSON object, for widgets that load them by their keys
-    pub fn to_obj(&self) -> Obj {
-        match serde_json::to_value(self) {
-            Ok(Value::Object(o)) => o,
-            _ => Obj::new(),
-        }
-    }
-
     /// Whether the download or seed queue is on
     pub fn queues_enabled(&self) -> bool {
         self.download_queue_enabled || self.seed_queue_enabled

@@ -87,48 +87,9 @@ pub const TR_PRI_NORMAL: i64 = 0;
 pub const TR_PRI_HIGH: i64 = 1;
 
 /* The keys of the session (for session_set) */
-pub const SGET_BLOCKLIST_ENABLED: &str = "blocklist_enabled";
-pub const SGET_BLOCKLIST_URL: &str = "blocklist_url";
-pub const SGET_DHT_ENABLED: &str = "dht_enabled";
-pub const SGET_LPD_ENABLED: &str = "lpd_enabled";
-pub const SGET_DOWNLOAD_DIR: &str = "download_dir";
-pub const SGET_INCOMPLETE_DIR: &str = "incomplete_dir";
-pub const SGET_INCOMPLETE_DIR_ENABLED: &str = "incomplete_dir_enabled";
-pub const SGET_ENCRYPTION: &str = "encryption";
-pub const SGET_PEER_LIMIT_GLOBAL: &str = "peer_limit_global";
-pub const SGET_PEER_LIMIT_PER_TORRENT: &str = "peer_limit_per_torrent";
-pub const SGET_PEER_PORT: &str = "peer_port";
-pub const SGET_PEER_PORT_RANDOM_ON_START: &str = "peer_port_random_on_start";
-pub const SGET_PEX_ENABLED: &str = "pex_enabled";
-pub const SGET_PORT_FORWARDING_ENABLED: &str = "port_forwarding_enabled";
-pub const SGET_SEED_RATIO_LIMIT: &str = "seed_ratio_limit";
-pub const SGET_SEED_RATIO_LIMITED: &str = "seed_ratio_limited";
-pub const SGET_SPEED_LIMIT_DOWN: &str = "speed_limit_down";
-pub const SGET_SPEED_LIMIT_DOWN_ENABLED: &str = "speed_limit_down_enabled";
-pub const SGET_SPEED_LIMIT_UP: &str = "speed_limit_up";
-pub const SGET_SPEED_LIMIT_UP_ENABLED: &str = "speed_limit_up_enabled";
-pub const SGET_TRASH_ORIGINAL_TORRENT_FILES: &str = "trash_original_torrent_files";
-pub const SGET_START_ADDED_TORRENTS: &str = "start_added_torrents";
-pub const SGET_RENAME_PARTIAL_FILES: &str = "rename_partial_files";
-pub const SGET_CACHE_SIZE_MIB: &str = "cache_size_mib";
-pub const SGET_SCRIPT_TORRENT_DONE_FILENAME: &str = "script_torrent_done_filename";
-pub const SGET_SCRIPT_TORRENT_DONE_ENABLED: &str = "script_torrent_done_enabled";
-pub const SGET_DOWNLOAD_QUEUE_ENABLED: &str = "download_queue_enabled";
-pub const SGET_DOWNLOAD_QUEUE_SIZE: &str = "download_queue_size";
-pub const SGET_SEED_QUEUE_ENABLED: &str = "seed_queue_enabled";
-pub const SGET_SEED_QUEUE_SIZE: &str = "seed_queue_size";
-pub const SGET_QUEUE_STALLED_ENABLED: &str = "queue_stalled_enabled";
-pub const SGET_QUEUE_STALLED_MINUTES: &str = "queue_stalled_minutes";
-pub const SGET_ALT_SPEED_DOWN: &str = "alt_speed_down";
 pub const SGET_ALT_SPEED_ENABLED: &str = "alt_speed_enabled";
-pub const SGET_ALT_SPEED_TIME_BEGIN: &str = "alt_speed_time_begin";
-pub const SGET_ALT_SPEED_TIME_ENABLED: &str = "alt_speed_time_enabled";
-pub const SGET_ALT_SPEED_TIME_END: &str = "alt_speed_time_end";
-pub const SGET_ALT_SPEED_TIME_DAY: &str = "alt_speed_time_day";
-pub const SGET_ALT_SPEED_UP: &str = "alt_speed_up";
-pub const SGET_SEQUENTIAL_DOWNLOAD: &str = "sequential_download";
-/// "utp" and/or "tcp", in the order of preference
-pub const SGET_PREFERRED_TRANSPORTS: &str = "preferred_transports";
+
+/* The values of the session's preferred_transports and encryption */
 pub const TRANSPORT_UTP: &str = "utp";
 pub const TRANSPORT_TCP: &str = "tcp";
 pub const ENCRYPTION_REQUIRED: &str = "required";

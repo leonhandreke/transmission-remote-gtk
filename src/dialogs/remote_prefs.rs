@@ -1,22 +1,71 @@
 //! The settings of the server: loaded from the latest session object of the
-//! client, sent with a session-set on OK. The session is then refreshed (see
-//! Client::dispatch_session_set).
+//! client into a settings object, which the widgets are bound to; the
+//! settings changed are sent with a session-set on OK. The session is then
+//! refreshed (see Client::dispatch_session_set).
 
 use std::cell::RefCell;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
-use serde_json::json;
 
 use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
-use crate::dialogs::json_widgets::JsonWidgets;
+use crate::dialogs::settings::{Closures, settings_object, source_property};
 use crate::i18n::{sprintf, tr};
-use crate::json::{Obj, get_i64};
 use crate::main_window::MainWindow;
 use crate::protocol::{self as p, Session};
 use crate::util;
+
+settings_object! {
+    /// The settings of the server the dialog shows, the fields of the session
+    pub struct RemoteSettings("TrgRemoteSettings", Session) in mod settings_imp {
+        download_dir: String,
+        incomplete_dir_enabled: bool,
+        incomplete_dir: String,
+        script_torrent_done_enabled: bool,
+        script_torrent_done_filename: String,
+        cache_size_mib: i64,
+        rename_partial_files: bool,
+        trash_original_torrent_files: bool,
+        start_added_torrents: bool,
+        sequential_download: Option<bool>,
+
+        peer_port: i64,
+        peer_port_random_on_start: bool,
+        port_forwarding_enabled: bool,
+        encryption: String,
+        preferred_transports: Option<Vec<String>>,
+        pex_enabled: bool,
+        dht_enabled: bool,
+        lpd_enabled: bool,
+        blocklist_enabled: bool,
+        blocklist_url: String,
+
+        speed_limit_down_enabled: bool,
+        speed_limit_down: i64,
+        speed_limit_up_enabled: bool,
+        speed_limit_up: i64,
+        alt_speed_enabled: bool,
+        alt_speed_time_enabled: bool,
+        alt_speed_time_begin: i64,
+        alt_speed_time_end: i64,
+        alt_speed_time_day: i64,
+        alt_speed_down: i64,
+        alt_speed_up: i64,
+
+        seed_ratio_limited: bool,
+        seed_ratio_limit: f64,
+        download_queue_enabled: bool,
+        download_queue_size: i64,
+        seed_queue_enabled: bool,
+        seed_queue_size: i64,
+        queue_stalled_enabled: bool,
+        queue_stalled_minutes: i64,
+        peer_limit_global: i64,
+        peer_limit_per_torrent: i64,
+    }
+}
 
 mod imp {
     use super::*;
@@ -25,11 +74,19 @@ mod imp {
     #[template(resource = "/io/github/TransmissionRemoteGtk/ui/remote-prefs-dialog.ui")]
     pub struct RemotePrefsDialog {
         #[template_child]
+        pub settings: TemplateChild<RemoteSettings>,
+        #[template_child]
         pub encryption_combo: TemplateChild<gtk::DropDown>,
+        #[template_child]
+        pub transport_label: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub transport_combo: TemplateChild<gtk::DropDown>,
         #[template_child]
         pub port_test_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub port_test_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub blocklist_check: TemplateChild<gtk::CheckButton>,
         #[template_child]
         pub blocklist_update_button: TemplateChild<gtk::Button>,
         #[template_child]
@@ -42,86 +99,9 @@ mod imp {
         pub alt_end_mins_spin: TemplateChild<gtk::SpinButton>,
         #[template_child]
         pub alt_days_grid: TemplateChild<gtk::Grid>,
-        #[template_child]
-        pub cache_size_spin: TemplateChild<gtk::SpinButton>,
-        #[template_child]
-        pub blocklist_url_entry: TemplateChild<gtk::Entry>,
-        #[template_child]
-        pub download_dir_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub incomplete_dir_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub incomplete_dir_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub script_torrent_done_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub script_torrent_done_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub rename_partial_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub trash_original_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub start_added_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub peer_port_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub peer_port_random_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub port_forwarding_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub sequential_download_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub transport_label: TemplateChild<gtk::Label>,
-        #[template_child]
-        pub transport_combo: TemplateChild<gtk::DropDown>,
-        #[template_child]
-        pub pex_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub dht_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub lpd_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub blocklist_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub speed_limit_down_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub speed_limit_down_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub speed_limit_up_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub speed_limit_up_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub alt_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub alt_time_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub alt_speed_down_spin: TemplateChild<gtk::SpinButton>,
-        #[template_child]
-        pub alt_speed_up_spin: TemplateChild<gtk::SpinButton>,
-        #[template_child]
-        pub seed_ratio_limited_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub seed_ratio_limit_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub peer_limit_global_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub peer_limit_per_torrent_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub download_queue_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub download_queue_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub seed_queue_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub seed_queue_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub queue_stalled_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub queue_stalled_spin: TemplateChild<gtk::Widget>,
 
         pub client: RefCell<Option<Client>>,
         pub win: glib::WeakRef<MainWindow>,
-        pub widgets: RefCell<JsonWidgets>,
     }
 
     #[glib::object_subclass]
@@ -131,8 +111,10 @@ mod imp {
         type ParentType = Dialog;
 
         fn class_init(klass: &mut Self::Class) {
+            RemoteSettings::ensure_type();
             klass.bind_template();
             klass.bind_template_instance_callbacks();
+            Closures::bind_template_callbacks(klass);
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -186,14 +168,6 @@ fn locale_day_names() -> Option<Vec<String>> {
 
 #[gtk::template_callbacks]
 impl RemotePrefsDialog {
-    /// The alternate limits apply when they're on, or at the alternate times
-    #[template_callback]
-    fn alt_speed_dependency_cb(check: &gtk::CheckButton, _pspec: &glib::ParamSpec) {
-        if let Some(d) = dlg(check) {
-            d.alt_speed_dependency();
-        }
-    }
-
     /// Two digits
     #[template_callback]
     fn time_spin_output(spin: &gtk::SpinButton) -> bool {
@@ -284,118 +258,17 @@ impl RemotePrefsDialog {
         d.set_transient_for(Some(win));
 
         let session = client.session_clone().unwrap_or_default();
-        let s = session.to_obj();
-        let mut widgets = JsonWidgets::default();
-
-        let session_widgets: Vec<(gtk::Widget, &str)> = vec![
-            (imp.download_dir_entry.get().upcast::<gtk::Widget>(), p::SGET_DOWNLOAD_DIR),
-            (
-                imp.incomplete_dir_check.get().upcast::<gtk::Widget>(),
-                p::SGET_INCOMPLETE_DIR_ENABLED,
-            ),
-            (imp.incomplete_dir_entry.get().upcast::<gtk::Widget>(), p::SGET_INCOMPLETE_DIR),
-            (
-                imp.script_torrent_done_check.get().upcast::<gtk::Widget>(),
-                p::SGET_SCRIPT_TORRENT_DONE_ENABLED,
-            ),
-            (
-                imp.script_torrent_done_entry.get().upcast::<gtk::Widget>(),
-                p::SGET_SCRIPT_TORRENT_DONE_FILENAME,
-            ),
-            (imp.rename_partial_check.get().upcast::<gtk::Widget>(), p::SGET_RENAME_PARTIAL_FILES),
-            (
-                imp.trash_original_check.get().upcast::<gtk::Widget>(),
-                p::SGET_TRASH_ORIGINAL_TORRENT_FILES,
-            ),
-            (imp.start_added_check.get().upcast::<gtk::Widget>(), p::SGET_START_ADDED_TORRENTS),
-            (
-                imp.sequential_download_check.get().upcast::<gtk::Widget>(),
-                p::SGET_SEQUENTIAL_DOWNLOAD,
-            ),
-            (imp.peer_port_spin.get().upcast::<gtk::Widget>(), p::SGET_PEER_PORT),
-            (
-                imp.peer_port_random_check.get().upcast::<gtk::Widget>(),
-                p::SGET_PEER_PORT_RANDOM_ON_START,
-            ),
-            (
-                imp.port_forwarding_check.get().upcast::<gtk::Widget>(),
-                p::SGET_PORT_FORWARDING_ENABLED,
-            ),
-            (imp.pex_check.get().upcast::<gtk::Widget>(), p::SGET_PEX_ENABLED),
-            (imp.dht_check.get().upcast::<gtk::Widget>(), p::SGET_DHT_ENABLED),
-            (imp.lpd_check.get().upcast::<gtk::Widget>(), p::SGET_LPD_ENABLED),
-            (imp.blocklist_check.get().upcast::<gtk::Widget>(), p::SGET_BLOCKLIST_ENABLED),
-            (
-                imp.speed_limit_down_check.get().upcast::<gtk::Widget>(),
-                p::SGET_SPEED_LIMIT_DOWN_ENABLED,
-            ),
-            (imp.speed_limit_down_spin.get().upcast::<gtk::Widget>(), p::SGET_SPEED_LIMIT_DOWN),
-            (
-                imp.speed_limit_up_check.get().upcast::<gtk::Widget>(),
-                p::SGET_SPEED_LIMIT_UP_ENABLED,
-            ),
-            (imp.speed_limit_up_spin.get().upcast::<gtk::Widget>(), p::SGET_SPEED_LIMIT_UP),
-            (imp.alt_check.get().upcast::<gtk::Widget>(), p::SGET_ALT_SPEED_ENABLED),
-            (imp.alt_time_check.get().upcast::<gtk::Widget>(), p::SGET_ALT_SPEED_TIME_ENABLED),
-            (imp.alt_speed_down_spin.get().upcast::<gtk::Widget>(), p::SGET_ALT_SPEED_DOWN),
-            (imp.alt_speed_up_spin.get().upcast::<gtk::Widget>(), p::SGET_ALT_SPEED_UP),
-            (
-                imp.seed_ratio_limited_check.get().upcast::<gtk::Widget>(),
-                p::SGET_SEED_RATIO_LIMITED,
-            ),
-            (imp.seed_ratio_limit_spin.get().upcast::<gtk::Widget>(), p::SGET_SEED_RATIO_LIMIT),
-            (imp.peer_limit_global_spin.get().upcast::<gtk::Widget>(), p::SGET_PEER_LIMIT_GLOBAL),
-            (
-                imp.peer_limit_per_torrent_spin.get().upcast::<gtk::Widget>(),
-                p::SGET_PEER_LIMIT_PER_TORRENT,
-            ),
-        ];
-        for (w, key) in &session_widgets {
-            widgets.add(w, &s, key);
-        }
-
-        let more_widgets: [(gtk::Widget, &str); 8] = [
-            (imp.download_queue_check.get().upcast(), p::SGET_DOWNLOAD_QUEUE_ENABLED),
-            (imp.download_queue_spin.get().upcast(), p::SGET_DOWNLOAD_QUEUE_SIZE),
-            (imp.seed_queue_check.get().upcast(), p::SGET_SEED_QUEUE_ENABLED),
-            (imp.seed_queue_spin.get().upcast(), p::SGET_SEED_QUEUE_SIZE),
-            (imp.queue_stalled_check.get().upcast(), p::SGET_QUEUE_STALLED_ENABLED),
-            (imp.queue_stalled_spin.get().upcast(), p::SGET_QUEUE_STALLED_MINUTES),
-            (imp.cache_size_spin.get().upcast(), p::SGET_CACHE_SIZE_MIB),
-            (imp.blocklist_url_entry.get().upcast(), p::SGET_BLOCKLIST_URL),
-        ];
-        for (w, key) in &more_widgets {
-            widgets.add(w, &s, key);
-        }
-
-        Self::time_widget_add(
-            &mut widgets,
-            &s,
-            p::SGET_ALT_SPEED_TIME_BEGIN,
-            &imp.alt_begin_hours_spin,
-            &imp.alt_begin_mins_spin,
-        );
-        Self::time_widget_add(
-            &mut widgets,
-            &s,
-            p::SGET_ALT_SPEED_TIME_END,
-            &imp.alt_end_hours_spin,
-            &imp.alt_end_mins_spin,
-        );
-        d.alt_days_add(&mut widgets, &s, p::SGET_ALT_SPEED_TIME_DAY);
-        *imp.widgets.borrow_mut() = widgets;
-        d.alt_speed_dependency();
-
-        imp.encryption_combo.set_selected(match session.encryption.as_str() {
-            p::ENCRYPTION_REQUIRED => 0,
-            p::ENCRYPTION_ALLOWED => 2,
-            _ => 1,
-        });
-
-        d.transports_add(&mut imp.widgets.borrow_mut(), &session);
-
+        imp.transport_label.set_visible(session.preferred_transports.is_some());
+        imp.transport_combo.set_visible(session.preferred_transports.is_some());
         imp.blocklist_check
             .set_label(Some(&sprintf(&tr("Blocklist (%ld entries)"), &[&session.blocklist_size])));
+        imp.settings.load(session);
+
+        d.bind_encryption();
+        d.bind_transports();
+        d.bind_time("alt-speed-time-begin", &imp.alt_begin_hours_spin, &imp.alt_begin_mins_spin);
+        d.bind_time("alt-speed-time-end", &imp.alt_end_hours_spin, &imp.alt_end_mins_spin);
+        d.bind_days();
 
         d.on_response(|d, response| {
             if response == Response::Ok {
@@ -411,31 +284,31 @@ impl RemotePrefsDialog {
         self.imp().client.borrow().clone().unwrap()
     }
 
-    fn alt_speed_dependency(&self) {
+    /// The encryption, in the order of the drop-down
+    fn bind_encryption(&self) {
         let imp = self.imp();
-        let sensitive = imp.alt_time_check.is_active() || imp.alt_check.is_active();
-        imp.alt_speed_down_spin.set_sensitive(sensitive);
-        imp.alt_speed_up_spin.set_sensitive(sensitive);
+        imp.settings
+            .bind_property("encryption", &*imp.encryption_combo, "selected")
+            .transform_to(|_, encryption: String| {
+                Some(match encryption.as_str() {
+                    p::ENCRYPTION_REQUIRED => 0u32,
+                    p::ENCRYPTION_ALLOWED => 2,
+                    _ => 1,
+                })
+            })
+            .transform_from(|_, selected: u32| {
+                Some(match selected {
+                    0 => p::ENCRYPTION_REQUIRED,
+                    2 => p::ENCRYPTION_ALLOWED,
+                    _ => p::ENCRYPTION_PREFERRED,
+                })
+            })
+            .bidirectional()
+            .sync_create()
+            .build();
     }
 
-    /// A time of day in minutes, in a spin button for the hours and one for
-    /// the minutes
-    fn time_widget_add(
-        widgets: &mut JsonWidgets,
-        obj: &Obj,
-        key: &str,
-        hours: &gtk::SpinButton,
-        mins: &gtk::SpinButton,
-    ) {
-        let value = get_i64(obj, key);
-        hours.set_value((value as f64 / 60.0).floor());
-        mins.set_value((value % 60) as f64);
-        let (h, m) = (hours.clone(), mins.clone());
-        widgets
-            .add_custom(key, move || json!(h.value_as_int() as i64 * 60 + m.value_as_int() as i64));
-    }
-
-    /// The preferred transports, in the order of the transport combo
+    /// The preferred transports, in the order of the transport drop-down
     const TRANSPORTS: [&'static [&'static str]; 4] = [
         &[p::TRANSPORT_UTP, p::TRANSPORT_TCP],
         &[p::TRANSPORT_TCP, p::TRANSPORT_UTP],
@@ -443,60 +316,85 @@ impl RemotePrefsDialog {
         &[p::TRANSPORT_UTP],
     ];
 
-    fn transports_add(&self, widgets: &mut JsonWidgets, s: &Session) {
+    /// The preferred transports, a position of the drop-down (the first if
+    /// they're none of them)
+    fn bind_transports(&self) {
         let imp = self.imp();
-        let Some(current) = &s.preferred_transports else {
-            imp.transport_label.set_visible(false);
-            imp.transport_combo.set_visible(false);
-            return;
-        };
-        let current: Vec<&str> = current.iter().map(String::as_str).collect();
-        let index = Self::TRANSPORTS.iter().position(|t| *t == current.as_slice()).unwrap_or(0);
-        imp.transport_combo.set_selected(index as u32);
-        let combo = imp.transport_combo.get();
-        widgets.add_custom(p::SGET_PREFERRED_TRANSPORTS, move || {
-            json!(Self::TRANSPORTS.get(combo.selected() as usize).unwrap_or(&Self::TRANSPORTS[0]))
-        });
+        imp.settings
+            .bind_property("preferred-transports", &*imp.transport_combo, "selected")
+            .transform_to(|_, transports: Vec<String>| {
+                let position = Self::TRANSPORTS.iter().position(|t| *t == transports.as_slice());
+                Some(position.unwrap_or(0) as u32)
+            })
+            .transform_from(|_, selected: u32| {
+                let transports =
+                    Self::TRANSPORTS.get(selected as usize).unwrap_or(&Self::TRANSPORTS[0]);
+                Some(transports.iter().map(|t| t.to_string()).collect::<Vec<String>>())
+            })
+            .bidirectional()
+            .sync_create()
+            .build();
     }
 
-    /// The days of the week, a bit each in a number
-    fn alt_days_add(&self, widgets: &mut JsonWidgets, obj: &Obj, key: &str) {
-        let grid = self.imp().alt_days_grid.get();
-        let days = get_i64(obj, key);
+    /// A time of day in minutes (a property of the settings), in a spin
+    /// button for the hours and one for the minutes
+    fn bind_time(&self, property: &'static str, hours: &gtk::SpinButton, mins: &gtk::SpinButton) {
+        let settings = &*self.imp().settings;
+        settings
+            .bind_property(property, hours, "value")
+            .transform_to(|_, time: i64| Some((time / 60) as f64))
+            .transform_from(move |b, h: f64| {
+                Some(h.round() as i64 * 60 + source_property::<i64>(b, property) % 60)
+            })
+            .bidirectional()
+            .sync_create()
+            .build();
+        settings
+            .bind_property(property, mins, "value")
+            .transform_to(|_, time: i64| Some((time % 60) as f64))
+            .transform_from(move |b, m: f64| {
+                Some(source_property::<i64>(b, property) / 60 * 60 + m.round() as i64)
+            })
+            .bidirectional()
+            .sync_create()
+            .build();
+    }
+
+    /// The days of the week of the alternate times, a bit each (Sunday
+    /// first), in the check boxes of the grid
+    fn bind_days(&self) {
+        let imp = self.imp();
         let names = if cfg!(feature = "nl_langinfo") { locale_day_names() } else { None };
         for i in 0..7 {
-            if let Some(w) = grid.child_at(i, 0).and_downcast::<gtk::CheckButton>() {
-                if let Some(names) = &names {
-                    w.set_label(Some(&names[i as usize]));
-                }
-                w.set_active(days & (1 << i) != 0);
+            let Some(check) = imp.alt_days_grid.child_at(i, 0).and_downcast::<gtk::CheckButton>()
+            else {
+                continue;
+            };
+            if let Some(names) = &names {
+                check.set_label(Some(&names[i as usize]));
             }
+            let bit = 1i64 << i;
+            imp.settings
+                .bind_property("alt-speed-time-day", &check, "active")
+                .transform_to(move |_, days: i64| Some(days & bit != 0))
+                .transform_from(move |b, active: bool| {
+                    let days = source_property::<i64>(b, "alt-speed-time-day");
+                    Some(if active { days | bit } else { days & !bit })
+                })
+                .bidirectional()
+                .sync_create()
+                .build();
         }
-        widgets.add_custom(key, move || {
-            let mut days = 0i64;
-            for i in 0..7 {
-                if grid
-                    .child_at(i, 0)
-                    .and_downcast::<gtk::CheckButton>()
-                    .is_some_and(|w| w.is_active())
-                {
-                    days += 1 << i;
-                }
-            }
-            json!(days)
-        });
     }
 
+    /// Sends the settings that changed, if any
     fn update_session(&self) {
-        let imp = self.imp();
-        let encryption = match imp.encryption_combo.selected() {
-            0 => p::ENCRYPTION_REQUIRED,
-            2 => p::ENCRYPTION_ALLOWED,
-            _ => p::ENCRYPTION_PREFERRED,
-        };
-        let mut req = p::session_set().with(p::SGET_ENCRYPTION, encryption);
-        imp.widgets.borrow().save(req.params_mut());
-
+        let changes = self.imp().settings.changes();
+        if changes.is_empty() {
+            return;
+        }
+        let mut req = p::session_set();
+        req.params_mut().extend(changes);
         self.client().dispatch_session_set(req);
     }
 }
