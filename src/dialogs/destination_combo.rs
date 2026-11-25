@@ -1,7 +1,6 @@
-//! An entry for a download directory, with a menu button to choose the
-//! default directory, the saved destinations (labels) or the directory of an
-//! existing torrent. Emits "changed" when the directory changes
-//! (trg-destination-combo.c).
+//! An entry for a download directory, with a menu button to choose the default
+//! directory, the saved destinations (labels) or the directory of an existing
+//! torrent. Emits "changed" when the directory changes.
 
 use std::cell::RefCell;
 
@@ -10,9 +9,8 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 
 use crate::client::Client;
-use crate::dialog;
-use crate::prefs;
-use crate::protocol::{self as p, get_str};
+use crate::json::{get_str, objects};
+use crate::prefs::{self, Scope};
 use crate::util;
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -27,7 +25,7 @@ mod imp {
     use std::sync::OnceLock;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-destination-combo.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/destination-combo.ui")]
     pub struct DestinationCombo {
         #[template_child]
         pub entry: TemplateChild<gtk::Entry>,
@@ -76,7 +74,7 @@ glib::wrapper! {
 impl DestinationCombo {
     #[template_callback]
     fn trg_destination_combo_entry_changed_cb(entry: &gtk::Entry) {
-        if let Some(combo) = dialog::ancestor::<DestinationCombo>(entry) {
+        if let Some(combo) = util::ancestor::<DestinationCombo>(entry) {
             combo.emit_by_name::<()>("changed", &[]);
         }
     }
@@ -113,7 +111,7 @@ impl DestinationCombo {
 
         // Restore any previous selection, or the default dir (the first item)
         let last = last_selection_key
-            .and_then(|k| client.prefs().get_string(k, prefs::CONNECTION))
+            .and_then(|k| client.prefs().get_string(k, Scope::Connection))
             .filter(|s| !s.is_empty());
         match last {
             Some(dir) => imp.entry.set_text(&dir),
@@ -153,15 +151,13 @@ impl DestinationCombo {
         // the default dir
         let default_dir = client
             .session()
-            .and_then(|s| {
-                get_str(&s, p::SGET_DOWNLOAD_DIR).map(|d| util::rm_trailing_slashes(d).to_string())
-            })
+            .map(|s| util::rm_trailing_slashes(&s.download_dir).to_string())
             .unwrap_or_default();
         self.insert(None, &default_dir, DestType::Default);
 
         // the saved dirs
-        if let Some(saved) = prefs.get_array(prefs::KEY_DESTINATIONS, prefs::CONNECTION) {
-            for obj in p::objects(&saved) {
+        if let Some(saved) = prefs.get_array(prefs::KEY_DESTINATIONS, Scope::Connection) {
+            for obj in objects(&saved) {
                 self.insert(
                     get_str(obj, prefs::SUBKEY_LABEL),
                     get_str(obj, prefs::KEY_DESTINATIONS_SUBKEY_DIR).unwrap_or(""),
@@ -171,7 +167,7 @@ impl DestinationCombo {
         }
 
         // all previously used download dirs, sorted
-        let mut dirs = client.torrent_model().map(|m| m.download_dirs()).unwrap_or_default();
+        let mut dirs = client.torrent_model().download_dirs();
         dirs.sort();
         for dir in dirs.iter().filter(|d| **d != default_dir) {
             self.insert(None, dir, DestType::Existing);
@@ -192,7 +188,7 @@ impl DestinationCombo {
             (imp.last_selection.borrow().as_ref(), imp.client.borrow().as_ref())
             && self.has_text()
         {
-            client.prefs().set_string(key, &self.dir(), prefs::CONNECTION);
+            client.prefs().set_string(key, &self.dir(), Scope::Connection);
         }
     }
 }

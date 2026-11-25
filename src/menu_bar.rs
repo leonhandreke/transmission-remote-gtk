@@ -1,158 +1,23 @@
-//! The toolbar (trg-toolbar.c) and the main menu (trg-menu-bar.c).
-//!
-//! The main menu is a GMenuModel. The menu items activate actions installed
-//! on the main window ("win." prefix), apart from the stateful view actions
-//! (check and radio items) which are created here as they're backed by
-//! preferences. It's shown in the window with a GtkPopoverMenuBar, or on
-//! macOS in the system menu bar with gtk_application_set_menubar(). There
-//! GTK provides the application menu, with About, Preferences and Quit
-//! (app.about, app.preferences and app.quit), so those aren't repeated in the
-//! other menus, and the Help menu links to the project page (app.help).
+//! The main menu, a GMenuModel. The menu items activate actions installed on
+//! the main window ("win." prefix), apart from the stateful view actions (check
+//! and radio items) which are created here as they're backed by preferences.
+//! It's shown in the window with a GtkPopoverMenuBar, or on macOS in the system
+//! menu bar with gtk_application_set_menubar(). There GTK provides the
+//! application menu, with About, Preferences and Quit (app.about,
+//! app.preferences and app.quit), so those aren't repeated in the other menus,
+//! and the Help menu links to the project page (app.help).
 
 use std::cell::{Cell, RefCell};
 
 use gtk::prelude::*;
-use gtk::subclass::prelude::*;
-use gtk::{CompositeTemplate, gio, glib};
+use gtk::{gio, glib};
 
-use crate::i18n::{sprintf, tr};
+use crate::client::ConnectionState;
+use crate::i18n::tr;
 use crate::main_window::MainWindow;
-use crate::prefs::{self, Prefs};
+use crate::prefs::{self, Prefs, Scope};
 use crate::tree_view::TreeView;
 use crate::util;
-
-/* The toolbar: a box of buttons with the "toolbar" style class. The buttons
- * activate the main window's actions, so they are made (in)sensitive along
- * with the menu items. */
-
-mod tb_imp {
-    use super::*;
-
-    #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-toolbar.ui")]
-    pub struct Toolbar {
-        #[template_child]
-        pub server_button: TemplateChild<gtk::MenuButton>,
-        #[template_child]
-        pub status_stack: TemplateChild<gtk::Stack>,
-        #[template_child]
-        pub status_icon: TemplateChild<gtk::Image>,
-        #[template_child]
-        pub spinner_box: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub server_label: TemplateChild<gtk::Label>,
-        #[template_child]
-        pub server_menu: TemplateChild<gio::Menu>,
-    }
-
-    #[glib::object_subclass]
-    impl ObjectSubclass for Toolbar {
-        const NAME: &'static str = "TrgToolbar";
-        type Type = super::Toolbar;
-        type ParentType = gtk::Box;
-
-        fn class_init(klass: &mut Self::Class) {
-            klass.bind_template();
-        }
-
-        fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
-            obj.init_template();
-        }
-    }
-
-    impl ObjectImpl for Toolbar {
-        fn constructed(&self) {
-            self.parent_constructed();
-            // The theme's green, as GTK has no style class for it
-            let css = gtk::CssProvider::new();
-            css.load_from_string("image.server-connected { color: @success_color; }");
-            gtk::style_context_add_provider_for_display(
-                &self.obj().display(),
-                &css,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        }
-    }
-    impl WidgetImpl for Toolbar {}
-    impl BoxImpl for Toolbar {}
-}
-
-glib::wrapper! {
-    pub struct Toolbar(ObjectSubclass<tb_imp::Toolbar>)
-        @extends gtk::Box, gtk::Widget,
-        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConnectionState {
-    Disconnected,
-    Connecting,
-    Connected,
-}
-
-impl Toolbar {
-    pub fn new(prefs: &Prefs) -> Self {
-        let tb: Self = glib::Object::new();
-        let imp = tb.imp();
-        imp.server_menu.prepend_section(None, &file_connect_menu_new(prefs));
-        // Under the button from its start, instead of centered, which would
-        // stick out of the window
-        if let Some(popover) = imp.server_button.popover() {
-            popover.set_halign(gtk::Align::Start);
-        }
-        tb
-    }
-
-    /// The server picker shows the profile connected (or connecting) to, or
-    /// the one Connect would use, and the state: a green dot while
-    /// connected, a spinner while connecting, the dot's outline otherwise.
-    /// The state is also in the tooltip and the accessible description, as
-    /// the colour alone doesn't tell it to everyone.
-    pub fn set_connection(&self, state: ConnectionState, name: &str) {
-        let imp = self.imp();
-        let (icon, class, description, tooltip) = match state {
-            ConnectionState::Connected => (
-                "trg-status-connected-symbolic",
-                "server-connected",
-                tr("Connected"),
-                sprintf(&tr("Connected to %s"), &[&name]),
-            ),
-            ConnectionState::Connecting => (
-                "trg-status-disconnected-symbolic",
-                "dim-label",
-                tr("Connecting"),
-                sprintf(&tr("Connecting to %s…"), &[&name]),
-            ),
-            ConnectionState::Disconnected => (
-                "trg-status-disconnected-symbolic",
-                "dim-label",
-                tr("Not connected"),
-                tr("Not connected"),
-            ),
-        };
-        imp.status_icon.set_icon_name(Some(icon));
-        imp.status_icon.set_css_classes(&[class]);
-        // in the dot's place, which is as wide
-        let stack = &imp.status_stack;
-        if state != ConnectionState::Connecting {
-            stack.set_visible_child_name("icon");
-        } else if stack.visible_child_name().as_deref() != Some("spinner") {
-            util::restart_spinner(&imp.spinner_box);
-            stack.set_visible_child_name("spinner");
-        }
-        imp.server_label.set_label(name);
-        // The name is cut at the window's minimum width, but not to nothing
-        imp.server_label.set_width_chars(name.chars().count().min(8) as i32);
-        let button = &imp.server_button;
-        button.set_tooltip_text(Some(&tooltip));
-        button.update_property(&[
-            gtk::accessible::Property::Label(name),
-            gtk::accessible::Property::Description(&description),
-        ]);
-    }
-}
-
-/* The main menu */
 
 const CONNECTED_ACTIONS: &[&str] =
     &["add", "add-url", "remote-prefs", "view-stats", "resume-all", "pause-all"];
@@ -196,7 +61,7 @@ fn append_items(menu: &gio::Menu, items: &gio::MenuModel) {
 }
 
 fn style_state(prefs: &Prefs) -> glib::Variant {
-    let mut style = prefs.get_int(prefs::KEY_STYLE, prefs::GLOBAL);
+    let mut style = prefs.get_int(prefs::KEY_STYLE, Scope::Global);
     if style < 0 || style as usize >= STYLE_NICKS.len() {
         style = prefs::STYLE_TR;
     }
@@ -268,7 +133,7 @@ impl MenuBar {
         }
 
         let builder =
-            gtk::Builder::from_resource("/io/github/TransmissionRemoteGtk/ui/trg-menu-bar.ui");
+            gtk::Builder::from_resource("/io/github/TransmissionRemoteGtk/ui/menu-bar.ui");
         let menu: gio::Menu = builder.object("main_menu").unwrap();
 
         // The connect submenu of the File menu
@@ -369,12 +234,12 @@ impl MenuBar {
             Some(glib::VariantTy::STRING),
             &style_state(prefs),
         );
+        // Like the view items, it sets the preference, and its state follows
         let p = prefs.clone();
-        action.connect_change_state(move |action, value| {
-            let Some(nick) = value.and_then(|v| v.str().map(str::to_string)) else { return };
-            if let Some(i) = STYLE_NICKS.iter().position(|n| *n == nick) {
-                action.set_state(value.unwrap());
-                p.set_int(prefs::KEY_STYLE, i as i64, prefs::GLOBAL);
+        action.connect_change_state(move |_, value| {
+            let nick = value.and_then(|v| v.str());
+            if let Some(i) = STYLE_NICKS.iter().position(|n| Some(*n) == nick) {
+                p.set_int(prefs::KEY_STYLE, i as i64, Scope::Global);
             }
         });
         let weak = action.downgrade();
@@ -388,30 +253,22 @@ impl MenuBar {
         win.add_action(&action);
     }
 
-    /// A boolean preference, as stateful "win.<name>" action
-    fn view_item_new(
-        win: &MainWindow,
-        prefs: &Prefs,
-        name: &str,
-        key: &'static str,
-        dependency: Option<&str>,
-    ) {
+    /// A boolean preference, as stateful "win.<name>" action. Changing its
+    /// state sets the preference, and its state follows the preference
+    /// (which the widgets follow too).
+    fn view_item_new(win: &MainWindow, prefs: &Prefs, name: &str, key: &'static str) {
         let action = gio::SimpleAction::new_stateful(
             name,
             None,
-            &prefs.get_bool(key, prefs::GLOBAL).to_variant(),
+            &prefs.get_bool(key, Scope::Global).to_variant(),
         );
         win.add_action(&action);
 
-        if let Some(dep) = dependency.and_then(|d| win.lookup_action(d)) {
-            action.set_enabled(dep.state().and_then(|s| s.get::<bool>()).unwrap_or(false));
-        }
-
         let p = prefs.clone();
-        action.connect_change_state(move |action, value| {
-            let Some(value) = value else { return };
-            action.set_state(value);
-            p.set_bool(key, value.get::<bool>().unwrap_or(false), prefs::GLOBAL);
+        action.connect_change_state(move |_, value| {
+            if let Some(value) = value.and_then(|v| v.get::<bool>()) {
+                p.set_bool(key, value, Scope::Global);
+            }
         });
 
         // Preferences can also be changed from the local preferences dialog
@@ -421,7 +278,7 @@ impl MenuBar {
             if updated != Some(key) {
                 return;
             }
-            let value = prefs.get_bool(key, prefs::GLOBAL);
+            let value = prefs.get_bool(key, Scope::Global);
             if action.state().and_then(|s| s.get::<bool>()) != Some(value) {
                 action.set_state(&value.to_variant());
             }
@@ -440,37 +297,23 @@ impl MenuBar {
         let sort_menu = torrent_tv.sort_menu(win);
         view_section.insert_submenu(0, Some(&tr("Sort")), &sort_menu);
 
-        Self::view_item_new(win, prefs, "view-states", prefs::KEY_SHOW_STATE_SELECTOR, None);
-        Self::view_item_new(win, prefs, "filter-dirs", prefs::KEY_FILTER_DIRS, Some("view-states"));
-        Self::view_item_new(
-            win,
-            prefs,
-            "filter-trackers",
-            prefs::KEY_FILTER_TRACKERS,
-            Some("view-states"),
-        );
-        Self::view_item_new(
-            win,
-            prefs,
-            "directories-first",
-            prefs::KEY_DIRECTORIES_FIRST,
-            Some("view-states"),
-        );
+        Self::view_item_new(win, prefs, "view-states", prefs::KEY_SHOW_STATE_SELECTOR);
+        Self::view_item_new(win, prefs, "filter-dirs", prefs::KEY_FILTER_DIRS);
+        Self::view_item_new(win, prefs, "filter-trackers", prefs::KEY_FILTER_TRACKERS);
+        Self::view_item_new(win, prefs, "directories-first", prefs::KEY_DIRECTORIES_FIRST);
 
-        if let Some(view_states) = win.lookup_action("view-states") {
-            let w = win.downgrade();
-            view_states.connect_notify_local(Some("state"), move |action, _| {
-                if let Some(win) = w.upgrade() {
-                    let state = action
-                        .downcast_ref::<gio::Action>()
-                        .and_then(|a| a.state())
-                        .and_then(|s| s.get::<bool>());
-                    set_enabled(&win, VIEW_DEPENDENT_ACTIONS, state.unwrap_or(false));
-                }
-            });
-        }
+        // The sidebar's options are enabled while it's shown
+        let sidebar_shown =
+            |prefs: &Prefs| prefs.get_bool(prefs::KEY_SHOW_STATE_SELECTOR, Scope::Global);
+        set_enabled(win, VIEW_DEPENDENT_ACTIONS, sidebar_shown(prefs));
+        let w = win.downgrade();
+        prefs.connect_changed(move |prefs, key| {
+            if let (Some(win), Some(prefs::KEY_SHOW_STATE_SELECTOR)) = (w.upgrade(), key) {
+                set_enabled(&win, VIEW_DEPENDENT_ACTIONS, sidebar_shown(prefs));
+            }
+        });
 
-        Self::view_item_new(win, prefs, "view-notebook", prefs::KEY_SHOW_NOTEBOOK, None);
+        Self::view_item_new(win, prefs, "view-notebook", prefs::KEY_SHOW_NOTEBOOK);
     }
 }
 

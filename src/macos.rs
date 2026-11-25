@@ -1,6 +1,6 @@
-//! macOS support (from main.c and trg-gtk-app.c): finding GTK's data and our
-//! translations in an application bundle or the prefix, following the
-//! system's light/dark appearance, and a few AppKit conventions.
+//! macOS support: finding GTK's data and our translations in an application
+//! bundle or the prefix, following the system's light/dark appearance, and a
+//! few AppKit conventions.
 
 use std::path::{Path, PathBuf};
 

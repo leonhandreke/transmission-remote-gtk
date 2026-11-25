@@ -1,5 +1,5 @@
-//! Adding torrents from files, with options: the destination, the priority
-//! and the files to download (trg-torrent-add-dialog.c), or straight away.
+//! Adding torrents from files, with options: the destination, the priority and
+//! the files to download, or straight away.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -8,17 +8,16 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 
+use crate::add_torrents::{self, AddOptions};
 use crate::bencode;
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
 use crate::dialogs::destination_combo::DestinationCombo;
-use crate::files::{self, FilesModel, FilesView};
+use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::files::{self, FileObject, FileSetter, FilesModel, FilesView};
 use crate::i18n::{sprintf, tr};
-use crate::item;
 use crate::main_window::MainWindow;
-use crate::prefs::{self, Prefs};
-use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_NORMAL};
-use crate::upload::{self, Upload};
+use crate::prefs::{self, Prefs, Scope};
+use crate::protocol::{TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_NORMAL};
 use crate::util;
 
 const MAGNET_MAX_LINK_WIDTH: usize = 75;
@@ -27,7 +26,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-torrent-add-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/torrent-add-dialog.ui")]
     pub struct TorrentAddDialog {
         #[template_child]
         pub source_chooser: TemplateChild<gtk::Button>,
@@ -93,7 +92,7 @@ fn generic_dialog(prefs: &Prefs) -> gtk::FileDialog {
         .modal(true)
         .build();
 
-    if let Some(dir) = prefs.get_string(prefs::KEY_LAST_TORRENT_DIR, prefs::GLOBAL) {
+    if let Some(dir) = prefs.get_string(prefs::KEY_LAST_TORRENT_DIR, Scope::Global) {
         dialog.set_initial_folder(Some(&gio::File::for_path(dir)));
     }
 
@@ -124,7 +123,7 @@ fn save_dir(files: &gio::ListModel, prefs: &Prefs) {
     let dir =
         files.item(0).and_downcast::<gio::File>().and_then(|f| f.parent()).and_then(|p| p.path());
     if let Some(dir) = dir {
-        prefs.set_string(prefs::KEY_LAST_TORRENT_DIR, &dir.to_string_lossy(), prefs::GLOBAL);
+        prefs.set_string(prefs::KEY_LAST_TORRENT_DIR, &dir.to_string_lossy(), Scope::Global);
     }
 }
 
@@ -142,32 +141,32 @@ pub fn add_dialog(win: &MainWindow, client: &Client) {
         let prefs = client.prefs();
         // A GtkFileDialog can't have extra options, so whether the options
         // dialog is shown follows the preference ("Options dialog on add").
-        let show_options = prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, prefs::GLOBAL);
+        let show_options = prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, Scope::Global);
         let list = filenames(&files);
         save_dir(&files, prefs);
 
         if show_options {
             TorrentAddDialog::new_from_filenames(&win, &client, list).present();
         } else {
-            upload::do_upload(Upload::new(list, &client, &win, prefs.add_flags()));
+            add_torrents::add_torrents(&win, &client, &list, &AddOptions::from_prefs(prefs));
         }
     });
 }
 
 /// The choices of "Apply to all", the targets of the items of its menu
-const APPLY_ALL_CHOICES: &[(&str, usize, i64)] = &[
-    ("high", files::COL_PRIORITY, TR_PRI_HIGH),
-    ("normal", files::COL_PRIORITY, TR_PRI_NORMAL),
-    ("low", files::COL_PRIORITY, TR_PRI_LOW),
-    ("download", files::COL_WANTED, 1),
-    ("skip", files::COL_WANTED, 0),
+const APPLY_ALL_CHOICES: &[(&str, FileSetter, i64)] = &[
+    ("high", files::set_priority, TR_PRI_HIGH),
+    ("normal", files::set_priority, TR_PRI_NORMAL),
+    ("low", files::set_priority, TR_PRI_LOW),
+    ("download", files::set_wanted, 1),
+    ("skip", files::set_wanted, 0),
 ];
 
 #[gtk::template_callbacks]
 impl TorrentAddDialog {
     #[template_callback]
     fn source_click_cb(button: &gtk::Button) {
-        let Some(d) = dialog::ancestor::<TorrentAddDialog>(button) else { return };
+        let Some(d) = util::ancestor::<TorrentAddDialog>(button) else { return };
         let dialog = generic_dialog(d.client().prefs());
         let weak = d.downgrade();
         dialog.open_multiple(Some(&d), gio::Cancellable::NONE, move |result| {
@@ -215,12 +214,12 @@ impl TorrentAddDialog {
             .sync_create()
             .build();
 
-        imp.paused_check.set_active(prefs.get_bool(prefs::KEY_START_PAUSED, prefs::GLOBAL));
-        imp.delete_check.set_active(prefs.get_bool(prefs::KEY_DELETE_LOCAL_TORRENT, prefs::GLOBAL));
+        imp.paused_check.set_active(prefs.get_bool(prefs::KEY_START_PAUSED, Scope::Global));
+        imp.delete_check.set_active(prefs.get_bool(prefs::KEY_DELETE_LOCAL_TORRENT, Scope::Global));
 
         // the server's default for added torrents
-        match client.session().and_then(|s| s.get(p::SGET_SEQUENTIAL_DOWNLOAD).cloned()) {
-            Some(v) => imp.sequential_check.set_active(v.as_bool().unwrap_or(false)),
+        match client.session().and_then(|s| s.sequential_download) {
+            Some(v) => imp.sequential_check.set_active(v),
             None => imp.sequential_check.set_visible(false),
         }
 
@@ -258,15 +257,11 @@ impl TorrentAddDialog {
     }
 
     fn apply_all(&self, name: &str) {
-        let Some(&(_, column, value)) = APPLY_ALL_CHOICES.iter().find(|c| c.0 == name) else {
+        let Some(&(_, set, value)) = APPLY_ALL_CHOICES.iter().find(|c| c.0 == name) else {
             return;
         };
-        for item in item::items(&self.files_model().store) {
-            if column == files::COL_WANTED {
-                files::set_wanted(&item, value);
-            } else {
-                files::set_priority(&item, value);
-            }
+        for file in util::objects(&self.files_model().store) {
+            set(&file, value);
         }
         self.file_list().tv.resort();
     }
@@ -302,7 +297,7 @@ impl TorrentAddDialog {
                 if std::path::Path::new(file_name).is_file() {
                     match bencode::parse_torrent_file(file_name) {
                         Err(e) => {
-                            util::error_dialog(win.as_ref(), &e);
+                            util::error_dialog(win.as_ref(), &e.to_string());
                             imp.filenames.borrow_mut().clear();
                             return;
                         }
@@ -328,43 +323,33 @@ impl TorrentAddDialog {
         *imp.filenames.borrow_mut() = filenames;
     }
 
-    fn response_cb(&self, response: i32) {
+    fn response_cb(&self, response: Response) {
         let imp = self.imp();
-        let mut flags = 0;
-        if imp.paused_check.is_active() {
-            flags |= p::TORRENT_ADD_FLAG_PAUSED;
-        }
-        if imp.delete_check.is_active() {
-            flags |= p::TORRENT_ADD_FLAG_DELETE;
-        }
-
-        if response == dialog::RESPONSE_ACCEPT
+        if response == Response::Ok
             && let Some(win) = imp.win.upgrade()
         {
             let dest = imp.dest_combo.borrow().clone().unwrap();
-            let model = self.files_model();
-            let mut up = Upload::new(imp.filenames.take(), &self.client(), &win, flags);
-            up.dir = Some(dest.dir());
-            up.priority = imp.priority_combo.selected() as i64 - 1;
-            up.extra_args = true;
-            if imp.sequential_check.is_visible() {
-                up.sequential_download = Some(imp.sequential_check.is_active());
-            }
 
             // The wanted state and priority of each file of the torrent
-            let n = model.n_files();
-            let mut wanted = vec![false; n];
-            let mut priorities = vec![0; n];
-            for i in 0..n {
-                if let Some(item) = model.file(i) {
-                    wanted[i] = item.int64(files::COL_WANTED) != 0;
-                    priorities[i] = item.int64(files::COL_PRIORITY);
-                }
-            }
-            up.file_wanted = Some(wanted);
-            up.file_priorities = Some(priorities);
+            let model = self.files_model();
+            let files: Vec<_> = (0..model.n_files()).map(|i| model.file(i)).collect();
+            let wanted = files.iter().map(|f| f.as_ref().is_some_and(|f| f.wanted() != 0));
+            let priorities = files.iter().map(|f| f.as_ref().map_or(0, FileObject::priority));
 
-            upload::do_upload(up);
+            let options = AddOptions {
+                paused: imp.paused_check.is_active(),
+                delete_local: imp.delete_check.is_active(),
+                download_dir: Some(dest.dir()),
+                // the selected position - 1 is the priority (TR_PRI_LOW is -1)
+                bandwidth_priority: Some(imp.priority_combo.selected() as i64 - 1),
+                sequential_download: imp
+                    .sequential_check
+                    .is_visible()
+                    .then(|| imp.sequential_check.is_active()),
+                files_wanted: Some(wanted.collect()),
+                file_priorities: Some(priorities.collect()),
+            };
+            add_torrents::add_torrents(&win, &self.client(), &imp.filenames.take(), &options);
             dest.save_selection();
         }
 

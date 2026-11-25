@@ -1,8 +1,9 @@
-//! Decoding .torrent files (bencode.c and trg-file-parser.c): their name and
-//! the tree of their files, for the add dialog.
+//! Decoding .torrent files: their name and the tree of their files, for the add
+//! dialog.
 
 use std::collections::BTreeMap;
 
+use crate::add_torrents::AddError;
 use crate::files::FileNode;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,7 +120,9 @@ pub struct TorrentFile {
     pub top_node: FileNode,
 }
 
-fn parse_nodes(info: &Be) -> Option<FileNode> {
+/// The files of a torrent in multi file mode, in the torrent's folder (its
+/// name) like the server lists them
+fn parse_nodes(info: &Be, name: &str) -> Option<FileNode> {
     let files = info.get("files")?.list()?;
     let mut top = FileNode::top();
     for (i, file) in files.iter().enumerate() {
@@ -131,7 +134,7 @@ fn parse_nodes(info: &Be) -> Option<FileNode> {
         if path.is_empty() {
             return None;
         }
-        top.insert(&path.join("/"), length, 0, i as i64, 1, 0);
+        top.insert(&format!("{name}/{}", path.join("/")), length, 0, i as i64, 1, 0);
     }
     Some(top)
 }
@@ -141,7 +144,7 @@ pub fn parse_torrent_data(data: &[u8]) -> Option<TorrentFile> {
     let info = top.get("info")?;
     let name = info.get("name")?.str()?;
 
-    let top_node = match parse_nodes(info) {
+    let top_node = match parse_nodes(info, &name) {
         Some(n) => n,
         None => {
             // single file mode
@@ -153,12 +156,15 @@ pub fn parse_torrent_data(data: &[u8]) -> Option<TorrentFile> {
     Some(TorrentFile { top_node })
 }
 
-pub fn parse_torrent_file(filename: &str) -> Result<Option<TorrentFile>, String> {
+/// The files of a .torrent file. None if it doesn't exist or isn't a
+/// torrent; an error if it can't be read.
+pub fn parse_torrent_file(filename: &str) -> Result<Option<TorrentFile>, AddError> {
     if !std::path::Path::new(filename).is_file() {
         gtk::glib::g_message!("trg", "{} does not exist", filename);
         return Ok(None);
     }
-    let data = std::fs::read(filename).map_err(|e| e.to_string())?;
+    let data = std::fs::read(filename)
+        .map_err(|source| AddError::Read { path: filename.to_string(), source })?;
     Ok(parse_torrent_data(&data))
 }
 
@@ -171,7 +177,10 @@ mod tests {
         let data =
             b"d4:infod5:filesld6:lengthi5e4:pathl1:a1:beed6:lengthi7e4:pathl1:ceee4:name1:xee";
         let t = parse_torrent_data(data).unwrap();
-        assert_eq!(t.top_node.children.len(), 2);
+        let dir = &t.top_node.children[0];
+        assert_eq!(dir.name.as_deref(), Some("x"));
+        assert_eq!(dir.children.len(), 2);
+        assert_eq!(dir.children[1].index, 1);
         let single = parse_torrent_data(b"d4:infod6:lengthi3e4:name1:yee").unwrap();
         assert_eq!(single.top_node.name.as_deref(), Some("y"));
         assert!(decode(b"l1:a").is_none());

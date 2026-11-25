@@ -3,31 +3,64 @@
 //!
 //! 1. holds the preferences,
 //! 2. holds the RPC transport (rpc::Transport), for connection reuse,
-//! 3. finds torrents by their ID (in the torrent model),
+//! 3. has the torrents (the torrent model), and finds them by their ID,
 //! 4. dispatches asynchronous requests (and batches of them), unless the
-//!    connection changed in the meantime, and tracks failures,
-//! 5. holds the connection state and an update serial,
+//!    connection changed in the meantime,
+//! 5. connects, and keeps the session and the torrents up to date (see
+//!    connection.rs), with the connection state, an update serial and the
+//!    failures,
 //! 6. holds the latest session object of a session_get response, with the
 //!    free space of the download directory (from free_space), and emits
 //!    "session-updated" with it.
 
 use std::cell::{Cell, RefCell};
-use std::rc::Rc;
 
 use gtk::glib;
 use gtk::glib::prelude::*;
 use gtk::glib::subclass::prelude::*;
-use serde_json::json;
 
-use crate::prefs::{self, Prefs};
-use crate::protocol::{self, Obj, Request};
+use crate::i18n::tr;
+use crate::json::{get_str, objects};
+use crate::prefs::{self, Prefs, Scope};
+use crate::protocol::{self, Request, Session};
 use crate::rpc::{self, Config, Transport};
-use crate::torrent_model::{TorrentItem, TorrentItemExt, TorrentModel};
+use crate::torrent_model::{TorrentModel, UpdateMode};
+use crate::torrent_object::TorrentObject;
+
+mod connection;
 
 pub use crate::rpc::Error;
 
 /// The result of a request
 pub type Response = rpc::Result;
+
+/// The state of the connection to the server, as the window shows it
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectionState {
+    Disconnected,
+    Connecting,
+    Connected,
+}
+
+/// Why the connection settings of a profile can't be used
+#[derive(Debug)]
+pub enum SettingsError {
+    NoHostname,
+    /// The URL made of the host, port and path isn't valid (GLib's message)
+    BadUrl(String),
+}
+
+// Not with thiserror: xgettext doesn't find the strings in attributes
+impl std::fmt::Display for SettingsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            SettingsError::NoHostname => f.write_str(&tr("No hostname set")),
+            SettingsError::BadUrl(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for SettingsError {}
 
 mod imp {
     use super::*;
@@ -39,12 +72,12 @@ mod imp {
         pub connid: Cell<i64>,
         pub fail_count: Cell<u32>,
         pub update_serial: Cell<i64>,
-        pub session: RefCell<Option<Obj>>,
-        pub version: Cell<f64>,
-        pub ssl: Cell<bool>,
-        pub seed_ratio_limited: Cell<bool>,
-        pub seed_ratio_limit: Cell<f64>,
-        pub torrent_model: RefCell<Option<TorrentModel>>,
+        pub session: RefCell<Option<Session>>,
+        pub torrent_model: TorrentModel,
+        /// From connect_to_profile() until the connection succeeds or fails
+        pub connecting: Cell<bool>,
+        pub torrents_timer: RefCell<Option<glib::SourceId>>,
+        pub session_timer: RefCell<Option<glib::SourceId>>,
     }
 
     impl Default for Client {
@@ -56,11 +89,10 @@ mod imp {
                 fail_count: Default::default(),
                 update_serial: Default::default(),
                 session: Default::default(),
-                version: Default::default(),
-                ssl: Default::default(),
-                seed_ratio_limited: Default::default(),
-                seed_ratio_limit: Default::default(),
-                torrent_model: Default::default(),
+                torrent_model: TorrentModel::new(),
+                connecting: Default::default(),
+                torrents_timer: Default::default(),
+                session_timer: Default::default(),
             }
         }
     }
@@ -74,7 +106,22 @@ mod imp {
     impl ObjectImpl for Client {
         fn signals() -> &'static [glib::subclass::Signal] {
             static SIGNALS: OnceLock<Vec<glib::subclass::Signal>> = OnceLock::new();
-            SIGNALS.get_or_init(|| vec![glib::subclass::Signal::builder("session-updated").build()])
+            SIGNALS.get_or_init(|| {
+                vec![
+                    glib::subclass::Signal::builder("session-updated").build(),
+                    // see connection.rs for these
+                    glib::subclass::Signal::builder("connection-changed").build(),
+                    glib::subclass::Signal::builder("torrents-updated")
+                        .param_types([UpdateMode::static_type()])
+                        .build(),
+                    glib::subclass::Signal::builder("request-failed")
+                        .param_types([String::static_type()])
+                        .build(),
+                    glib::subclass::Signal::builder("status-message")
+                        .param_types([String::static_type()])
+                        .build(),
+                ]
+            })
         }
 
         fn dispose(&self) {
@@ -111,89 +158,60 @@ impl Client {
         })
     }
 
-    pub fn session(&self) -> Option<std::cell::Ref<'_, Obj>> {
+    pub fn session(&self) -> Option<std::cell::Ref<'_, Session>> {
         std::cell::Ref::filter_map(self.imp().session.borrow(), Option::as_ref).ok()
     }
 
-    pub fn session_clone(&self) -> Option<Obj> {
+    pub fn session_clone(&self) -> Option<Session> {
         self.imp().session.borrow().clone()
     }
 
+    /// The download directory of the session, if there is one
     fn download_dir(&self) -> Option<String> {
-        self.session()
-            .and_then(|s| protocol::get_str(&s, protocol::SGET_DOWNLOAD_DIR).map(str::to_string))
+        self.session().map(|s| s.download_dir.clone()).filter(|d| !d.is_empty())
     }
 
-    pub fn set_session(&self, mut session: Obj) {
-        let imp = self.imp();
-        if imp.session.borrow().is_none() {
-            imp.version.set(protocol::session_get_version(Some(&session)));
-        }
-
+    pub fn set_session(&self, mut session: Session) {
         // the free space of the last update, if it isn't in this one
-        let dir = protocol::get_str(&session, protocol::SGET_DOWNLOAD_DIR).map(str::to_string);
-        if !session.contains_key(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE)
-            && dir.is_some()
-            && self.download_dir() == dir
+        if session.download_dir_free_space.is_none()
+            && let Some(last) = self.session()
+            && last.download_dir == session.download_dir
         {
-            let last =
-                self.session().and_then(|s| s.get(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE).cloned());
-            if let Some(free) = last {
-                session.insert(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE.into(), free);
-            }
+            session.download_dir_free_space = last.download_dir_free_space;
         }
-        let needs_free_space = !session.contains_key(protocol::SGET_DOWNLOAD_DIR_FREE_SPACE);
+        let needs_free_space = session.download_dir_free_space.is_none();
+        let dir = session.download_dir.clone();
 
-        imp.seed_ratio_limit.set(protocol::get_f64(&session, protocol::SGET_SEED_RATIO_LIMIT));
-        imp.seed_ratio_limited.set(protocol::get_bool(&session, protocol::SGET_SEED_RATIO_LIMITED));
-        *imp.session.borrow_mut() = Some(session);
+        *self.imp().session.borrow_mut() = Some(session);
         self.emit_by_name::<()>("session-updated", &[]);
 
         // a new download directory (or the first session): its free space
         // now rather than with the next session update
-        if let (true, Some(dir)) = (needs_free_space, dir) {
+        if needs_free_space && !dir.is_empty() {
             let client = self.clone();
             self.dispatch(protocol::free_space(&dir), move |r| {
                 let Ok(r) = r else { return };
                 {
                     let mut session = client.imp().session.borrow_mut();
-                    let Some(s) = session.as_mut() else { return };
-                    if protocol::get_str(s, protocol::SGET_DOWNLOAD_DIR) != Some(dir.as_str()) {
+                    let Some(s) = session.as_mut().filter(|s| s.download_dir == dir) else {
                         return;
-                    }
-                    s.insert(
-                        protocol::SGET_DOWNLOAD_DIR_FREE_SPACE.into(),
-                        json!(protocol::free_space_bytes(&r)),
-                    );
+                    };
+                    s.download_dir_free_space = Some(protocol::free_space_bytes(&r));
                 }
                 client.emit_by_name::<()>("session-updated", &[]);
             });
         }
     }
 
-    pub fn version(&self) -> f64 {
-        self.imp().version.get()
-    }
-
     pub fn version_string(&self) -> Option<String> {
-        self.session()
-            .and_then(|s| protocol::get_str(&s, protocol::SGET_VERSION).map(str::to_string))
-    }
-
-    /// The server's rpc_version_semver
-    pub fn rpc_version(&self) -> Option<String> {
-        self.session()
-            .and_then(|s| {
-                protocol::get_str(&s, protocol::SGET_RPC_VERSION_SEMVER).map(str::to_string)
-            })
-            .or_else(|| self.imp().transport.rpc_version())
+        self.session().map(|s| s.version.clone())
     }
 
     pub fn is_connected(&self) -> bool {
         self.imp().session.borrow().is_some()
     }
 
-    pub fn inc_connid(&self) {
+    fn inc_connid(&self) {
         let c = &self.imp().connid;
         c.set(c.get() + 1);
     }
@@ -211,84 +229,64 @@ impl Client {
         s.set(s.get() + 1);
     }
 
-    pub fn fail_count(&self) -> u32 {
+    fn fail_count(&self) -> u32 {
         self.imp().fail_count.get()
     }
 
-    pub fn inc_fail_count(&self) -> u32 {
+    fn inc_fail_count(&self) -> u32 {
         let c = &self.imp().fail_count;
         c.set(c.get() + 1);
         c.get()
     }
 
-    pub fn reset_fail_count(&self) {
+    fn reset_fail_count(&self) {
         self.imp().fail_count.set(0);
     }
 
-    pub fn seed_ratio_limited(&self) -> bool {
-        self.imp().seed_ratio_limited.get()
+    /// The session's seed ratio limit, if it's on
+    pub fn seed_ratio_limit(&self) -> Option<f64> {
+        self.session().filter(|s| s.seed_ratio_limited).map(|s| s.seed_ratio_limit)
     }
 
-    pub fn seed_ratio_limit(&self) -> f64 {
-        self.imp().seed_ratio_limit.get()
+    /// The torrents
+    pub fn torrent_model(&self) -> TorrentModel {
+        self.imp().torrent_model.clone()
     }
 
-    pub fn ssl(&self) -> bool {
-        self.imp().ssl.get()
-    }
-
-    pub fn set_torrent_model(&self, model: &TorrentModel) {
-        *self.imp().torrent_model.borrow_mut() = Some(model.clone());
-    }
-
-    pub fn torrent_model(&self) -> Option<TorrentModel> {
-        self.imp().torrent_model.borrow().clone()
-    }
-
-    /// Looks up a torrent by its ID: its JSON object (from the last update)
-    /// and item.
-    pub fn torrent_data(&self, id: i64) -> Option<(Rc<Obj>, TorrentItem)> {
-        let item = self.torrent_model()?.find(id)?;
-        Some((item.torrent_json()?, item))
-    }
-
-    pub fn status_change(&self, connected: bool) {
-        if !connected {
-            *self.imp().session.borrow_mut() = None;
-            self.prefs().set_connection(None);
-        }
+    /// Looks up a torrent by its ID
+    pub fn find_torrent(&self, id: i64) -> Option<TorrentObject> {
+        self.torrent_model().find(id)
     }
 
     /// Reads the connection settings of the current profile, which becomes
     /// the connection.
-    pub fn parse_settings(&self) -> Result<(), String> {
+    pub fn parse_settings(&self) -> Result<(), SettingsError> {
         let prefs = self.prefs();
         prefs.set_connection(prefs.profile());
         let transport = &self.imp().transport;
         transport.configure(None);
 
-        let port = prefs.get_int(prefs::KEY_PORT, prefs::CONNECTION);
-        let host = prefs.get_string(prefs::KEY_HOSTNAME, prefs::CONNECTION).unwrap_or_default();
-        let path = prefs.get_string(prefs::KEY_RPC_URL_PATH, prefs::CONNECTION).unwrap_or_default();
+        let port = prefs.get_int(prefs::KEY_PORT, Scope::Connection);
+        let host = prefs.get_string(prefs::KEY_HOSTNAME, Scope::Connection).unwrap_or_default();
+        let path = prefs.get_string(prefs::KEY_RPC_URL_PATH, Scope::Connection).unwrap_or_default();
 
         if host.is_empty() {
-            return Err("Bad hostname.".into());
+            return Err(SettingsError::NoHostname);
         }
 
-        let ssl = prefs.get_bool(prefs::KEY_SSL, prefs::CONNECTION);
-        self.imp().ssl.set(ssl);
+        let ssl = prefs.get_bool(prefs::KEY_SSL, Scope::Connection);
 
         let url = format!("{}://{host}:{port}{path}", if ssl { "https" } else { "http" });
         if let Err(e) = glib::Uri::parse(&url, glib::UriFlags::NONE) {
-            return Err(e.message().to_string());
+            return Err(SettingsError::BadUrl(e.message().to_string()));
         }
 
         let mut headers = Vec::new();
-        if let Some(custom) = prefs.get_array(prefs::KEY_CUSTOM_HEADERS, prefs::CONNECTION) {
-            for h in protocol::objects(&custom) {
+        if let Some(custom) = prefs.get_array(prefs::KEY_CUSTOM_HEADERS, Scope::Connection) {
+            for h in objects(&custom) {
                 if let (Some(k), Some(v)) = (
-                    protocol::get_str(h, prefs::KEY_CUSTOM_HEADER_NAME),
-                    protocol::get_str(h, prefs::KEY_CUSTOM_HEADER_VALUE),
+                    get_str(h, prefs::KEY_CUSTOM_HEADER_NAME),
+                    get_str(h, prefs::KEY_CUSTOM_HEADER_VALUE),
                 ) {
                     headers.push((k.to_string(), v.to_string()));
                 }
@@ -297,10 +295,10 @@ impl Client {
 
         transport.configure(Some(Config {
             url,
-            username: prefs.get_string(prefs::KEY_USERNAME, prefs::CONNECTION),
-            password: prefs.get_string(prefs::KEY_PASSWORD, prefs::CONNECTION),
+            username: prefs.get_string(prefs::KEY_USERNAME, Scope::Connection),
+            password: prefs.get_string(prefs::KEY_PASSWORD, Scope::Connection),
             headers,
-            ssl_validate: prefs.get_bool(prefs::KEY_SSL_VALIDATE, prefs::CONNECTION),
+            ssl_validate: prefs.get_bool(prefs::KEY_SSL_VALIDATE, Scope::Connection),
         }));
         Ok(())
     }
@@ -331,22 +329,12 @@ impl Client {
         });
     }
 
-    /// Sends requests whose results are of no interest, as notifications
-    pub fn notify(&self, reqs: Vec<Request>) {
-        let client = self.clone();
-        glib::spawn_future_local(async move {
-            if let Err(e) = client.imp().transport.notify(reqs).await {
-                glib::g_message!("trg", "notification failed: {e}");
-            }
-        });
-    }
-
     /// Sends requests, then gets the session (and the free space of its
     /// download directory) in the same batch. callback gets the results of
     /// the requests and the session.
     pub fn update_session_after<F>(&self, mut reqs: Vec<Request>, callback: F)
     where
-        F: FnOnce(Vec<Response>, Response) + 'static,
+        F: FnOnce(Vec<Response>, rpc::Result<Session>) + 'static,
     {
         let n = reqs.len();
         reqs.push(protocol::session_get());
@@ -356,14 +344,12 @@ impl Client {
         }
         self.dispatch_batch(reqs, move |mut results| {
             let free_space = if dir.is_some() { results.pop() } else { None };
-            let mut session = results.pop().unwrap_or_else(|| Err(Error::Decode(String::new())));
+            let session = results.pop().unwrap_or_else(|| Err(Error::Decode(String::new())));
+            let mut session = session.and_then(Session::of);
             if let (Ok(s), Some(Ok(free))) = (&mut session, free_space) {
                 // only if the directory didn't change in the meantime
-                if protocol::get_str(s, protocol::SGET_DOWNLOAD_DIR) == dir.as_deref() {
-                    s.insert(
-                        protocol::SGET_DOWNLOAD_DIR_FREE_SPACE.into(),
-                        json!(protocol::free_space_bytes(&free)),
-                    );
+                if Some(&s.download_dir) == dir.as_ref() {
+                    s.download_dir_free_space = Some(protocol::free_space_bytes(&free));
                 }
             }
             results.truncate(n);
@@ -371,7 +357,7 @@ impl Client {
         });
     }
 
-    pub fn update_session<F: FnOnce(Response) + 'static>(&self, callback: F) {
+    pub fn update_session<F: FnOnce(rpc::Result<Session>) + 'static>(&self, callback: F) {
         self.update_session_after(Vec::new(), |_, session| callback(session));
     }
 }

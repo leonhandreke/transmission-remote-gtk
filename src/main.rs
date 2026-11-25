@@ -11,30 +11,37 @@
 //! MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
 //! Public License for more details.
 
+mod add_torrents;
 mod app;
 mod bencode;
 mod client;
 #[cfg(feature = "debug-snapshot")]
 mod debug_snapshot;
-mod dialog;
+mod details;
 mod dialogs;
 mod files;
+mod format;
+mod general_panel;
 mod i18n;
-mod item;
+mod json;
 mod macos;
 mod main_window;
-mod menus;
-mod panels;
+mod menu_bar;
 mod peers;
 mod prefs;
 mod protocol;
 mod rpc;
 mod state_selector;
+mod status_bar;
+mod toolbar;
+mod torrent_list;
+mod torrent_menu;
 mod torrent_model;
+mod torrent_object;
 mod torrent_view;
 mod trackers;
 mod tree_view;
-mod upload;
+mod type_ahead;
 mod util;
 
 use gtk::prelude::*;

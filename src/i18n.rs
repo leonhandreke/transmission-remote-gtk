@@ -153,7 +153,7 @@ mod tests {
             std::env::set_var("LANGUAGE", "de");
             libc::setlocale(libc::LC_ALL, c"en_US.UTF-8".as_ptr());
         }
-        init(env!("TRG_LOCALEDIR"));
+        init(concat!(env!("OUT_DIR"), "/locale"));
         assert_ne!(tr("Downloading"), "Downloading");
     }
 

@@ -1,7 +1,7 @@
 //! The sidebar of torrent states, trackers and directories to filter the
-//! torrents by (trg-state-selector.c). Its rows count the torrents.
+//! torrents by. Its rows count the torrents.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 
 use gtk::prelude::*;
@@ -10,47 +10,100 @@ use gtk::{gdk, gio, glib};
 
 use crate::client::Client;
 use crate::i18n::tr;
-use crate::item::{self, Item, Val};
-use crate::prefs::{self, Prefs};
-use crate::protocol::{self as p, get_str};
-use crate::torrent_model::{self as tm, Stats, TorrentItemExt, TorrentModel};
-use crate::util::{self, HostRegex};
+use crate::prefs::{self, Prefs, Scope};
+use crate::protocol as p;
+use crate::torrent_model::{self as tm, Stats, TorrentModel};
+use crate::torrent_object::TorrentObject;
+use crate::type_ahead::TypeAhead;
+use crate::util;
 
-pub const FILTER_FLAG_TRACKER: u32 = 1 << 14;
-pub const FILTER_FLAG_DIR: u32 = 1 << 15;
+/// Which torrents a row of the sidebar shows
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Filter {
+    #[default]
+    All,
+    /// Those with any of these TORRENT_FLAG_*
+    State(u32),
+    /// Those with a tracker on this host
+    Tracker(String),
+    /// Those in this directory (its short form, `download_dir_short`)
+    Directory(String),
+}
 
-/// The columns of the rows
-const COL_ICON: usize = 0;
-const COL_NAME: usize = 1;
-const COL_COUNT: usize = 2;
-const COL_BIT: usize = 3;
-const COL_SERIAL: usize = 4;
-const COL_INDEX: usize = 5;
+/* A row: a state, tracker or directory, and the number of its torrents */
 
-fn new_state_item(icon: &str, name: &str, bit: u32, index: u32) -> Item {
-    Item::new(vec![
-        Val::Str(Some(icon.to_string())),
-        Val::Str(Some(name.to_string())),
-        Val::I64(0),
-        Val::U32(bit),
-        Val::I64(0),
-        Val::U32(index),
-    ])
+mod row_imp {
+    use super::*;
+
+    #[derive(glib::Properties, Default)]
+    #[properties(wrapper_type = super::StateRow)]
+    pub struct StateRow {
+        #[property(get, construct_only)]
+        pub icon: RefCell<String>,
+        #[property(get, construct_only)]
+        pub name: RefCell<String>,
+        /// Which torrents it shows, set once by new()
+        pub filter: OnceCell<Filter>,
+        /// The number of torrents, none shown if it's not positive
+        #[property(get, set)]
+        pub count: Cell<i64>,
+        /// For trackers and directories, the update serial they were
+        /// counted with
+        #[property(get, set)]
+        pub serial: Cell<i64>,
+        /// For states, which one to select at startup (u32::MAX for none)
+        #[property(get, set)]
+        pub index: Cell<u32>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for StateRow {
+        const NAME: &'static str = "TrgStateRow";
+        type Type = super::StateRow;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for StateRow {}
+}
+
+glib::wrapper! {
+    pub struct StateRow(ObjectSubclass<row_imp::StateRow>);
+}
+
+impl StateRow {
+    fn new(icon: &str, name: &str, filter: Filter, index: u32) -> Self {
+        let row: Self = glib::Object::builder()
+            .property("icon", icon)
+            .property("name", name)
+            .property("index", index)
+            .build();
+        let _ = row.imp().filter.set(filter);
+        row
+    }
+
+    fn filter(&self) -> &Filter {
+        self.imp().filter.get().unwrap_or(&Filter::All)
+    }
+
+    /// A tracker or directory
+    fn is_dynamic(&self) -> bool {
+        matches!(self.filter(), Filter::Tracker(_) | Filter::Directory(_))
+    }
 }
 
 #[derive(Default)]
 pub struct States {
-    error: Option<Item>,
-    all: Option<Item>,
-    paused: Option<Item>,
-    down: Option<Item>,
-    seeding: Option<Item>,
-    complete: Option<Item>,
-    incomplete: Option<Item>,
-    checking: Option<Item>,
-    active: Option<Item>,
-    seed_wait: Option<Item>,
-    down_wait: Option<Item>,
+    error: Option<StateRow>,
+    all: Option<StateRow>,
+    paused: Option<StateRow>,
+    down: Option<StateRow>,
+    seeding: Option<StateRow>,
+    complete: Option<StateRow>,
+    incomplete: Option<StateRow>,
+    checking: Option<StateRow>,
+    active: Option<StateRow>,
+    seed_wait: Option<StateRow>,
+    down_wait: Option<StateRow>,
 }
 
 mod imp {
@@ -64,24 +117,21 @@ mod imp {
         /// The store, in sections (see build)
         pub sections: gtk::SortListModel,
         pub store: gio::ListStore,
-        pub search: RefCell<String>,
-        pub search_time: Cell<i64>,
+        pub type_ahead: TypeAhead,
 
-        pub flag: Cell<u32>,
         pub show_dirs: Cell<bool>,
         pub show_trackers: Cell<bool>,
         pub dirs_first: Cell<bool>,
         pub client: RefCell<Option<Client>>,
-        pub trackers: RefCell<HashMap<String, Item>>,
-        pub directories: RefCell<HashMap<String, Item>>,
-        pub host_regex: HostRegex,
+        pub trackers: RefCell<HashMap<String, StateRow>>,
+        pub directories: RefCell<HashMap<String, StateRow>>,
         pub n_categories: Cell<i32>,
         pub states: RefCell<States>,
     }
 
     impl Default for StateSelector {
         fn default() -> Self {
-            let store = gio::ListStore::new::<Item>();
+            let store = gio::ListStore::new::<StateRow>();
             let sections = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
             Self {
                 scrolled: Default::default(),
@@ -89,16 +139,13 @@ mod imp {
                 selection: gtk::SingleSelection::new(Some(sections.clone())),
                 sections,
                 store,
-                search: Default::default(),
-                search_time: Cell::new(0),
-                flag: Cell::new(0),
+                type_ahead: Default::default(),
                 show_dirs: Cell::new(false),
                 show_trackers: Cell::new(false),
                 dirs_first: Cell::new(false),
                 client: Default::default(),
                 trackers: Default::default(),
                 directories: Default::default(),
-                host_regex: HostRegex::new(),
                 n_categories: Cell::new(0),
                 states: Default::default(),
             }
@@ -115,13 +162,7 @@ mod imp {
     impl ObjectImpl for StateSelector {
         fn signals() -> &'static [glib::subclass::Signal] {
             static SIGNALS: OnceLock<Vec<glib::subclass::Signal>> = OnceLock::new();
-            SIGNALS.get_or_init(|| {
-                vec![
-                    glib::subclass::Signal::builder("torrent-state-changed")
-                        .param_types([u32::static_type()])
-                        .build(),
-                ]
-            })
+            SIGNALS.get_or_init(|| vec![glib::subclass::Signal::builder("filter-changed").build()])
         }
 
         fn dispose(&self) {
@@ -144,13 +185,7 @@ mod imp {
             if let Some(s) = self.scrolled.borrow().as_ref() {
                 s.allocate(width, height, baseline, None);
             }
-            let mut child = self.obj().first_child();
-            while let Some(c) = child {
-                if let Some(p) = c.downcast_ref::<gtk::Popover>() {
-                    p.present();
-                }
-                child = c.next_sibling();
-            }
+            util::present_popovers(&*self.obj());
         }
 
         fn focus(&self, direction: gtk::DirectionType) -> bool {
@@ -195,42 +230,32 @@ impl StateSelector {
         self.client().prefs().clone()
     }
 
-    pub fn connect_state_changed<F: Fn(&Self, u32) + 'static>(&self, f: F) {
-        self.connect_local("torrent-state-changed", false, move |args| {
-            f(&args[0].get::<Self>().unwrap(), args[1].get::<u32>().unwrap());
+    /// The selected row changed, and with it the filter
+    pub fn connect_filter_changed<F: Fn(&Self) + 'static>(&self, f: F) {
+        self.connect_local("filter-changed", false, move |args| {
+            f(&args[0].get::<Self>().unwrap());
             None
         });
     }
 
-    pub fn host_regex(&self) -> &HostRegex {
-        &self.imp().host_regex
-    }
-
-    pub fn flag(&self) -> u32 {
-        self.imp().flag.get()
-    }
-
-    pub fn selected_text(&self) -> Option<String> {
-        self.imp().selection.selected_item().and_downcast::<Item>().and_then(|i| i.string(COL_NAME))
+    /// Which torrents the selected row shows
+    pub fn filter(&self) -> Filter {
+        let row = self.imp().selection.selected_item().and_downcast::<StateRow>();
+        row.map(|r| r.filter().clone()).unwrap_or_default()
     }
 
     fn selection_changed(&self) {
         let imp = self.imp();
         // The selected tracker or directory went away, show all torrents
-        let Some(item) = imp.selection.selected_item().and_downcast::<Item>() else {
+        let Some(item) = imp.selection.selected_item().and_downcast::<StateRow>() else {
             imp.selection.set_selected(0);
             return;
         };
-        imp.flag.set(item.uint(COL_BIT));
-        self.prefs().set_int(
-            prefs::STATE_SELECTOR_LAST,
-            item.uint(COL_INDEX) as i64,
-            prefs::GLOBAL,
-        );
-        self.emit_by_name::<()>("torrent-state-changed", &[&imp.flag.get()]);
+        self.prefs().set_int(prefs::STATE_SELECTOR_LAST, item.index() as i64, Scope::Global);
+        self.emit_by_name::<()>("filter-changed", &[]);
     }
 
-    fn remove_item(&self, item: &Item) {
+    fn remove_item(&self, item: &StateRow) {
         if let Some(pos) = self.imp().store.find(item) {
             self.imp().store.remove(pos);
         }
@@ -241,11 +266,11 @@ impl StateSelector {
     fn remove_dynamic(&self, dirs: bool, keep_serial: Option<i64>) {
         let imp = self.imp();
         let table = if dirs { &imp.directories } else { &imp.trackers };
-        let removed: Vec<Item> = {
+        let removed: Vec<StateRow> = {
             let mut t = table.borrow_mut();
             let keys: Vec<String> = t
                 .iter()
-                .filter(|(_, v)| keep_serial.is_none_or(|s| v.int64(COL_SERIAL) != s))
+                .filter(|(_, v)| keep_serial.is_none_or(|s| v.serial() != s))
                 .map(|(k, _)| k.clone())
                 .collect();
             keys.into_iter().filter_map(|k| t.remove(&k)).collect()
@@ -255,26 +280,26 @@ impl StateSelector {
         }
     }
 
-    fn update_dynamic_filter(item: &Item, serial: i64) {
-        if item.int64(COL_SERIAL) != serial {
-            item.set(COL_COUNT, 1i64);
-            item.set(COL_SERIAL, serial);
+    fn update_dynamic_filter(item: &StateRow, serial: i64) {
+        if item.serial() != serial {
+            item.set_count(1);
+            item.set_serial(serial);
         } else {
-            item.set(COL_COUNT, item.int64(COL_COUNT) + 1);
+            item.set_count(item.count() + 1);
         }
     }
 
     /// Inserts a row for a tracker or directory, in name order among the
     /// range rows after offset (all of them if range is None).
-    fn insert(&self, offset: usize, range: Option<usize>, item: &Item) {
+    fn insert(&self, offset: usize, range: Option<usize>, item: &StateRow) {
         let store = &self.imp().store;
-        let name = item.string(COL_NAME);
+        let name = item.name();
         let n = store.n_items() as usize;
         let mut pos = offset.min(n);
         let end = range.map(|r| n.min(offset + r)).unwrap_or(n);
         while pos < end {
-            let other = store.item(pos as u32).and_downcast::<Item>().unwrap();
-            if other.string(COL_NAME) >= name {
+            let other = store.item(pos as u32).and_downcast::<StateRow>().unwrap();
+            if other.name() >= name {
                 break;
             }
             pos += 1;
@@ -282,10 +307,10 @@ impl StateSelector {
         store.insert(pos as u32, item);
     }
 
-    fn filter_item_new(icon: &str, name: &str, bit: u32, serial: i64) -> Item {
-        let item = new_state_item(icon, name, bit, 0);
-        item.set(COL_SERIAL, serial);
-        item.set(COL_COUNT, 1i64);
+    fn filter_item_new(icon: &str, name: &str, filter: Filter, serial: i64) -> StateRow {
+        let item = StateRow::new(icon, name, filter, 0);
+        item.set_serial(serial);
+        item.set_count(1);
         item
     }
 
@@ -298,16 +323,15 @@ impl StateSelector {
         if !client.is_connected() || !(update_trackers || update_dirs) {
             return;
         }
-        let Some(model) = client.torrent_model() else { return };
+        let model = client.torrent_model();
         let n_cat = imp.n_categories.get() as usize;
 
-        for torrent in item::items(&model.store()) {
-            let Some(t) = torrent.torrent_json() else { continue };
+        for torrent in util::objects::<TorrentObject>(&model.store()) {
+            let t = torrent.torrent();
 
             if update_trackers {
-                for tracker in p::objects(p::torrent_get_tracker_stats(&t)) {
-                    let Some(host) =
-                        get_str(tracker, p::FIELD_ANNOUNCE).and_then(|a| imp.host_regex.first(a))
+                for tracker in &t.tracker_stats {
+                    let Some(host) = util::tracker_host(&tracker.announce).map(str::to_string)
                     else {
                         continue;
                     };
@@ -319,7 +343,7 @@ impl StateSelector {
                     let item = Self::filter_item_new(
                         "network-server-symbolic",
                         &host,
-                        FILTER_FLAG_TRACKER,
+                        Filter::Tracker(host.clone()),
                         serial,
                     );
                     if imp.dirs_first.get() {
@@ -332,13 +356,18 @@ impl StateSelector {
             }
 
             if update_dirs {
-                let Some(dir) = torrent.string(tm::COL_DOWNLOADDIR_SHORT) else { continue };
+                let dir = torrent.values().download_dir_short.clone();
                 let existing = imp.directories.borrow().get(&dir).cloned();
                 if let Some(item) = existing {
                     Self::update_dynamic_filter(&item, serial);
                     continue;
                 }
-                let item = Self::filter_item_new("folder-symbolic", &dir, FILTER_FLAG_DIR, serial);
+                let item = Self::filter_item_new(
+                    "folder-symbolic",
+                    &dir,
+                    Filter::Directory(dir.clone()),
+                    serial,
+                );
                 if imp.dirs_first.get() {
                     self.insert(n_cat, Some(imp.directories.borrow().len()), &item);
                 } else {
@@ -364,7 +393,10 @@ impl StateSelector {
         );
     }
 
-    pub fn set_show_dirs(&self, show: bool) {
+    fn set_show_dirs(&self, show: bool) {
+        if show == self.imp().show_dirs.get() {
+            return;
+        }
         self.imp().show_dirs.set(show);
         // rebuilt, the rows count each torrent once per update
         self.remove_dynamic(true, None);
@@ -373,7 +405,10 @@ impl StateSelector {
         }
     }
 
-    pub fn set_show_trackers(&self, show: bool) {
+    fn set_show_trackers(&self, show: bool) {
+        if show == self.imp().show_trackers.get() {
+            return;
+        }
         self.imp().show_trackers.set(show);
         self.remove_dynamic(false, None);
         if show {
@@ -381,8 +416,11 @@ impl StateSelector {
         }
     }
 
-    pub fn set_directories_first(&self, first: bool) {
+    fn set_directories_first(&self, first: bool) {
         let imp = self.imp();
+        if first == imp.dirs_first.get() {
+            return;
+        }
         // the sections' order changes only while they're empty
         self.remove_dynamic(true, None);
         self.remove_dynamic(false, None);
@@ -392,9 +430,9 @@ impl StateSelector {
 
     /// Adds a state row at pos (or at the end); its index (for restoring the
     /// selection) is the number of rows before it was added.
-    fn add_state(&self, pos: Option<u32>, icon: &str, name: &str, flag: u32) -> Item {
+    fn add_state(&self, pos: Option<u32>, icon: &str, name: &str, filter: Filter) -> StateRow {
         let imp = self.imp();
-        let item = new_state_item(icon, name, flag, imp.store.n_items());
+        let item = StateRow::new(icon, name, filter, imp.store.n_items());
         match pos {
             Some(pos) => imp.store.insert(pos, &item),
             None => imp.store.append(&item),
@@ -403,7 +441,7 @@ impl StateSelector {
         item
     }
 
-    fn remove_state(&self, item: Option<Item>) {
+    fn remove_state(&self, item: Option<StateRow>) {
         if let Some(item) = item {
             self.remove_item(&item);
             let n = &self.imp().n_categories;
@@ -411,9 +449,9 @@ impl StateSelector {
         }
     }
 
-    fn set_count(item: &Option<Item>, count: i64) {
+    fn set_count(item: &Option<StateRow>, count: i64) {
         if let Some(item) = item {
-            item.set(COL_COUNT, count);
+            item.set_count(count);
         }
     }
 
@@ -426,10 +464,10 @@ impl StateSelector {
                 Some(pos),
                 "dialog-warning-symbolic",
                 &tr("Error"),
-                p::TORRENT_FLAG_ERROR,
+                Filter::State(p::TORRENT_FLAG_ERROR),
             );
             // not there at startup, so it isn't restored
-            item.set(COL_INDEX, u32::MAX);
+            item.set_index(u32::MAX);
             imp.states.borrow_mut().error = Some(item);
         } else if stats.error < 1 && has_error {
             let item = imp.states.borrow_mut().error.take();
@@ -481,17 +519,17 @@ impl StateSelector {
                 Some(2),
                 "media-seek-backward-symbolic",
                 &tr("Queue Down"),
-                p::TORRENT_FLAG_DOWNLOADING_WAIT,
+                Filter::State(p::TORRENT_FLAG_DOWNLOADING_WAIT),
             );
             let up = self.add_state(
                 Some(4),
                 "media-seek-forward-symbolic",
                 &tr("Queue Up"),
-                p::TORRENT_FLAG_SEEDING_WAIT,
+                Filter::State(p::TORRENT_FLAG_SEEDING_WAIT),
             );
             // their indices when they were added at the start
-            down.set(COL_INDEX, 2u32);
-            up.set(COL_INDEX, 4u32);
+            down.set_index(2);
+            up.set_index(4);
             let mut s = imp.states.borrow_mut();
             s.down_wait = Some(down);
             s.seed_wait = Some(up);
@@ -505,12 +543,14 @@ impl StateSelector {
         }
     }
 
-    /// Selects the row at position, and shows it
-    fn select(&self, position: u32) {
-        let imp = self.imp();
-        imp.selection.set_selected(position);
-        if let Some(lv) = imp.list_view.borrow().as_ref() {
-            let _ = lv.activate_action("list.scroll-to-item", Some(&position.to_variant()));
+    /// Selects the row at position, shows it and moves the focus there
+    fn select_and_focus(&self, position: u32) {
+        if let Some(lv) = self.imp().list_view.borrow().as_ref() {
+            lv.scroll_to(
+                position,
+                gtk::ListScrollFlags::FOCUS | gtk::ListScrollFlags::SELECT,
+                None,
+            );
         }
     }
 
@@ -518,31 +558,14 @@ impl StateSelector {
     /// with the typed text.
     fn key_pressed(&self, keyval: gdk::Key, state: gdk::ModifierType) -> bool {
         let imp = self.imp();
-        let Some(c) = keyval.to_unicode() else { return false };
-        if c.is_whitespace()
-            || c.is_control()
-            || state.intersects(
-                gdk::ModifierType::CONTROL_MASK
-                    | gdk::ModifierType::ALT_MASK
-                    | gdk::ModifierType::META_MASK
-                    | gdk::ModifierType::SUPER_MASK,
-            )
-        {
+        let Some(c) = TypeAhead::typed_char(keyval, state).filter(|c| !c.is_whitespace()) else {
             return false;
-        }
-        let now = glib::monotonic_time();
-        if now - imp.search_time.get() > 1_000_000 {
-            imp.search.borrow_mut().clear();
-        }
-        imp.search_time.set(now);
-        imp.search.borrow_mut().push(c);
-        let needle = glib::casefold(imp.search.borrow().as_str()).to_string();
-
-        let found = item::items(&imp.selection).position(|item| {
-            item.string(COL_NAME).is_some_and(|n| glib::casefold(&n).starts_with(&needle))
-        });
+        };
+        let needle = imp.type_ahead.push(c);
+        let found = util::objects::<StateRow>(&imp.selection)
+            .position(|r| glib::casefold(r.name()).starts_with(&needle));
         if let Some(i) = found {
-            self.select(i as u32);
+            self.select_and_focus(i as u32);
         }
         true
     }
@@ -581,9 +604,9 @@ impl StateSelector {
     /// and the trackers, in the order that's set
     fn section(&self, item: &glib::Object) -> u32 {
         let dirs_first = self.imp().dirs_first.get();
-        match item.downcast_ref::<Item>().map(|i| i.uint(COL_BIT)) {
-            Some(FILTER_FLAG_DIR) => 2 - dirs_first as u32,
-            Some(FILTER_FLAG_TRACKER) => 1 + dirs_first as u32,
+        match item.downcast_ref::<StateRow>().map(StateRow::filter) {
+            Some(Filter::Directory(_)) => 2 - dirs_first as u32,
+            Some(Filter::Tracker(_)) => 1 + dirs_first as u32,
             _ => 0,
         }
     }
@@ -592,9 +615,21 @@ impl StateSelector {
         let imp = self.imp();
         let prefs = self.prefs();
 
-        imp.show_dirs.set(prefs.get_bool(prefs::KEY_FILTER_DIRS, prefs::GLOBAL));
-        imp.show_trackers.set(prefs.get_bool(prefs::KEY_FILTER_TRACKERS, prefs::GLOBAL));
-        imp.dirs_first.set(prefs.get_bool(prefs::KEY_DIRECTORIES_FIRST, prefs::GLOBAL));
+        imp.show_dirs.set(prefs.get_bool(prefs::KEY_FILTER_DIRS, Scope::Global));
+        imp.show_trackers.set(prefs.get_bool(prefs::KEY_FILTER_TRACKERS, Scope::Global));
+        imp.dirs_first.set(prefs.get_bool(prefs::KEY_DIRECTORIES_FIRST, Scope::Global));
+        // and follow them, from the menu or the preferences dialog
+        let weak = self.downgrade();
+        prefs.connect_changed(move |prefs, key| {
+            let Some(s) = weak.upgrade() else { return };
+            let value = |key| prefs.get_bool(key, Scope::Global);
+            match key {
+                Some(k @ prefs::KEY_FILTER_DIRS) => s.set_show_dirs(value(k)),
+                Some(k @ prefs::KEY_FILTER_TRACKERS) => s.set_show_trackers(value(k)),
+                Some(k @ prefs::KEY_DIRECTORIES_FIRST) => s.set_directories_first(value(k)),
+                _ => {}
+            }
+        });
 
         // The states, directories and trackers are sections of the list. The
         // store is in their order already, so the sort keeps it.
@@ -607,57 +642,61 @@ impl StateSelector {
 
         // Symbolic icons, as in the toolbar: lists in GNOME's HIG have them, and
         // they follow the theme's colors (dark mode, the selected row)
-        let f = &p::TORRENT_FLAG_DOWNLOADING;
         let s = States {
-            all: Some(self.add_state(None, "view-list-bullet-symbolic", &tr("All"), 0)),
-            down: Some(self.add_state(None, "folder-download-symbolic", &tr("Downloading"), *f)),
+            all: Some(self.add_state(None, "view-list-bullet-symbolic", &tr("All"), Filter::All)),
+            down: Some(self.add_state(
+                None,
+                "folder-download-symbolic",
+                &tr("Downloading"),
+                Filter::State(p::TORRENT_FLAG_DOWNLOADING),
+            )),
             down_wait: Some(self.add_state(
                 None,
                 "media-seek-backward-symbolic",
                 &tr("Queue Down"),
-                p::TORRENT_FLAG_DOWNLOADING_WAIT,
+                Filter::State(p::TORRENT_FLAG_DOWNLOADING_WAIT),
             )),
             seeding: Some(self.add_state(
                 None,
                 "send-to-symbolic",
                 &tr("Seeding"),
-                p::TORRENT_FLAG_SEEDING,
+                Filter::State(p::TORRENT_FLAG_SEEDING),
             )),
             seed_wait: Some(self.add_state(
                 None,
                 "media-seek-forward-symbolic",
                 &tr("Queue Up"),
-                p::TORRENT_FLAG_SEEDING_WAIT,
+                Filter::State(p::TORRENT_FLAG_SEEDING_WAIT),
             )),
             paused: Some(self.add_state(
                 None,
                 "media-playback-pause-symbolic",
                 &tr("Paused"),
-                p::TORRENT_FLAG_PAUSED,
+                Filter::State(p::TORRENT_FLAG_PAUSED),
             )),
             complete: Some(self.add_state(
                 None,
                 "object-select-symbolic",
                 &tr("Complete"),
-                p::TORRENT_FLAG_COMPLETE,
+                Filter::State(p::TORRENT_FLAG_COMPLETE),
             )),
             incomplete: Some(self.add_state(
                 None,
                 "edit-select-all-symbolic",
                 &tr("Incomplete"),
-                p::TORRENT_FLAG_INCOMPLETE,
+                Filter::State(p::TORRENT_FLAG_INCOMPLETE),
             )),
             active: Some(self.add_state(
                 None,
                 "network-transmit-receive-symbolic",
                 &tr("Active"),
-                p::TORRENT_FLAG_ACTIVE,
+                Filter::State(p::TORRENT_FLAG_ACTIVE),
             )),
             checking: Some(self.add_state(
                 None,
                 "view-refresh-symbolic",
                 &tr("Checking"),
-                p::TORRENT_FLAG_CHECKING_ANY,
+                Filter::State(p::TORRENT_FLAG_CHECKING_ANY),
             )),
             ..Default::default()
         };
@@ -673,7 +712,7 @@ impl StateSelector {
             }
         });
 
-        let mut index = prefs.get_int(prefs::STATE_SELECTOR_LAST, prefs::GLOBAL);
+        let mut index = prefs.get_int(prefs::STATE_SELECTOR_LAST, Scope::Global);
         if index < 0 || index >= imp.n_categories.get() as i64 {
             index = 0;
         }
@@ -704,43 +743,45 @@ impl StateSelector {
         });
         factory.connect_bind(|_, obj| {
             let Some(li) = obj.downcast_ref::<gtk::ListItem>() else { return };
-            let Some(item) = li.item().and_downcast::<Item>() else { return };
-            let bx = li.child().unwrap();
+            let (Some(row), Some(bx)) = (li.item().and_downcast::<StateRow>(), li.child()) else {
+                return;
+            };
+            let image = bx.first_child().and_downcast::<gtk::Image>().unwrap();
+            let name = image.next_sibling().and_downcast::<gtk::Label>().unwrap();
+            let count = name.next_sibling().and_downcast::<gtk::Label>().unwrap();
+
+            image.set_icon_name(Some(&row.icon()));
+            name.set_text(&row.name());
 
             // The trackers' and directories' names can be long (paths). They
             // don't ask for any room, so only the states set the sidebar's
             // width, and are ellipsized: hosts at the end, paths at the start,
             // which keeps their last directories. The tooltip has all of it.
-            let bit = item.uint(COL_BIT);
-            let dynamic = bit == FILTER_FLAG_DIR || bit == FILTER_FLAG_TRACKER;
-            bx.set_tooltip_text(item.string(COL_NAME).as_deref().filter(|_| dynamic));
-            let name = bx.first_child().and_then(|c| c.next_sibling()).and_downcast::<gtk::Label>();
-            if let Some(name) = name {
-                name.set_ellipsize(match bit {
-                    FILTER_FLAG_DIR => gtk::pango::EllipsizeMode::Start,
-                    FILTER_FLAG_TRACKER => gtk::pango::EllipsizeMode::End,
-                    _ => gtk::pango::EllipsizeMode::None,
-                });
-                name.set_max_width_chars(if dynamic { 0 } else { -1 });
-            }
-            let weak = li.downgrade();
-            let id = item.connect_local("column-changed", false, move |_| {
-                if let Some(li) = weak.upgrade() {
-                    row_refresh(&li);
-                }
-                None
+            let dynamic = row.is_dynamic();
+            bx.set_tooltip_text(dynamic.then(|| row.name()).as_deref());
+            name.set_ellipsize(match row.filter() {
+                Filter::Directory(_) => gtk::pango::EllipsizeMode::Start,
+                Filter::Tracker(_) => gtk::pango::EllipsizeMode::End,
+                _ => gtk::pango::EllipsizeMode::None,
             });
+            name.set_max_width_chars(if dynamic { 0 } else { -1 });
+
+            // Empty rather than hidden, so it keeps its room (see the
+            // factory's setup) and the sidebar's width doesn't change on
+            // connecting
+            let binding = row
+                .bind_property("count", &count, "label")
+                .transform_to(|_, n: i64| Some(if n > 0 { n.to_string() } else { String::new() }))
+                .sync_create()
+                .build();
             unsafe {
-                li.set_data("trg-handler", id);
+                li.set_data("trg-binding", binding);
             }
-            row_refresh(li);
         });
         factory.connect_unbind(|_, obj| {
             let Some(li) = obj.downcast_ref::<gtk::ListItem>() else { return };
-            if let (Some(item), Some(id)) =
-                (li.item(), unsafe { li.steal_data::<glib::SignalHandlerId>("trg-handler") })
-            {
-                item.disconnect(id);
+            if let Some(binding) = unsafe { li.steal_data::<glib::Binding>("trg-binding") } {
+                binding.unbind();
             }
         });
 
@@ -788,21 +829,4 @@ impl StateSelector {
             weak.upgrade().is_some_and(|s| s.context_menu(x, y))
         });
     }
-}
-
-/// The rows: an icon, the name and the count
-fn row_refresh(li: &gtk::ListItem) {
-    let (Some(item), Some(bx)) = (li.item().and_downcast::<Item>(), li.child()) else {
-        return;
-    };
-    let image = bx.first_child().and_downcast::<gtk::Image>().unwrap();
-    let name = image.next_sibling().and_downcast::<gtk::Label>().unwrap();
-    let count_label = name.next_sibling().and_downcast::<gtk::Label>().unwrap();
-    let count = item.int64(COL_COUNT);
-
-    image.set_icon_name(item.string(COL_ICON).as_deref());
-    name.set_text(&item.string(COL_NAME).unwrap_or_default());
-    // Empty rather than hidden, so it keeps its room (see the factory's
-    // setup) and the sidebar's width doesn't change on connecting
-    count_label.set_text(&if count > 0 { count.to_string() } else { String::new() });
 }

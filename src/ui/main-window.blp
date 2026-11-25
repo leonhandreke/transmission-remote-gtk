@@ -1,0 +1,50 @@
+using Gtk 4.0;
+// The skeleton of the main window. Its parts that need the client or the
+// models when they're created are added by TrgMainWindow: the toolbar, the
+// state selector and the drop target.
+template $TrgMainWindow: ApplicationWindow {
+  title: _("Transmission Remote");
+  // Fits a 1024x600 screen: GNOME's top bar leaves 568 px, and with
+  // client-side decorations this includes the title bar
+  default-width: 1000;
+  default-height: 560;
+  close-request => $close_request();
+  destroy => $destroy_window();
+
+  Box {
+    orientation: vertical;
+    // Not on macOS, which shows the menu in its menu bar
+    PopoverMenuBar menu_bar {}
+
+    // The toolbar and the torrent list's search entry, see construct()
+    Box toolbar_box {}
+
+    Paned vpaned {
+      orientation: vertical;
+      vexpand: true;
+      resize-start-child: true;
+      // Smaller than its minimum, the torrent list would be squeezed with
+      // GTK warnings when the details are hidden
+      shrink-start-child: false;
+      resize-end-child: false;
+      shrink-end-child: false;
+
+      start-child: Paned hpaned {
+        orientation: horizontal;
+        resize-start-child: false;
+        shrink-start-child: false;
+        resize-end-child: true;
+        shrink-end-child: true;
+
+        end-child: $TrgTorrentList torrent_list {};
+      };
+
+      end-child: $TrgDetails details {};
+    }
+
+    $TrgStatusBar status_bar {
+      margin-top: 2;
+      margin-bottom: 2;
+    }
+  }
+}

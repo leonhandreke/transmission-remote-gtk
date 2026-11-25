@@ -1,5 +1,4 @@
-//! The statistics of the server (trg-stats-dialog.c), refreshed while the
-//! dialog is open.
+//! The statistics of the server, refreshed while the dialog is open.
 
 use std::cell::{Cell, RefCell};
 
@@ -8,9 +7,11 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, glib};
 
 use crate::client::{Client, Response};
-use crate::dialog::{Dialog, DialogImpl, TrgDialogExt};
+use crate::dialogs::dialog::{Dialog, DialogImpl, TrgDialogExt};
+use crate::format;
+use crate::json::Obj;
 use crate::main_window::MainWindow;
-use crate::protocol::{self as p, Obj, get_f64, get_i64};
+use crate::protocol as p;
 use crate::util;
 
 const STATS_UPDATE_INTERVAL: u32 = 5;
@@ -18,18 +19,11 @@ const STATS_UPDATE_INTERVAL: u32 = 5;
 /// reply is dropped when the client disconnects in between).
 const STATS_STALE_TICKS: u32 = 6;
 
-thread_local! {
-    static INSTANCE: RefCell<glib::WeakRef<StatsDialog>> = RefCell::new(glib::WeakRef::new());
-    /// Identifies the dialog a reply is for, so a reply that arrives after
-    /// the dialog was closed (or for an earlier one) is ignored.
-    static GENERATION: Cell<u32> = const { Cell::new(0) };
-}
-
 mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-stats-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/stats-dialog.ui")]
     pub struct StatsDialog {
         #[template_child]
         pub grid: TemplateChild<gtk::Grid>,
@@ -62,7 +56,6 @@ mod imp {
 
         pub client: RefCell<Option<Client>>,
         pub timer: RefCell<Option<glib::SourceId>>,
-        pub generation: Cell<u32>,
         /// 0: no request pending
         pub in_flight_ticks: Cell<u32>,
         pub error_shown: Cell<bool>,
@@ -104,21 +97,8 @@ glib::wrapper! {
             gtk::ShortcutManager;
 }
 
-pub fn instance(win: &MainWindow, client: &Client) -> StatsDialog {
-    if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade()) {
-        return d;
-    }
-    let d = StatsDialog::new(win, client);
-    INSTANCE.with(|i| i.borrow().set(Some(&d)));
-    d
-}
-
-fn stats<'a>(args: &'a Obj, key: &str) -> Option<&'a Obj> {
-    p::get_obj(args, key)
-}
-
 impl StatsDialog {
-    fn new(win: &MainWindow, client: &Client) -> Self {
+    pub fn new(win: &MainWindow, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         *imp.client.borrow_mut() = Some(client.clone());
@@ -126,11 +106,6 @@ impl StatsDialog {
         d.set_transient_for(Some(win));
         d.on_response(|d, _| d.destroy());
 
-        let generation = GENERATION.with(|g| {
-            g.set(g.get() + 1);
-            g.get()
-        });
-        imp.generation.set(generation);
         d.request();
 
         let weak = d.downgrade();
@@ -151,11 +126,9 @@ impl StatsDialog {
     fn request(&self) {
         let imp = self.imp();
         imp.in_flight_ticks.set(1);
-        let generation = imp.generation.get();
+        let weak = self.downgrade();
         self.client().dispatch(p::session_stats(), move |response| {
-            if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade())
-                && d.imp().generation.get() == generation
-            {
+            if let Some(d) = weak.upgrade() {
                 d.on_stats_reply(response);
             }
         });
@@ -196,45 +169,32 @@ impl StatsDialog {
         }
     }
 
-    fn show_stats(&self, args: &Obj) {
+    fn show_stats(&self, result: &Obj) {
         let imp = self.imp();
-        {
-            let empty = Obj::new();
-            let session = stats(args, p::STATS_CURRENT).unwrap_or(&empty);
-            let cumulat = stats(args, p::STATS_CUMULATIVE).unwrap_or(&empty);
+        let stats: p::SessionStats = p::parse(result);
+        let (session, cumulative) = (&stats.current_stats, &stats.cumulative_stats);
 
-            imp.version_session.set_text(&format!(
-                "Transmission {}",
-                self.client().version_string().unwrap_or_default()
-            ));
+        imp.version_session.set_text(&format!(
+            "Transmission {}",
+            self.client().version_string().unwrap_or_default()
+        ));
 
-            let set = |s: &gtk::Label, c: &gtk::Label, f: &dyn Fn(&Obj) -> String| {
-                s.set_text(&f(session));
-                c.set_text(&f(cumulat));
-            };
-            set(&imp.up_session, &imp.up_cumulat, &|o| {
-                util::format_size(get_i64(o, p::STATS_UPLOADED_BYTES))
-            });
-            set(&imp.down_session, &imp.down_cumulat, &|o| {
-                util::format_size(get_i64(o, p::STATS_DOWNLOADED_BYTES))
-            });
-            // NAN and INFINITY are handled by format_ratio
-            set(&imp.ratio_session, &imp.ratio_cumulat, &|o| {
-                util::format_ratio(
-                    get_f64(o, p::STATS_UPLOADED_BYTES) / get_f64(o, p::STATS_DOWNLOADED_BYTES),
-                )
-            });
-            set(&imp.files_added_session, &imp.files_added_cumulat, &|o| {
-                get_i64(o, p::STATS_FILES_ADDED).to_string()
-            });
-            set(&imp.session_count_session, &imp.session_count_cumulat, &|o| {
-                get_i64(o, p::STATS_SESSION_COUNT).to_string()
-            });
-            set(&imp.active_session, &imp.active_cumulat, &|o| {
-                util::format_time_long(get_i64(o, p::STATS_SECONDS_ACTIVE))
-            });
+        let set = |s: &gtk::Label, c: &gtk::Label, f: &dyn Fn(&p::TransferStats) -> String| {
+            s.set_text(&f(session));
+            c.set_text(&f(cumulative));
+        };
+        set(&imp.up_session, &imp.up_cumulat, &|s| format::size(s.uploaded_bytes));
+        set(&imp.down_session, &imp.down_cumulat, &|s| format::size(s.downloaded_bytes));
+        // NAN and INFINITY are handled by format::ratio()
+        set(&imp.ratio_session, &imp.ratio_cumulat, &|s| {
+            format::ratio(s.uploaded_bytes as f64 / s.downloaded_bytes as f64)
+        });
+        set(&imp.files_added_session, &imp.files_added_cumulat, &|s| s.files_added.to_string());
+        set(&imp.session_count_session, &imp.session_count_cumulat, &|s| {
+            s.session_count.to_string()
+        });
+        set(&imp.active_session, &imp.active_cumulat, &|s| format::time_long(s.seconds_active));
 
-            imp.error_shown.set(false);
-        }
+        imp.error_shown.set(false);
     }
 }

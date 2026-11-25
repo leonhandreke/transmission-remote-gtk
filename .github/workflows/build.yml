@@ -21,6 +21,8 @@ jobs:
       - uses: actions/checkout@v7
       # gtk4-rs needs a newer Rust than Ubuntu's
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
       - name: install deps
         run: |
           sudo apt-get update
@@ -37,6 +39,12 @@ jobs:
         run: meson setup build
       - name: build
         run: meson compile -C build
+      # cargo test, with the environment meson sets (blueprint-compiler may
+      # be meson's fallback)
+      - name: test
+        run: meson test -C build --print-errorlogs
+      - name: clippy
+        run: meson devenv -C build cargo clippy --manifest-path ../Cargo.toml --target-dir target --all-targets -- -D warnings
       - name: dist
         run: meson dist -C build
       - name: translation template
@@ -68,6 +76,11 @@ jobs:
         run: meson setup build
       - name: meson build
         run: meson compile -C build
+      - name: test
+        run: meson test -C build --print-errorlogs
+      # also the macOS-only code
+      - name: clippy
+        run: meson devenv -C build cargo clippy --manifest-path ../Cargo.toml --target-dir target --all-targets -- -D warnings
       - name: dist
         run: meson dist -C build
       - name: application bundle

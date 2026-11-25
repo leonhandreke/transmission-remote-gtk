@@ -1,11 +1,20 @@
-//! The local preferences: the connection profiles, updates, adding torrents
-//! and the view (trg-preferences-dialog.c and trg-persistent-tree-view.c).
+//! The local preferences: the connection profiles, updates, adding torrents and
+//! the view.
 //!
-//! The widgets of the template which show a preference are listed with the
-//! key and flags of the preference, and loaded and saved with them.
+//! The widgets of the template are bound to a settings object, which has a
+//! property for each preference shown (but the lists), named like its key.
+//! It's loaded from the preferences when the dialog opens and when another
+//! profile is selected, and saved to them on OK and before selecting another
+//! profile.
+//!
+//! The view settings (the sidebar, its options, the details) are previewed:
+//! the settings object's set the preference straight away, which the window
+//! follows, and they follow it (the menu's view items set it too). Closing
+//! without OK restores the values they had when the dialog opened.
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::OnceLock;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
@@ -13,18 +22,143 @@ use gtk::{CompositeTemplate, gio, glib};
 use serde_json::{Value, json};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
+use crate::dialogs::settings::Closures;
 use crate::i18n::tr;
-use crate::item::{self, Item, Val};
+use crate::json::{get_str, objects};
 use crate::macos;
-use crate::main_window::MainWindow;
-use crate::prefs::{self, Prefs};
-use crate::protocol::{self as p, get_str};
-use crate::tree_view::{COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView};
+use crate::prefs::{self, Prefs, Scope};
+use crate::tree_view::{
+    COLUMN_EDITABLE, COLUMN_UNREMOVABLE, ColType, ColumnDesc, TreeView, row_object,
+};
 use crate::util;
 
-thread_local! {
-    static INSTANCE: RefCell<glib::WeakRef<PreferencesDialog>> = RefCell::new(glib::WeakRef::new());
+/* The settings the dialog shows (but the lists): a property for each
+ * preference, named like its key, which the template binds the widgets to */
+
+#[derive(Clone, Copy)]
+enum Kind {
+    Bool,
+    Int,
+    Text,
+}
+
+/// The preferences, their types and scopes: the profile's (the one being
+/// edited) and the application's
+const SETTINGS: [(&str, Kind, Scope); 26] = [
+    (prefs::KEY_PROFILE_NAME, Kind::Text, Scope::Profile),
+    (prefs::KEY_HOSTNAME, Kind::Text, Scope::Profile),
+    (prefs::KEY_PORT, Kind::Int, Scope::Profile),
+    (prefs::KEY_RPC_URL_PATH, Kind::Text, Scope::Profile),
+    (prefs::KEY_USERNAME, Kind::Text, Scope::Profile),
+    (prefs::KEY_PASSWORD, Kind::Text, Scope::Profile),
+    (prefs::KEY_AUTO_CONNECT, Kind::Bool, Scope::Profile),
+    (prefs::KEY_SSL, Kind::Bool, Scope::Profile),
+    (prefs::KEY_SSL_VALIDATE, Kind::Bool, Scope::Profile),
+    (prefs::KEY_TIMEOUT, Kind::Int, Scope::Profile),
+    (prefs::KEY_RETRIES, Kind::Int, Scope::Profile),
+    (prefs::KEY_UPDATE_ACTIVE_ONLY, Kind::Bool, Scope::Profile),
+    (prefs::ACTIVEONLY_FULLSYNC_ENABLED, Kind::Bool, Scope::Profile),
+    (prefs::ACTIVEONLY_FULLSYNC_EVERY, Kind::Int, Scope::Profile),
+    (prefs::KEY_UPDATE_INTERVAL, Kind::Int, Scope::Profile),
+    (prefs::KEY_SESSION_UPDATE_INTERVAL, Kind::Int, Scope::Profile),
+    (prefs::KEY_START_PAUSED, Kind::Bool, Scope::Global),
+    (prefs::KEY_ADD_OPTIONS_DIALOG, Kind::Bool, Scope::Global),
+    (prefs::KEY_DELETE_LOCAL_TORRENT, Kind::Bool, Scope::Global),
+    (prefs::KEY_SHOW_STATE_SELECTOR, Kind::Bool, Scope::Global),
+    (prefs::KEY_FILTER_DIRS, Kind::Bool, Scope::Global),
+    (prefs::KEY_FILTER_TRACKERS, Kind::Bool, Scope::Global),
+    (prefs::KEY_DIRECTORIES_FIRST, Kind::Bool, Scope::Global),
+    (prefs::KEY_SHOW_NOTEBOOK, Kind::Bool, Scope::Global),
+    (prefs::KEY_ADD_NOTIFY, Kind::Bool, Scope::Global),
+    (prefs::KEY_COMPLETE_NOTIFY, Kind::Bool, Scope::Global),
+];
+
+/// The view settings (global), which are previewed (see the top)
+const VIEW_SETTINGS: [&str; 5] = [
+    prefs::KEY_SHOW_STATE_SELECTOR,
+    prefs::KEY_FILTER_DIRS,
+    prefs::KEY_FILTER_TRACKERS,
+    prefs::KEY_DIRECTORIES_FIRST,
+    prefs::KEY_SHOW_NOTEBOOK,
+];
+
+mod settings_imp {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct LocalSettings {
+        /// The values of SETTINGS, in their order
+        pub values: RefCell<Vec<glib::Value>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for LocalSettings {
+        const NAME: &'static str = "TrgLocalSettings";
+        type Type = super::LocalSettings;
+    }
+
+    impl ObjectImpl for LocalSettings {
+        fn properties() -> &'static [glib::ParamSpec] {
+            static PROPERTIES: OnceLock<Vec<glib::ParamSpec>> = OnceLock::new();
+            PROPERTIES.get_or_init(|| {
+                SETTINGS
+                    .iter()
+                    .map(|&(key, kind, _)| match kind {
+                        Kind::Bool => glib::ParamSpecBoolean::builder(key).build(),
+                        Kind::Int => glib::ParamSpecInt64::builder(key).build(),
+                        Kind::Text => {
+                            glib::ParamSpecString::builder(key).default_value(Some("")).build()
+                        }
+                    })
+                    .collect()
+            })
+        }
+
+        fn constructed(&self) {
+            self.parent_constructed();
+            let defaults = Self::properties().iter().map(|p| p.default_value().clone());
+            self.values.replace(defaults.collect());
+        }
+
+        // the IDs are the positions in SETTINGS, from 1
+        fn property(&self, id: usize, _pspec: &glib::ParamSpec) -> glib::Value {
+            self.values.borrow()[id - 1].clone()
+        }
+
+        fn set_property(&self, id: usize, value: &glib::Value, _pspec: &glib::ParamSpec) {
+            self.values.borrow_mut()[id - 1] = value.clone();
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct LocalSettings(ObjectSubclass<settings_imp::LocalSettings>);
+}
+
+impl LocalSettings {
+    /// Shows the preferences
+    fn load(&self, prefs: &Prefs) {
+        for (key, kind, scope) in SETTINGS {
+            match kind {
+                Kind::Bool => self.set_property(key, prefs.get_bool(key, scope)),
+                Kind::Int => self.set_property(key, prefs.get_int(key, scope)),
+                Kind::Text => {
+                    self.set_property(key, prefs.get_string(key, scope).unwrap_or_default())
+                }
+            }
+        }
+    }
+
+    fn save(&self, prefs: &Prefs) {
+        for (key, kind, scope) in SETTINGS {
+            match kind {
+                Kind::Bool => prefs.set_bool(key, self.property(key), scope),
+                Kind::Int => prefs.set_int(key, self.property(key), scope),
+                Kind::Text => prefs.set_string(key, &self.property::<String>(key), scope),
+            }
+        }
+    }
 }
 
 /* The items of the profile drop down: a GObject with a "name" property,
@@ -60,13 +194,43 @@ impl ProfileItem {
     }
 }
 
+/* An entry of a config list: two texts (like a label and a directory) */
+
+mod row_imp {
+    use super::*;
+
+    #[derive(glib::Properties, Default)]
+    #[properties(wrapper_type = super::PersistentRow)]
+    pub struct PersistentRow {
+        #[property(get, set)]
+        pub first: RefCell<String>,
+        #[property(get, set)]
+        pub second: RefCell<String>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for PersistentRow {
+        const NAME: &'static str = "TrgPersistentRow";
+        type Type = super::PersistentRow;
+    }
+
+    #[glib::derived_properties]
+    impl ObjectImpl for PersistentRow {}
+}
+
+glib::wrapper! {
+    pub struct PersistentRow(ObjectSubclass<row_imp::PersistentRow>);
+}
+
 /* A config list which saves and restores simple data in the preferences: a
  * box with a tree view of editable text columns, and the buttons to add,
  * delete and move entries. */
 
 struct PersistentColumn {
+    /// The key of its text in the entries of the preference
     key: String,
-    index: usize,
+    /// The property of the rows it shows
+    property: &'static str,
     desc: Rc<ColumnDesc>,
 }
 
@@ -80,17 +244,13 @@ pub struct PersistentTreeView {
     down_button: gtk::Button,
     add_select: RefCell<Option<usize>>,
     key: String,
-    flags: u32,
-}
-
-fn new_persistent_item() -> Item {
-    Item::new(vec![Val::Str(None), Val::Str(None)])
+    scope: Scope,
 }
 
 impl PersistentTreeView {
-    fn new(key: &str, flags: u32) -> Rc<Self> {
+    fn new(key: &str, scope: Scope) -> Rc<Self> {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let store = gio::ListStore::new::<Item>();
+        let store = gio::ListStore::new::<PersistentRow>();
 
         // no prefs: nothing about the view itself is persisted
         let tv = TreeView::new(None, "TrgPersistentTreeView");
@@ -129,7 +289,7 @@ impl PersistentTreeView {
             down_button: down_button.clone(),
             add_select: Default::default(),
             key: key.to_string(),
-            flags,
+            scope,
         });
 
         let weak = Rc::downgrade(&ptv);
@@ -149,24 +309,26 @@ impl PersistentTreeView {
         let weak = Rc::downgrade(&ptv);
         tv.connect_row_activated(move |tv, position| {
             let Some(p) = weak.upgrade() else { return };
-            if let Some(item) = tv.selection().item(position).and_then(|r| item::row_item(&r)) {
-                p.edit_item(&item);
+            if let Some(row) =
+                tv.selection().item(position).and_then(row_object).and_downcast::<PersistentRow>()
+            {
+                p.edit_row(&row);
             }
         });
 
         let weak = Rc::downgrade(&ptv);
         add_button.connect_clicked(move |_| {
             if let Some(p) = weak.upgrade() {
-                let item = new_persistent_item();
-                p.store.append(&item);
-                p.edit_item(&item);
+                let row: PersistentRow = glib::Object::new();
+                p.store.append(&row);
+                p.edit_row(&row);
             }
         });
         let weak = Rc::downgrade(&ptv);
         del_button.connect_clicked(move |_| {
             if let Some(p) = weak.upgrade() {
-                for item in p.tv.selected_items() {
-                    if let Some(pos) = p.store.find(&item) {
+                for row in p.tv.selected_items::<PersistentRow>() {
+                    if let Some(pos) = p.store.find(&row) {
                         p.store.remove(pos);
                     }
                 }
@@ -193,7 +355,7 @@ impl PersistentTreeView {
         if self.tv.count_selected() != 1 {
             return None;
         }
-        self.tv.first_selected().and_then(|i| self.store.find(&i))
+        self.tv.first_selected::<PersistentRow>().and_then(|r| self.store.find(&r))
     }
 
     fn update_buttons(&self) {
@@ -204,20 +366,24 @@ impl PersistentTreeView {
         self.down_button.set_sensitive(position.is_some_and(|p| p + 1 < n));
     }
 
-    fn add_column(self: &Rc<Self>, index: usize, key: &str, label: &str) -> usize {
-        let desc = self.tv.reg_column(
+    /// Adds a column of the texts with key, shown in the property of the rows
+    fn add_column(self: &Rc<Self>, property: &'static str, key: &str, label: &str) -> usize {
+        // nothing is saved, the sort key is the column's position
+        let position = self.columns.borrow().len() as i32;
+        let desc = self.tv.reg_property(
             ColType::Text,
-            index as i32,
+            position,
+            property,
             label,
             key,
             COLUMN_UNREMOVABLE | COLUMN_EDITABLE,
         );
-        desc.set_edit(move |_, item, done, new_text| {
+        desc.set_edit(move |row: &PersistentRow, done, new_text| {
             if let (true, Some(text)) = (done, new_text) {
-                item.set(index, text);
+                row.set_property(property, text);
             }
         });
-        self.columns.borrow_mut().push(PersistentColumn { key: key.to_string(), index, desc });
+        self.columns.borrow_mut().push(PersistentColumn { key: key.to_string(), property, desc });
         self.tv.remove_all_columns();
         self.tv.setup_columns();
         self.columns.borrow().len() - 1
@@ -227,12 +393,12 @@ impl PersistentTreeView {
         *self.add_select.borrow_mut() = Some(column);
     }
 
-    fn edit_item(&self, item: &Item) {
+    fn edit_row(&self, row: &PersistentRow) {
         let columns = self.columns.borrow();
         let column = self.add_select.borrow().and_then(|i| columns.get(i)).or(columns.first());
-        self.tv.select_item(item);
+        self.tv.select_item(row);
         if let Some(c) = column {
-            self.tv.start_editing(item, &c.desc);
+            self.tv.start_editing(row, &c.desc);
         }
     }
 
@@ -242,79 +408,41 @@ impl PersistentTreeView {
         if (offset < 0 && position == 0) || (offset > 0 && position + 1 >= n) {
             return;
         }
-        let item = self.store.item(position).and_downcast::<Item>().unwrap();
+        let row = self.store.item(position).and_downcast::<PersistentRow>().unwrap();
         self.store.remove(position);
-        self.store.insert((position as i32 + offset) as u32, &item);
-        self.tv.select_item(&item);
+        self.store.insert((position as i32 + offset) as u32, &row);
+        self.tv.select_item(&row);
     }
 
     fn refresh(&self, prefs: &Prefs) {
-        let entries = prefs.get_array(&self.key, self.flags).unwrap_or_default();
+        let entries = prefs.get_array(&self.key, self.scope).unwrap_or_default();
         let columns = self.columns.borrow();
-        let items: Vec<Item> = p::objects(&entries)
+        let rows: Vec<PersistentRow> = objects(&entries)
             .map(|obj| {
-                let item = new_persistent_item();
+                let row: PersistentRow = glib::Object::new();
                 for c in columns.iter() {
-                    item.set(c.index, get_str(obj, &c.key));
+                    row.set_property(c.property, get_str(obj, &c.key).unwrap_or_default());
                 }
-                item
+                row
             })
             .collect();
-        self.store.splice(0, self.store.n_items(), &items);
+        self.store.splice(0, self.store.n_items(), &rows);
     }
 
     fn save(&self, prefs: &Prefs) {
         // keep an entry that is still being edited, like when OK is clicked
         self.tv.stop_editing();
         let columns = self.columns.borrow();
-        let entries: Vec<Value> = item::items(&self.store)
-            .map(|item| {
+        let entries: Vec<Value> = util::objects::<PersistentRow>(&self.store)
+            .map(|row| {
                 let mut obj = serde_json::Map::new();
                 for c in columns.iter() {
-                    obj.insert(c.key.clone(), json!(item.string(c.index).unwrap_or_default()));
+                    obj.insert(c.key.clone(), json!(row.property::<String>(c.property)));
                 }
                 Value::Object(obj)
             })
             .collect();
-        prefs.set_value(&self.key, Value::Array(entries), self.flags);
-    }
-}
-
-/// A widget showing a preference
-pub enum PrefWidget {
-    Simple { widget: gtk::Widget, key: &'static str, flags: u32 },
-    List(Rc<PersistentTreeView>),
-}
-
-impl PrefWidget {
-    fn refresh(&self, prefs: &Prefs) {
-        match self {
-            PrefWidget::Simple { widget, key, flags } => {
-                if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
-                    check.set_active(prefs.get_bool(key, *flags));
-                } else if let Some(spin) = widget.downcast_ref::<gtk::SpinButton>() {
-                    spin.set_value(prefs.get_int(key, *flags) as f64);
-                } else if let Some(e) = widget.dynamic_cast_ref::<gtk::Editable>() {
-                    e.set_text(&prefs.get_string(key, *flags).unwrap_or_default());
-                }
-            }
-            PrefWidget::List(ptv) => ptv.refresh(prefs),
-        }
-    }
-
-    fn save(&self, prefs: &Prefs) {
-        match self {
-            PrefWidget::Simple { widget, key, flags } => {
-                if let Some(check) = widget.downcast_ref::<gtk::CheckButton>() {
-                    prefs.set_bool(key, check.is_active(), *flags);
-                } else if let Some(spin) = widget.downcast_ref::<gtk::SpinButton>() {
-                    prefs.set_int(key, spin.value_as_int() as i64, *flags);
-                } else if let Some(e) = widget.dynamic_cast_ref::<gtk::Editable>() {
-                    prefs.set_string(key, &e.text(), *flags);
-                }
-            }
-            PrefWidget::List(ptv) => ptv.save(prefs),
-        }
+        prefs.set_value(&self.key, Value::Array(entries), self.scope);
     }
 }
 
@@ -322,7 +450,7 @@ mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-preferences-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/preferences-dialog.ui")]
     pub struct PreferencesDialog {
         #[template_child]
         pub notebook: TemplateChild<gtk::Notebook>,
@@ -335,69 +463,20 @@ mod imp {
         #[template_child]
         pub profile_store: TemplateChild<gio::ListStore>,
         #[template_child]
-        pub full_update_check: TemplateChild<gtk::CheckButton>,
-        #[template_child]
-        pub full_update_spin: TemplateChild<gtk::SpinButton>,
-        #[template_child]
         pub headers_box: TemplateChild<gtk::Box>,
         #[template_child]
         pub destinations_box: TemplateChild<gtk::Box>,
         #[template_child]
-        pub profile_name_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub hostname_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub port_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub rpc_url_path_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub username_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub password_entry: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub auto_connect_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub ssl_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub ssl_validate_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub timeout_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub retries_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub update_active_only_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub update_interval_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub session_update_interval_spin: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub start_paused_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub add_options_dialog_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub delete_local_torrent_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub show_state_selector_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub filter_dirs_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub filter_trackers_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub directories_first_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub show_notebook_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub system_tray_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub minimize_to_tray_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub add_notify_check: TemplateChild<gtk::Widget>,
-        #[template_child]
-        pub complete_notify_check: TemplateChild<gtk::Widget>,
+        pub settings: TemplateChild<LocalSettings>,
 
         pub client: RefCell<Option<Client>>,
-        pub win: glib::WeakRef<MainWindow>,
-        pub widgets: RefCell<Vec<PrefWidget>>,
+        /// The lists (custom headers, destinations)
+        pub lists: RefCell<Vec<Rc<PersistentTreeView>>>,
+        /// The view settings when the dialog opened, restored unless it's
+        /// closed with OK
+        pub view_before: RefCell<Vec<(&'static str, bool)>>,
+        /// Its settings following the view preferences
+        pub view_handlers: RefCell<Vec<glib::SignalHandlerId>>,
         pub populating: std::cell::Cell<bool>,
     }
 
@@ -409,8 +488,10 @@ mod imp {
 
         fn class_init(klass: &mut Self::Class) {
             ProfileItem::ensure_type();
+            LocalSettings::ensure_type();
             klass.bind_template();
             klass.bind_template_instance_callbacks();
+            Closures::bind_template_callbacks(klass);
         }
 
         fn instance_init(obj: &glib::subclass::InitializingObject<Self>) {
@@ -431,17 +512,8 @@ glib::wrapper! {
             gtk::ShortcutManager;
 }
 
-pub fn instance(win: &MainWindow, client: &Client) -> PreferencesDialog {
-    if let Some(d) = INSTANCE.with(|i| i.borrow().upgrade()) {
-        return d;
-    }
-    let d = PreferencesDialog::new(win, client);
-    INSTANCE.with(|i| i.borrow().set(Some(&d)));
-    d
-}
-
 fn dlg(w: &impl IsA<gtk::Widget>) -> Option<PreferencesDialog> {
-    dialog::ancestor::<PreferencesDialog>(w)
+    util::ancestor::<PreferencesDialog>(w)
 }
 
 #[gtk::template_callbacks]
@@ -498,153 +570,55 @@ impl PreferencesDialog {
         }
     }
 
-    /// The full update interval only matters when updating active torrents
-    /// only and doing full updates
-    #[template_callback]
-    fn full_update_dependency_cb(check: &gtk::CheckButton, _pspec: &glib::ParamSpec) {
-        if let Some(d) = dlg(check) {
-            d.full_update_dependency();
-        }
-    }
-
-    #[template_callback]
-    fn view_states_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.state_selector().set_visible(check.is_active());
-        }
-    }
-
-    #[template_callback]
-    fn filter_dirs_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.state_selector().set_show_dirs(check.is_active());
-        }
-    }
-
-    #[template_callback]
-    fn filter_trackers_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.state_selector().set_show_trackers(check.is_active());
-        }
-    }
-
-    #[template_callback]
-    fn directories_first_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.state_selector().set_directories_first(check.is_active());
-        }
-    }
-
-    #[template_callback]
-    fn notebook_toggled_cb(check: &gtk::CheckButton) {
-        if let Some(w) = dlg(check).and_then(|d| d.imp().win.upgrade()) {
-            w.notebook_set_visible(check.is_active());
-        }
-    }
-
-    fn new(win: &MainWindow, client: &Client) -> Self {
+    pub fn new(win: &impl IsA<gtk::Window>, client: &Client) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         *imp.client.borrow_mut() = Some(client.clone());
-        imp.win.set(Some(win));
 
         d.set_transient_for(Some(win));
         if util::is_macos() {
-            d.macos_settings_window(win);
+            d.macos_settings_window(win.upcast_ref());
         }
         d.profile_combo_populate();
 
-        let simple: Vec<(gtk::Widget, &'static str, u32)> = vec![
-            (imp.profile_name_entry.get().upcast(), prefs::KEY_PROFILE_NAME, prefs::PROFILE),
-            (imp.hostname_entry.get().upcast(), prefs::KEY_HOSTNAME, prefs::PROFILE),
-            (imp.port_spin.get().upcast(), prefs::KEY_PORT, prefs::PROFILE),
-            (imp.rpc_url_path_entry.get().upcast(), prefs::KEY_RPC_URL_PATH, prefs::PROFILE),
-            (imp.username_entry.get().upcast(), prefs::KEY_USERNAME, prefs::PROFILE),
-            (imp.password_entry.get().upcast(), prefs::KEY_PASSWORD, prefs::PROFILE),
-            (imp.auto_connect_check.get().upcast(), prefs::KEY_AUTO_CONNECT, prefs::PROFILE),
-            (imp.ssl_check.get().upcast(), prefs::KEY_SSL, prefs::PROFILE),
-            (imp.ssl_validate_check.get().upcast(), prefs::KEY_SSL_VALIDATE, prefs::PROFILE),
-            (imp.timeout_spin.get().upcast(), prefs::KEY_TIMEOUT, prefs::PROFILE),
-            (imp.retries_spin.get().upcast(), prefs::KEY_RETRIES, prefs::PROFILE),
-            (
-                imp.update_active_only_check.get().upcast(),
-                prefs::KEY_UPDATE_ACTIVE_ONLY,
-                prefs::PROFILE,
-            ),
-            (
-                imp.full_update_check.get().upcast(),
-                prefs::ACTIVEONLY_FULLSYNC_ENABLED,
-                prefs::PROFILE,
-            ),
-            (imp.full_update_spin.get().upcast(), prefs::ACTIVEONLY_FULLSYNC_EVERY, prefs::PROFILE),
-            (imp.update_interval_spin.get().upcast(), prefs::KEY_UPDATE_INTERVAL, prefs::PROFILE),
-            (
-                imp.session_update_interval_spin.get().upcast(),
-                prefs::KEY_SESSION_UPDATE_INTERVAL,
-                prefs::PROFILE,
-            ),
-            (imp.start_paused_check.get().upcast(), prefs::KEY_START_PAUSED, prefs::GLOBAL),
-            (
-                imp.add_options_dialog_check.get().upcast(),
-                prefs::KEY_ADD_OPTIONS_DIALOG,
-                prefs::GLOBAL,
-            ),
-            (
-                imp.delete_local_torrent_check.get().upcast(),
-                prefs::KEY_DELETE_LOCAL_TORRENT,
-                prefs::GLOBAL,
-            ),
-            (
-                imp.show_state_selector_check.get().upcast(),
-                prefs::KEY_SHOW_STATE_SELECTOR,
-                prefs::GLOBAL,
-            ),
-            (imp.filter_dirs_check.get().upcast(), prefs::KEY_FILTER_DIRS, prefs::GLOBAL),
-            (imp.filter_trackers_check.get().upcast(), prefs::KEY_FILTER_TRACKERS, prefs::GLOBAL),
-            (
-                imp.directories_first_check.get().upcast(),
-                prefs::KEY_DIRECTORIES_FIRST,
-                prefs::GLOBAL,
-            ),
-            (imp.show_notebook_check.get().upcast(), prefs::KEY_SHOW_NOTEBOOK, prefs::GLOBAL),
-            (imp.system_tray_check.get().upcast(), prefs::KEY_SYSTEM_TRAY, prefs::GLOBAL),
-            (imp.minimize_to_tray_check.get().upcast(), prefs::KEY_MINIMIZE_TO_TRAY, prefs::GLOBAL),
-            (imp.add_notify_check.get().upcast(), prefs::KEY_ADD_NOTIFY, prefs::GLOBAL),
-            (imp.complete_notify_check.get().upcast(), prefs::KEY_COMPLETE_NOTIFY, prefs::GLOBAL),
-        ];
-        for (widget, key, flags) in simple {
-            let wd = PrefWidget::Simple { widget, key, flags };
-            wd.refresh(&d.prefs());
-            imp.widgets.borrow_mut().push(wd);
-        }
+        imp.settings.load(&d.prefs());
 
         d.add_persistent_list(
             &imp.headers_box,
             prefs::KEY_CUSTOM_HEADERS,
-            prefs::PROFILE,
+            Scope::Profile,
             (prefs::KEY_CUSTOM_HEADER_NAME, &tr("Name")),
             (prefs::KEY_CUSTOM_HEADER_VALUE, &tr("Value")),
         );
         d.add_persistent_list(
             &imp.destinations_box,
             prefs::KEY_DESTINATIONS,
-            prefs::CONNECTION,
+            Scope::Connection,
             (prefs::SUBKEY_LABEL, &tr("Label")),
             (prefs::KEY_DESTINATIONS_SUBKEY_DIR, &tr("Directory")),
         );
 
-        d.full_update_dependency();
+        d.preview_view_prefs();
 
         d.on_response(|d, response| {
             let prefs = d.prefs();
-            if response == dialog::RESPONSE_OK {
+            for id in d.imp().view_handlers.take() {
+                prefs.disconnect(id);
+            }
+            if response == Response::Ok {
                 d.save_all();
                 prefs.save();
+            } else {
+                for (key, value) in d.imp().view_before.take() {
+                    if prefs.get_bool(key, Scope::Global) != value {
+                        prefs.set_bool(key, value, Scope::Global);
+                    }
+                }
             }
-            if let Some(win) = d.imp().win.upgrade() {
-                win.reload_dir_aliases();
+            if let Some(client) = d.imp().client.borrow().as_ref() {
+                client.reload_dir_aliases();
             }
-            d.imp().widgets.borrow_mut().clear();
+            d.imp().lists.borrow_mut().clear();
             d.destroy();
         });
 
@@ -661,8 +635,9 @@ impl PreferencesDialog {
 
     fn refresh_all(&self) {
         let prefs = self.prefs();
-        for wd in self.imp().widgets.borrow().iter() {
-            wd.refresh(&prefs);
+        self.imp().settings.load(&prefs);
+        for list in self.imp().lists.borrow().iter() {
+            list.refresh(&prefs);
         }
     }
 
@@ -671,22 +646,41 @@ impl PreferencesDialog {
         if prefs.profile().is_none() {
             return;
         }
-        for wd in self.imp().widgets.borrow().iter() {
-            wd.save(&prefs);
+        self.imp().settings.save(&prefs);
+        for list in self.imp().lists.borrow().iter() {
+            list.save(&prefs);
         }
     }
 
-    fn full_update_dependency(&self) {
+    /// The view settings set and follow their preferences (see the top)
+    fn preview_view_prefs(&self) {
         let imp = self.imp();
-        let check = &imp.full_update_check;
-        imp.full_update_spin.set_sensitive(check.is_sensitive() && check.is_active());
+        let prefs = self.prefs();
+        for key in VIEW_SETTINGS {
+            imp.view_before.borrow_mut().push((key, prefs.get_bool(key, Scope::Global)));
+            let p = prefs.clone();
+            imp.settings.connect_notify_local(Some(key), move |settings, _| {
+                // not when it follows the preference
+                let value = settings.property::<bool>(key);
+                if p.get_bool(key, Scope::Global) != value {
+                    p.set_bool(key, value, Scope::Global);
+                }
+            });
+            let weak = imp.settings.downgrade();
+            let id = prefs.connect_changed(move |prefs, changed| {
+                if let (Some(settings), true) = (weak.upgrade(), changed == Some(key)) {
+                    settings.set_property(key, prefs.get_bool(key, Scope::Global));
+                }
+            });
+            imp.view_handlers.borrow_mut().push(id);
+        }
     }
 
     /// This is the application's Settings window on macOS, which has a fixed
     /// size and its minimize and zoom buttons dimmed. It's sized by its
     /// content then, so the Connection tab (which is the tallest, and
     /// scrolls) has to ask for its full height, as far as the screen allows.
-    fn macos_settings_window(&self, win: &MainWindow) {
+    fn macos_settings_window(&self, win: &gtk::Window) {
         let scroll = &self.imp().connection_scroll;
         scroll.set_propagate_natural_height(true);
         if let Some(monitor) = win.surface().and_then(|s| s.display().monitor_at_surface(&s)) {
@@ -700,7 +694,7 @@ impl PreferencesDialog {
     fn profile_combo_populate(&self) {
         let imp = self.imp();
         let prefs = self.prefs();
-        let profile_id = prefs.get_int(prefs::KEY_PROFILE_ID, prefs::GLOBAL);
+        let profile_id = prefs.get_int(prefs::KEY_PROFILE_ID, Scope::Global);
         let profiles = prefs.profiles();
 
         imp.populating.set(true);
@@ -726,17 +720,16 @@ impl PreferencesDialog {
         &self,
         bx: &gtk::Box,
         key: &str,
-        flags: u32,
+        scope: Scope,
         col1: (&str, &str),
         col2: (&str, &str),
     ) {
-        let ptv = PersistentTreeView::new(key, flags);
-        let first = ptv.add_column(0, col1.0, col1.1);
+        let ptv = PersistentTreeView::new(key, scope);
+        let first = ptv.add_column("first", col1.0, col1.1);
         ptv.set_add_select(first);
-        ptv.add_column(1, col2.0, col2.1);
-        let wd = PrefWidget::List(ptv.clone());
-        wd.refresh(&self.prefs());
-        self.imp().widgets.borrow_mut().push(wd);
+        ptv.add_column("second", col2.0, col2.1);
+        ptv.refresh(&self.prefs());
+        self.imp().lists.borrow_mut().push(ptv.clone());
         ptv.widget.set_vexpand(true);
         bx.append(&ptv.widget);
     }

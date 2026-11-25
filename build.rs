@@ -5,7 +5,8 @@
 //! in libc.
 //!
 //! A plain `cargo build` works for development: the translations are then
-//! compiled into the build directory, and the data of GTK's prefix is used.
+//! used from the build directory (where they're always compiled, for the
+//! tests), and the data of GTK's prefix is used.
 
 use std::env;
 use std::fs;
@@ -28,13 +29,15 @@ fn blueprints(out_dir: &Path) -> PathBuf {
     let ui_dir = out_dir.join("ui");
     fs::create_dir_all(&ui_dir).unwrap();
 
-    let mut files: Vec<PathBuf> = fs::read_dir("src")
+    let mut files: Vec<PathBuf> = fs::read_dir("src/ui")
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|e| e == "blp"))
         .collect();
     files.sort();
 
+    // also when a file is added
+    println!("cargo:rerun-if-changed=src/ui");
     println!("cargo:rerun-if-env-changed=BLUEPRINT_COMPILER");
     let compiler = env::var("BLUEPRINT_COMPILER").unwrap_or_else(|_| "blueprint-compiler".into());
     // The compiler may be a command line (eg. "python3 /path/to/blueprint-compiler.py")
@@ -44,7 +47,7 @@ fn blueprints(out_dir: &Path) -> PathBuf {
     let status = cmd
         .arg("batch-compile")
         .arg(&ui_dir)
-        .arg("src")
+        .arg("src/ui")
         .args(&files)
         .status()
         .expect("blueprint-compiler (>= 0.16) is needed to build the user interface");
@@ -59,7 +62,7 @@ fn blueprints(out_dir: &Path) -> PathBuf {
 
 fn resources(ui_dir: &Path) {
     let ui_dir = ui_dir.to_str().unwrap();
-    glib_build_tools::compile_resources(&[ui_dir], "src/trg.gresource.xml", "trg-ui.gresource");
+    glib_build_tools::compile_resources(&[ui_dir], "src/ui/ui.gresource.xml", "trg-ui.gresource");
     glib_build_tools::compile_resources(
         &["data"],
         &format!("data/{APPLICATION_ID}.gresource.xml"),
@@ -67,7 +70,7 @@ fn resources(ui_dir: &Path) {
     );
 }
 
-/// Translations for running from the build directory
+/// Translations for running from the build directory, and for the tests
 fn compile_translations(out_dir: &Path) -> PathBuf {
     let locale_dir = out_dir.join("locale");
     println!("cargo:rerun-if-changed=po/LINGUAS");
@@ -106,10 +109,9 @@ fn config(out_dir: &Path) {
         println!("cargo:rerun-if-env-changed={var}");
     }
 
-    let locale_dir = match env::var("TRG_LOCALEDIR") {
-        Ok(dir) => dir,
-        Err(_) => compile_translations(out_dir).display().to_string(),
-    };
+    // Always compiled: the tests use them, also in builds for installing
+    let build_locale_dir = compile_translations(out_dir).display().to_string();
+    let locale_dir = env::var("TRG_LOCALEDIR").unwrap_or(build_locale_dir);
     let data_dir = env::var("TRG_DATADIR").unwrap_or_else(|_| format!("{}/share", gtk_prefix()));
 
     println!("cargo:rustc-env=TRG_PACKAGE_NAME={PACKAGE_NAME}");

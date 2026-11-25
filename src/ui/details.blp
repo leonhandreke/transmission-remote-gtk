@@ -1,0 +1,17 @@
+using Gtk 4.0;
+
+// The selected torrent's details, below the torrent list. TrgDetails adds
+// the trackers, files and peers pages after the General page once it has
+// the client.
+template $TrgDetails: Widget {
+  Notebook notebook {
+    ScrolledWindow {
+      $TrgGeneralPanel general {}
+    }
+
+    [tab]
+    Label {
+      label: _("General");
+    }
+  }
+}

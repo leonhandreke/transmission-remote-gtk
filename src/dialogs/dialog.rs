@@ -1,36 +1,32 @@
 //! TrgDialog: a window with a content area and a row of buttons, which
-//! respond with a response ID like GtkDialog (deprecated in GTK 4.10) did.
+//! respond like GtkDialog (deprecated in GTK 4.10) did, but with only the
+//! two answers the dialogs tell apart.
 //!
 //! In a template, children go into the content area, and children of type
 //! "action" ([action] in Blueprint) into the row of buttons, which respond
-//! through the dialog.* actions: "dialog.accept" responds with ACCEPT, and so
-//! on. They're separate actions, so a response can be disabled (and its
-//! button made insensitive) with action_set_enabled().
+//! through the actions "dialog.ok" (Response::Ok: OK, Add, Move...) and
+//! "dialog.cancel" (Response::Cancel: Cancel, Close). Closing the window
+//! (also with Escape) responds with Response::Cancel. They're actions so a
+//! response can be disabled (and its button made insensitive) with
+//! action_set_enabled().
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{gdk, glib};
+use gtk::{gdk, gio, glib};
 
-pub const RESPONSE_ACCEPT: i32 = -3;
-pub const RESPONSE_DELETE_EVENT: i32 = -4;
-pub const RESPONSE_OK: i32 = -5;
-pub const RESPONSE_CANCEL: i32 = -6;
-pub const RESPONSE_CLOSE: i32 = -7;
-pub const RESPONSE_YES: i32 = -8;
-pub const RESPONSE_NO: i32 = -9;
-pub const RESPONSE_APPLY: i32 = -10;
+/// How a dialog was answered
+#[derive(Clone, Copy, Debug, PartialEq, Eq, glib::Enum)]
+#[enum_type(name = "TrgDialogResponse")]
+pub enum Response {
+    /// Confirmed: the dialog's changes or request are to be applied
+    Ok,
+    /// Cancelled or closed
+    Cancel,
+}
 
-const RESPONSE_ACTIONS: &[(&str, i32)] = &[
-    ("accept", RESPONSE_ACCEPT),
-    ("cancel", RESPONSE_CANCEL),
-    ("ok", RESPONSE_OK),
-    ("close", RESPONSE_CLOSE),
-    ("apply", RESPONSE_APPLY),
-    ("yes", RESPONSE_YES),
-    ("no", RESPONSE_NO),
-];
+const RESPONSE_ACTIONS: &[(&str, Response)] = &[("ok", Response::Ok), ("cancel", Response::Cancel)];
 
 const GUI_PAD: i32 = 6;
 const GUI_PAD_BIG: i32 = 12;
@@ -43,7 +39,6 @@ mod imp {
         pub content_area: gtk::Box,
         pub action_area: gtk::Box,
         pub destroyed: Cell<bool>,
-        pub responded: RefCell<Option<i32>>,
     }
 
     impl Default for Dialog {
@@ -52,7 +47,6 @@ mod imp {
                 content_area: gtk::Box::new(gtk::Orientation::Vertical, 0),
                 action_area: gtk::Box::new(gtk::Orientation::Horizontal, GUI_PAD),
                 destroyed: Cell::new(false),
-                responded: Default::default(),
             }
         }
     }
@@ -82,7 +76,7 @@ mod imp {
             SIGNALS.get_or_init(|| {
                 vec![
                     glib::subclass::Signal::builder("response")
-                        .param_types([i32::static_type()])
+                        .param_types([Response::static_type()])
                         .build(),
                 ]
             })
@@ -91,6 +85,7 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             self.obj().setup();
+            super::add_app_shortcuts(self.obj().upcast_ref());
         }
 
         fn dispose(&self) {
@@ -101,11 +96,11 @@ mod imp {
     impl WidgetImpl for Dialog {}
 
     impl WindowImpl for Dialog {
-        /// Closing the window is a DELETE_EVENT response, like GtkDialog. The
-        /// handlers usually destroy the window themselves.
+        /// Closing the window cancels it. The handlers usually destroy the
+        /// window themselves.
         fn close_request(&self) -> glib::Propagation {
             let obj = self.obj().clone();
-            super::TrgDialogExt::response(&obj, RESPONSE_DELETE_EVENT);
+            super::TrgDialogExt::response(&obj, Response::Cancel);
             if self.destroyed.get() {
                 return glib::Propagation::Stop;
             }
@@ -180,30 +175,51 @@ impl Dialog {
     }
 }
 
+/// The application's shortcuts ("app." actions: Quit; on macOS also Close
+/// Window and Minimize) in a dialog. A window only has them while it belongs
+/// to the application, and the dialogs don't: on macOS, the menu bar's
+/// "win." actions follow the application's active window, so they'd be
+/// disabled while a dialog of the application has the focus. The main
+/// window's shortcuts ("win." actions) aren't for the dialogs.
+pub fn add_app_shortcuts(window: &gtk::Window) {
+    let Some(app) = gio::Application::default().and_downcast::<gtk::Application>() else {
+        return;
+    };
+    let controller = gtk::ShortcutController::new();
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    for name in app.list_actions() {
+        for accel in app.accels_for_action(&format!("app.{name}")) {
+            let Some(trigger) = gtk::ShortcutTrigger::parse_string(&accel) else { continue };
+            let weak = app.downgrade();
+            let name = name.clone();
+            let action = gtk::CallbackAction::new(move |_, _| {
+                let Some(app) = weak.upgrade() else { return glib::Propagation::Proceed };
+                if !app.lookup_action(&name).is_some_and(|a| a.is_enabled()) {
+                    return glib::Propagation::Proceed;
+                }
+                app.activate_action(&name, None);
+                glib::Propagation::Stop
+            });
+            controller.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
+        }
+    }
+    window.add_controller(controller);
+}
+
 /// The methods of a dialog, for its subclasses
 pub trait TrgDialogExt: IsA<Dialog> + 'static {
-    fn response(&self, response: i32) {
+    fn response(&self, response: Response) {
         self.emit_by_name::<()>("response", &[&response]);
     }
 
     /// Calls f with the dialog and the response
-    fn on_response<F: Fn(&Self, i32) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+    fn on_response<F: Fn(&Self, Response) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_local("response", false, move |args| {
             let d = args[0].get::<Dialog>().unwrap();
-            f(d.downcast_ref::<Self>().unwrap(), args[1].get::<i32>().unwrap());
+            f(d.downcast_ref::<Self>().unwrap(), args[1].get::<Response>().unwrap());
             None
         })
     }
 }
 
 impl<T: IsA<Dialog>> TrgDialogExt for T {}
-
-/// The widget of type T that widget is in (the template object of a
-/// callback of a template, as the callbacks get the emitter)
-pub fn ancestor<T: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Option<T> {
-    let widget = widget.as_ref();
-    if let Some(t) = widget.downcast_ref::<T>() {
-        return Some(t.clone());
-    }
-    widget.ancestor(T::static_type()).and_downcast::<T>()
-}

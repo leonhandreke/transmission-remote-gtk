@@ -1,5 +1,5 @@
-//! The application (trg-gtk-app.c): the main window, the command line,
-//! files opened from the Finder, and the macOS conventions.
+//! The application: the main window, the command line, files opened from the
+//! Finder, and the macOS conventions.
 
 use std::cell::RefCell;
 
@@ -9,7 +9,7 @@ use gtk::{gio, glib};
 
 use crate::client::Client;
 use crate::main_window::MainWindow;
-use crate::menus;
+use crate::menu_bar;
 use crate::util;
 
 /// The project page, which is the help on macOS
@@ -162,9 +162,10 @@ impl App {
     }
 
     fn startup_main(&self) {
-        // "app.quit" (File -> Quit, Ctrl+Q) closes the window, rather than
-        // quitting straight away, so that it can save its state.
-        self.add_simple_action("quit", |app| match app.windows().first() {
+        // "app.quit" (File -> Quit, Ctrl+Q, also in the dialogs) closes the
+        // main window, rather than quitting straight away, so that it can
+        // save its state; closing it quits.
+        self.add_simple_action("quit", |app| match app.main_window() {
             Some(w) => w.close(),
             None => app.quit(),
         });
@@ -173,9 +174,19 @@ impl App {
             crate::macos::disable_window_tabbing();
         }
 
+        let css = gtk::CssProvider::new();
+        css.load_from_resource("/io/github/TransmissionRemoteGtk/style.css");
+        if let Some(display) = gtk::gdk::Display::default() {
+            gtk::style_context_add_provider_for_display(
+                &display,
+                &css,
+                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+        }
+
         let client = self.imp().client.borrow().clone().unwrap();
         let window = MainWindow::new(self.upcast_ref(), &client);
-        menus::set_accels(self.upcast_ref());
+        menu_bar::set_accels(self.upcast_ref());
         if util::is_macos() {
             self.macos_startup(&window);
         }

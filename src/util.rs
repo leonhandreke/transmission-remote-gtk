@@ -1,5 +1,5 @@
-//! Formatting (sizes, speeds, times, ratios, from Transmission), URL checks
-//! and GTK helpers: error dialogs, context menus and popover menus.
+//! URL checks and GTK helpers: error dialogs, context menus and popover
+//! menus.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -8,148 +8,7 @@ use gtk::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use crate::client::Error;
-use crate::i18n::{ctr, ntr, qtr, sprintf, tr};
-
-/* Sizes and speeds, as Transmission formats them */
-
-pub const DISK_K: i64 = 1024;
-pub const SPEED_K: i64 = 1024;
-
-fn size_units() -> [String; 4] {
-    [tr("KiB"), tr("MiB"), tr("GiB"), tr("TiB")]
-}
-
-fn speed_units() -> [String; 4] {
-    [tr("KiB/s"), tr("MiB/s"), tr("GiB/s"), tr("TiB/s")]
-}
-
-/// tr_formatter_size_B()
-pub fn format_size(bytes: i64) -> String {
-    let units = size_units();
-    let k = DISK_K as f64;
-    let values = [k, k * k, k * k * k, k * k * k * k];
-    let b = bytes as f64;
-    let i = if b < values[1] {
-        0
-    } else if b < values[2] {
-        1
-    } else if b < values[3] {
-        2
-    } else {
-        3
-    };
-    let value = b / values[i];
-    let precision = if value < 100.0 { 2 } else { 1 };
-    format!("{value:.precision$} {}", units[i])
-}
-
-/// tr_formatter_speed_KBps()
-pub fn format_speed_kbps(kbps: f64) -> String {
-    let units = speed_units();
-    let k = SPEED_K as f64;
-    let mut speed = kbps;
-    if speed <= 999.95 {
-        format!("{} {}", speed as i64, units[0])
-    } else {
-        speed /= k;
-        if speed <= 99.995 {
-            format!("{speed:.2} {}", units[1])
-        } else if speed <= 999.95 {
-            format!("{speed:.1} {}", units[1])
-        } else {
-            speed /= k;
-            format!("{speed:.1} {}", units[2])
-        }
-    }
-}
-
-/// A speed in bytes per second
-pub fn format_speed(bytes_per_second: i64) -> String {
-    format_speed_kbps((bytes_per_second / DISK_K) as f64)
-}
-
-/// tr_strlsize(): "None" for 0
-pub fn format_size_or_none(bytes: i64) -> String {
-    if bytes == 0 { qtr("None") } else { format_size(bytes) }
-}
-
-pub fn truncd(x: f64, decimal_places: i32) -> f64 {
-    let i = 10f64.powi(decimal_places);
-    ((x * i) as i64) as f64 / i
-}
-
-/// tr_strlpercent()
-pub fn format_percent(x: f64) -> String {
-    let precision = if x < 10.0 {
-        2
-    } else if x < 100.0 {
-        1
-    } else {
-        0
-    };
-    format!("{:.*}%", precision as usize, truncd(x, precision))
-}
-
-/// tr_strlratio()
-pub fn format_ratio(ratio: f64) -> String {
-    if ratio.is_nan() {
-        tr("None")
-    } else if ratio.is_infinite() {
-        "\u{221E}".into()
-    } else if ratio < 10.0 {
-        format!("{:.2}", truncd(ratio, 2))
-    } else if ratio < 100.0 {
-        format!("{:.1}", truncd(ratio, 1))
-    } else {
-        format!("{ratio:.0}")
-    }
-}
-
-/// tr_strltime_short(): hh:mm:ss
-pub fn format_time_short(seconds: i64) -> String {
-    let s = seconds.max(0);
-    format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, (s % 3600) % 60)
-}
-
-/// tr_strltime_long(): "2 days, 3 hours"
-pub fn format_time_long(seconds: i64) -> String {
-    let s = seconds.max(0);
-    let days = s / 86400;
-    let hours = (s % 86400) / 3600;
-    let minutes = (s % 3600) / 60;
-    let secs = (s % 3600) % 60;
-
-    let d = sprintf(&ntr("%d day", "%d days", days), &[&days]);
-    let h = sprintf(&ntr("%d hour", "%d hours", hours), &[&hours]);
-    let m = sprintf(&ntr("%d minute", "%d minutes", minutes), &[&minutes]);
-    let sec = sprintf(&ntr("%ld second", "%ld seconds", secs), &[&secs]);
-
-    if days > 0 {
-        if days >= 4 || hours == 0 { d } else { format!("{d}, {h}") }
-    } else if hours > 0 {
-        if hours >= 4 || minutes == 0 { h } else { format!("{h}, {m}") }
-    } else if minutes > 0 {
-        if minutes >= 4 || secs == 0 { m } else { format!("{m}, {sec}") }
-    } else {
-        sec
-    }
-}
-
-/// "%F %H:%M:%S" in local time, "N/A" for 0
-pub fn epoch_to_string(epoch: i64) -> String {
-    if epoch == 0 {
-        return tr("N/A");
-    }
-    glib::DateTime::from_unix_local(epoch)
-        .and_then(|dt| dt.format("%F %H:%M:%S"))
-        .map(|s| s.to_string())
-        .unwrap_or_default()
-}
-
-/// The progress bar text of a percentage
-pub fn progress_text(progress: f64) -> String {
-    sprintf(&ctr("progress bar label", "%d %%"), &[&(progress as i64)])
-}
+use crate::i18n::tr;
 
 /* URLs */
 
@@ -161,77 +20,45 @@ pub fn is_url(s: &str) -> bool {
     s.starts_with("http://") || s.starts_with("https://")
 }
 
-/// The host of a tracker URL, without www., tracker. and the like
-pub struct HostRegex(glib::Regex);
+/// The host of a tracker's URL, without "www.", "tracker." and the like,
+/// which is what tells the trackers apart. Like the regular expression
+/// ^[^:/?#]+:?//(?:www\.|torrent\.|torrents\.|tracker\.|\d+\.)?([^/?#:]*)
+pub fn tracker_host(url: &str) -> Option<&str> {
+    let is_delimiter = |c| matches!(c, ':' | '/' | '?' | '#');
+    let scheme_end = url.find(is_delimiter).filter(|&i| i > 0)?;
+    let rest = &url[scheme_end..];
+    let mut rest = rest.strip_prefix(':').unwrap_or(rest).strip_prefix("//")?;
 
-impl Default for HostRegex {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl HostRegex {
-    pub fn new() -> Self {
-        Self(
-            glib::Regex::new(
-                r"^[^:/?#]+:?//(?:www\.|torrent\.|torrents\.|tracker\.|\d+\.)?([^/?#:]*)",
-                glib::RegexCompileFlags::OPTIMIZE,
-                glib::RegexMatchFlags::empty(),
-            )
-            .ok()
-            .flatten()
-            .expect("the host regex is valid"),
-        )
+    let prefix = ["www.", "torrent.", "torrents.", "tracker."]
+        .iter()
+        .find_map(|p| rest.strip_prefix(p))
+        .or_else(|| {
+            let digits = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            rest[digits..].strip_prefix('.').filter(|_| digits > 0)
+        });
+    if let Some(r) = prefix {
+        rest = r;
     }
 
-    /// The first group of the match, like trg_gregex_get_first()
-    pub fn first(&self, src: &str) -> Option<String> {
-        let s = glib::GString::from(src);
-        let mi = self.0.match_(s.as_gstr(), glib::RegexMatchFlags::empty()).ok()?;
-        if mi.matches() { mi.fetch(1).map(|s| s.to_string()) } else { None }
-    }
-}
-
-pub fn base64_encode_file(filename: &str) -> Result<String, String> {
-    use base64::Engine;
-    let data = std::fs::read(filename).map_err(|e| e.to_string())?;
-    Ok(base64::engine::general_purpose::STANDARD.encode(data))
+    let end = rest.find(is_delimiter).unwrap_or(rest.len());
+    Some(&rest[..end])
 }
 
 pub fn rm_trailing_slashes(s: &str) -> &str {
     s.trim_end_matches('/')
 }
 
-/// Wraps the (first) link in text with a hyperlink, for Pango markup. The
-/// result is always escaped markup.
-pub fn add_links_to_text(original: &str) -> String {
-    let lower = original.to_ascii_lowercase();
-    if lower.contains("<a ") {
-        return original.to_string();
-    }
-    let mut out = String::new();
-    let mut rest = original;
-    while let Some(i) = rest.find("http://").or_else(|| rest.find("https://")).map(|i| {
-        // the earlier of both
-        match (rest.find("http://"), rest.find("https://")) {
-            (Some(a), Some(b)) => a.min(b),
-            _ => i,
-        }
-    }) {
-        out.push_str(&glib::markup_escape_text(&rest[..i]));
-        let url_len = rest[i..]
-            .find(|c: char| !(c.is_ascii_alphanumeric() || "_-./?=&:".contains(c)))
-            .unwrap_or(rest.len() - i);
-        let url = &rest[i..i + url_len];
-        let escaped = glib::markup_escape_text(url);
-        out.push_str(&format!("<a href='{escaped}'>{escaped}</a>"));
-        rest = &rest[i + url_len..];
-    }
-    out.push_str(&glib::markup_escape_text(rest));
-    out
-}
-
 /* GTK */
+
+/// The widget of type T that widget is in (the template object of a
+/// callback of a template, as the callbacks get the emitter)
+pub fn ancestor<T: IsA<gtk::Widget>>(widget: &impl IsA<gtk::Widget>) -> Option<T> {
+    let widget = widget.as_ref();
+    if let Some(t) = widget.downcast_ref::<T>() {
+        return Some(t.clone());
+    }
+    widget.ancestor(T::static_type()).and_downcast::<T>()
+}
 
 /// Whether we're running on GTK's macOS backend, so should follow macOS
 /// conventions (native menu bar, Command key shortcuts, ...).
@@ -323,8 +150,8 @@ pub fn popover_menu_popup(
         popover.insert_action_group(prefix, Some(actions));
     }
 
-    // A tree view presents its popovers. From the keyboard, point at the row
-    // with the focus if there is one.
+    // From the keyboard, point at the row of a tree view with the focus if
+    // there is one.
     if (x < 0.0 || y < 0.0)
         && let Some(tv) = parent.downcast_ref::<crate::tree_view::TreeView>()
         && let Some(bounds) = tv.focus_rect()
@@ -353,9 +180,9 @@ pub fn popover_menu_popup(
     popover.popup();
 
     // Most widgets don't present popovers they don't know about in their
-    // size_allocate, so the menu would keep the size it had before its items
-    // were fully set up (eg. accelerator labels). Re-present it for the
-    // first few frames.
+    // size_allocate (ours do, see present_popovers), so the menu would keep
+    // the size it had before its items were fully set up (eg. accelerator
+    // labels). Re-present it for the first few frames.
     let frames = Cell::new(0);
     popover.add_tick_callback(move |popover, _| {
         if popover.parent().is_some() && popover.is_visible() {
@@ -366,7 +193,19 @@ pub fn popover_menu_popup(
     });
 }
 
-/// A scrolled window with a frame around child
+/// Presents the popovers among the children of widget, for its
+/// size_allocate: a widget with context menus (popovers of it, see
+/// popover_menu_popup) has to, or they aren't positioned and sized.
+pub fn present_popovers(widget: &impl IsA<gtk::Widget>) {
+    let mut child = widget.first_child();
+    while let Some(c) = child {
+        if let Some(p) = c.downcast_ref::<gtk::Popover>() {
+            p.present();
+        }
+        child = c.next_sibling();
+    }
+}
+
 /// Puts a new spinner, spinning, first in a box, in place of the one
 /// that's there. GTK 4.24's spinner pauses its animation when it's unmapped
 /// (in a hidden stack page, say) and doesn't play it again when it's mapped,
@@ -378,6 +217,7 @@ pub fn restart_spinner(container: &gtk::Box) {
     container.prepend(&gtk::Spinner::builder().spinning(true).build());
 }
 
+/// A scrolled window with a frame around child
 pub fn scrolled_window(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
     gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
@@ -387,19 +227,65 @@ pub fn scrolled_window(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
         .build()
 }
 
+/// The items (of type T) of a list model
+pub fn objects<T: IsA<glib::Object>>(
+    model: &impl IsA<gio::ListModel>,
+) -> impl Iterator<Item = T> + '_ {
+    (0..model.n_items()).filter_map(move |i| model.item(i).and_downcast::<T>())
+}
+
+/// Removes the items (of type T) for which stale is true, in runs from the
+/// end, so it's linear in the number of items. Returns how many were removed.
+pub fn remove_where<T: IsA<glib::Object>>(
+    store: &gio::ListStore,
+    mut stale: impl FnMut(&T) -> bool,
+) -> u32 {
+    let mut removed = 0;
+    let mut i = store.n_items();
+    while i > 0 {
+        let end = i;
+        while i > 0 {
+            let item = store.item(i - 1).and_downcast::<T>().unwrap();
+            if !stale(&item) {
+                break;
+            }
+            i -= 1;
+        }
+        if i < end {
+            store.splice(i, end - i, &[] as &[glib::Object]);
+            removed += end - i;
+        } else {
+            i -= 1;
+        }
+    }
+    removed
+}
+
+/// Sets a property of obj, notifying only if its value changes (setting a
+/// property notifies even if it doesn't), so the cells showing it don't
+/// refresh for nothing
+pub fn set_changed<V>(obj: &impl IsA<glib::Object>, name: &str, value: V)
+where
+    V: Into<glib::Value> + PartialEq + for<'a> glib::value::FromValue<'a> + 'static,
+{
+    if obj.property::<V>(name) != value {
+        obj.set_property(name, value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn formats() {
-        assert_eq!(format_time_short(3725), "01:02:05");
-        assert_eq!(format_ratio(1.236), "1.23");
-        assert_eq!(format_percent(5.555), "5.55%");
-        assert_eq!(truncd(1.239, 2), 1.23);
-        assert!(
-            add_links_to_text("see http://a.b/c?d=1 & more")
-                .contains("<a href='http://a.b/c?d=1'>")
-        );
+    fn tracker_hosts() {
+        assert_eq!(tracker_host("udp://tracker.example.org:6969/announce"), Some("example.org"));
+        assert_eq!(tracker_host("https://www.example.org/announce?x"), Some("example.org"));
+        assert_eq!(tracker_host("http://torrents.example.org"), Some("example.org"));
+        assert_eq!(tracker_host("http://9.example.org/"), Some("example.org"));
+        assert_eq!(tracker_host("http://torrentsite.org/"), Some("torrentsite.org"));
+        assert_eq!(tracker_host("http:example.org"), None);
+        assert_eq!(tracker_host("//example.org"), None);
+        assert_eq!(tracker_host("example.org:443"), None);
     }
 }

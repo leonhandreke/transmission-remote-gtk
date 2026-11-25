@@ -50,6 +50,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       Entry download_dir_entry {
+        text: bind settings.download-dir bidirectional;
         hexpand: true;
 
         layout {
@@ -59,6 +60,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton incomplete_dir_check {
+        active: bind settings.incomplete-dir-enabled bidirectional;
         label: _("Incomplete download dir");
         use-underline: true;
         margin-start: 18;
@@ -70,6 +72,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       Entry incomplete_dir_entry {
+        text: bind settings.incomplete-dir bidirectional;
         sensitive: bind incomplete_dir_check.active;
         hexpand: true;
 
@@ -80,6 +83,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton script_torrent_done_check {
+        active: bind settings.script-torrent-done-enabled bidirectional;
         label: _("Torrent done script");
         use-underline: true;
         margin-start: 18;
@@ -91,6 +95,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       Entry script_torrent_done_entry {
+        text: bind settings.script-torrent-done-filename bidirectional;
         sensitive: bind script_torrent_done_check.active;
         hexpand: true;
 
@@ -114,6 +119,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton cache_size_spin {
+        value: bind settings.cache-size-mib bidirectional;
         digits: 0;
 
         adjustment: Adjustment {
@@ -148,6 +154,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton rename_partial_check {
+        active: bind settings.rename-partial-files bidirectional;
         label: _("Rename partial files");
         use-underline: true;
         hexpand: true;
@@ -161,6 +168,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton trash_original_check {
+        active: bind settings.trash-original-torrent-files bidirectional;
         label: _("Trash original torrent files");
         use-underline: true;
         hexpand: true;
@@ -174,6 +182,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton start_added_check {
+        active: bind settings.start-added-torrents bidirectional;
         label: _("Start added torrents");
         use-underline: true;
         hexpand: true;
@@ -187,6 +196,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton sequential_download_check {
+        active: bind settings.sequential-download bidirectional;
         label: _("Download added torrents _sequentially");
         use-underline: true;
         hexpand: true;
@@ -243,6 +253,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton peer_port_spin {
+        value: bind settings.peer-port bidirectional;
         digits: 0;
 
         adjustment: Adjustment {
@@ -344,6 +355,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton peer_port_random_check {
+        active: bind settings.peer-port-random-on-start bidirectional;
         label: _("Random peer port on start");
         use-underline: true;
         hexpand: true;
@@ -357,6 +369,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton port_forwarding_check {
+        active: bind settings.port-forwarding-enabled bidirectional;
         label: _("Request forwarding of the peer port using UPnP or NAT-PMP");
         use-underline: true;
         hexpand: true;
@@ -386,6 +399,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton pex_check {
+        active: bind settings.pex-enabled bidirectional;
         label: _("Peer exchange (PEX)");
         use-underline: true;
         hexpand: true;
@@ -399,6 +413,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton dht_check {
+        active: bind settings.dht-enabled bidirectional;
         label: _("Distributed Hash Table (DHT)");
         use-underline: true;
         hexpand: true;
@@ -412,6 +427,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton lpd_check {
+        active: bind settings.lpd-enabled bidirectional;
         label: _("Local peer discovery");
         use-underline: true;
         hexpand: true;
@@ -441,6 +457,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton blocklist_check {
+        active: bind settings.blocklist-enabled bidirectional;
         margin-start: 18;
 
         layout {
@@ -474,6 +491,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       Entry blocklist_url_entry {
+        text: bind settings.blocklist-url bidirectional;
         hexpand: true;
 
         layout {
@@ -513,6 +531,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton speed_limit_down_check {
+        active: bind settings.speed-limit-down-enabled bidirectional;
         label: _("Down Limit (KiB/s)");
         use-underline: true;
         margin-start: 18;
@@ -524,6 +543,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton speed_limit_down_spin {
+        value: bind settings.speed-limit-down bidirectional;
         digits: 0;
         sensitive: bind speed_limit_down_check.active;
 
@@ -543,6 +563,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton speed_limit_up_check {
+        active: bind settings.speed-limit-up-enabled bidirectional;
         label: _("Up Limit (KiB/s)");
         use-underline: true;
         margin-start: 18;
@@ -554,6 +575,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton speed_limit_up_spin {
+        value: bind settings.speed-limit-up bidirectional;
         digits: 0;
         sensitive: bind speed_limit_up_check.active;
 
@@ -589,9 +611,9 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton alt_check {
+        active: bind settings.alt-speed-enabled bidirectional;
         label: _("Alternate speed limits active");
         use-underline: true;
-        notify::active => $alt_speed_dependency_cb();
         hexpand: true;
         margin-start: 18;
 
@@ -603,9 +625,9 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton alt_time_check {
+        active: bind settings.alt-speed-time-enabled bidirectional;
         label: _("Alternate time range");
         use-underline: true;
-        notify::active => $alt_speed_dependency_cb();
         margin-start: 18;
 
         layout {
@@ -637,7 +659,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
           output => $time_spin_output();
 
           adjustment: Adjustment {
-            upper: 69;
+            upper: 59;
             step-increment: 1;
             page-increment: 10;
           };
@@ -671,7 +693,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
           output => $time_spin_output();
 
           adjustment: Adjustment {
-            upper: 69;
+            upper: 59;
             step-increment: 1;
             page-increment: 10;
           };
@@ -787,6 +809,9 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton alt_speed_down_spin {
+        value: bind settings.alt-speed-down bidirectional;
+        // the alternate limits apply when they're on, or at the alternate times
+        sensitive: bind $either(settings.alt-speed-enabled, settings.alt-speed-time-enabled) as <bool>;
         digits: 0;
 
         adjustment: Adjustment {
@@ -818,6 +843,8 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton alt_speed_up_spin {
+        value: bind settings.alt-speed-up bidirectional;
+        sensitive: bind $either(settings.alt-speed-enabled, settings.alt-speed-time-enabled) as <bool>;
         digits: 0;
 
         adjustment: Adjustment {
@@ -866,6 +893,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton seed_ratio_limited_check {
+        active: bind settings.seed-ratio-limited bidirectional;
         label: _("Seed ratio limit");
         use-underline: true;
         margin-start: 18;
@@ -877,6 +905,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton seed_ratio_limit_spin {
+        value: bind settings.seed-ratio-limit bidirectional;
         digits: 2;
         sensitive: bind seed_ratio_limited_check.active;
 
@@ -912,6 +941,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton download_queue_check {
+        active: bind settings.download-queue-enabled bidirectional;
         label: _("Download queue size");
         use-underline: true;
         margin-start: 18;
@@ -923,6 +953,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton download_queue_spin {
+        value: bind settings.download-queue-size bidirectional;
         digits: 0;
         sensitive: bind download_queue_check.active;
 
@@ -942,6 +973,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton seed_queue_check {
+        active: bind settings.seed-queue-enabled bidirectional;
         label: _("Seed queue size");
         use-underline: true;
         margin-start: 18;
@@ -953,6 +985,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton seed_queue_spin {
+        value: bind settings.seed-queue-size bidirectional;
         digits: 0;
         sensitive: bind seed_queue_check.active;
 
@@ -972,6 +1005,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       CheckButton queue_stalled_check {
+        active: bind settings.queue-stalled-enabled bidirectional;
         label: _("Ignore stalled (minutes)");
         use-underline: true;
         margin-start: 18;
@@ -983,6 +1017,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton queue_stalled_spin {
+        value: bind settings.queue-stalled-minutes bidirectional;
         digits: 0;
         sensitive: bind queue_stalled_check.active;
 
@@ -1031,6 +1066,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton peer_limit_global_spin {
+        value: bind settings.peer-limit-global bidirectional;
         digits: 0;
 
         adjustment: Adjustment {
@@ -1062,6 +1098,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
       }
 
       SpinButton peer_limit_per_torrent_spin {
+        value: bind settings.peer-limit-per-torrent bidirectional;
         digits: 0;
 
         adjustment: Adjustment {
@@ -1090,7 +1127,7 @@ template $TrgRemotePrefsDialog: $TrgDialog {
   Button {
     label: _("_Close");
     use-underline: true;
-    action-name: "dialog.close";
+    action-name: "dialog.cancel";
   }
 
   [action]
@@ -1104,3 +1141,6 @@ template $TrgRemotePrefsDialog: $TrgDialog {
     ]
   }
 }
+
+// The settings, which the widgets show
+$TrgRemoteSettings settings {}

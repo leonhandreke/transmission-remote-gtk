@@ -43,4 +43,4 @@ jobs:
             https://gitlab.gnome.org/GNOME/blueprint-compiler.git \
             "$RUNNER_TEMP/blueprint-compiler"
       - name: Run blueprint-compiler format check
-        run: python3 "$RUNNER_TEMP/blueprint-compiler/blueprint-compiler.py" format src/*.blp
+        run: python3 "$RUNNER_TEMP/blueprint-compiler/blueprint-compiler.py" format src/ui/*.blp

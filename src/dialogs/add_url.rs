@@ -1,4 +1,4 @@
-//! Adding a torrent from a URL or magnet link (trg-torrent-add-url-dialog.c)
+//! Adding a torrent from a URL or magnet link
 
 use std::cell::RefCell;
 
@@ -7,17 +7,17 @@ use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gio, glib};
 
 use crate::client::Client;
-use crate::dialog::{self, Dialog, DialogImpl, TrgDialogExt};
+use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::i18n::tr;
 use crate::main_window::MainWindow;
-use crate::protocol::{self as p, get_bool};
+use crate::protocol as p;
 use crate::util;
 
 mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-torrent-add-url-dialog.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/torrent-add-url-dialog.ui")]
     pub struct TorrentAddUrlDialog {
         #[template_child]
         pub url_entry: TemplateChild<gtk::Entry>,
@@ -60,8 +60,8 @@ glib::wrapper! {
 impl TorrentAddUrlDialog {
     #[template_callback]
     fn url_entry_changed(entry: &gtk::Entry) {
-        if let Some(d) = dialog::ancestor::<TorrentAddUrlDialog>(entry) {
-            d.action_set_enabled("dialog.accept", entry.text_length() > 0);
+        if let Some(d) = util::ancestor::<TorrentAddUrlDialog>(entry) {
+            d.action_set_enabled("dialog.ok", entry.text_length() > 0);
         }
     }
 
@@ -71,7 +71,7 @@ impl TorrentAddUrlDialog {
         *imp.client.borrow_mut() = Some(client.clone());
         imp.win.set(Some(win));
 
-        d.action_set_enabled("dialog.accept", false);
+        d.action_set_enabled("dialog.ok", false);
 
         // a URL or magnet link in the clipboard
         let entry = imp.url_entry.get();
@@ -88,12 +88,12 @@ impl TorrentAddUrlDialog {
         d.set_transient_for(Some(win));
         d.on_response(|d, response| {
             let imp = d.imp();
-            if response == dialog::RESPONSE_ACCEPT {
+            if response == Response::Ok {
                 let client = imp.client.borrow().clone().unwrap();
                 let text = imp.url_entry.text().to_string();
                 let win = imp.win.upgrade();
 
-                let dht = client.session().map(|s| get_bool(&s, p::SGET_DHT_ENABLED)).unwrap_or(false);
+                let dht = client.session().is_some_and(|s| s.dht_enabled);
                 if text.starts_with("magnet:") && !dht {
                     // The add dialog is destroyed right after this, so use the
                     // main window as parent now that the warning doesn't block.
@@ -105,7 +105,7 @@ impl TorrentAddUrlDialog {
 
                 let req = p::torrent_add_url(&text, imp.start_check.is_active());
                 if let Some(win) = imp.win.upgrade() {
-                    crate::upload::dispatch_adds(&win, &client, vec![req]);
+                    crate::add_torrents::dispatch_adds(&win, &client, vec![req]);
                 }
             }
             d.destroy();

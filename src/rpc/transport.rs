@@ -29,8 +29,6 @@ pub struct Transport {
     soup: soup::Session,
     config: RefCell<Option<Config>>,
     session_id: RefCell<Option<String>>,
-    /// The rpc_version_semver of the X-Transmission-Rpc-Version header
-    rpc_version: RefCell<Option<String>>,
     next_id: Cell<u64>,
 }
 
@@ -44,7 +42,6 @@ impl Transport {
             soup,
             config: Default::default(),
             session_id: Default::default(),
-            rpc_version: Default::default(),
             next_id: Cell::new(1),
         }
     }
@@ -53,16 +50,10 @@ impl Transport {
     pub fn configure(&self, config: Option<Config>) {
         *self.config.borrow_mut() = config;
         *self.session_id.borrow_mut() = None;
-        *self.rpc_version.borrow_mut() = None;
     }
 
     pub fn abort(&self) {
         self.soup.abort();
-    }
-
-    /// The server's rpc_version_semver, from the handshake
-    pub fn rpc_version(&self) -> Option<String> {
-        self.rpc_version.borrow().clone()
     }
 
     fn new_message(&self, body: &glib::Bytes) -> Result<soup::Message> {
@@ -107,9 +98,7 @@ impl Transport {
         *self.session_id.borrow_mut() = Some(id.to_string());
 
         // sent from 4.1 on, along with JSON-RPC 2.0
-        let version = headers.one(RPC_VERSION_HEADER).map(|s| s.to_string());
-        let major = version.as_deref().and_then(parse_semver).map(|v| v.0);
-        *self.rpc_version.borrow_mut() = version;
+        let major = headers.one(RPC_VERSION_HEADER).and_then(|v| parse_semver(&v)).map(|v| v.0);
         match major {
             Some(m) if m >= JSONRPC_MIN_MAJOR => {
                 if m > SUPPORTED_MAJOR {
@@ -148,10 +137,6 @@ impl Transport {
         Err(Error::Status(409))
     }
 
-    pub async fn call(&self, req: Request) -> Result {
-        self.batch(vec![req]).await.pop().unwrap_or_else(|| Err(Error::Decode(String::new())))
-    }
-
     /// Sends the requests in one go, which the server executes in order.
     /// Returns their results, in the same order.
     pub async fn batch(&self, requests: Vec<Request>) -> Vec<Result> {
@@ -162,23 +147,11 @@ impl Transport {
         let first_id = self.next_id.get();
         self.next_id.set(first_id + n as u64);
 
-        let result = match self.post(encode_jsonrpc(&requests, Some(first_id))).await {
+        let result = match self.post(encode_jsonrpc(&requests, first_id)).await {
             Ok((200, bytes)) => decode_jsonrpc(&bytes, first_id, n),
             Ok((status, _)) => Err(Error::Status(status)),
             Err(e) => Err(e),
         };
         result.unwrap_or_else(|e| (0..n).map(|_| Err(e.clone())).collect())
-    }
-
-    /// Sends the requests as notifications: the server doesn't respond to
-    /// them, for when the result doesn't matter.
-    pub async fn notify(&self, requests: Vec<Request>) -> Result<()> {
-        if requests.is_empty() {
-            return Ok(());
-        }
-        match self.post(encode_jsonrpc(&requests, None)).await? {
-            (200 | 204, _) => Ok(()),
-            (status, _) => Err(Error::Status(status)),
-        }
     }
 }

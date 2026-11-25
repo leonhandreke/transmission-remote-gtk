@@ -157,9 +157,9 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       Label {
-        label: _("Running time:");
+        label: _("Added:");
         xalign: 0;
-        mnemonic-widget: date_started_lb;
+        mnemonic-widget: added_lb;
         use-underline: true;
         margin-start: 18;
 
@@ -169,7 +169,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
         }
       }
 
-      Label date_started_lb {
+      Label added_lb {
         xalign: 0;
         single-line-mode: true;
         hexpand: true;
@@ -434,6 +434,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       CheckButton honors_session_limits_check {
+        active: bind settings.honors-session-limits bidirectional;
         label: _("Honor global limits");
         use-underline: true;
         hexpand: true;
@@ -490,6 +491,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       SpinButton queue_position_spin {
+        value: bind settings.queue-position bidirectional;
         digits: 0;
 
         adjustment: Adjustment {
@@ -508,6 +510,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       CheckButton download_limited_check {
+        active: bind settings.download-limited bidirectional;
         label: _("Limit download speed (KiB/s)");
         use-underline: true;
         margin-start: 18;
@@ -519,6 +522,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       SpinButton download_limit_spin {
+        value: bind settings.download-limit bidirectional;
         digits: 0;
         sensitive: bind download_limited_check.active;
 
@@ -538,6 +542,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       CheckButton upload_limited_check {
+        active: bind settings.upload-limited bidirectional;
         label: _("Limit upload speed (KiB/s)");
         use-underline: true;
         margin-start: 18;
@@ -549,6 +554,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       SpinButton upload_limit_spin {
+        value: bind settings.upload-limit bidirectional;
         digits: 0;
         sensitive: bind upload_limited_check.active;
 
@@ -597,7 +603,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       DropDown seed_ratio_mode_combo {
-        notify::selected => $seed_ratio_mode_changed_cb();
+        selected: bind settings.seed-ratio-mode bidirectional;
 
         model: StringList {
           strings [
@@ -629,8 +635,9 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       SpinButton seed_ratio_limit_spin {
+        value: bind settings.seed-ratio-limit bidirectional;
+        sensitive: bind $stops_at_ratio(settings.seed-ratio-mode) as <bool>;
         digits: 1;
-        sensitive: false;
 
         adjustment: Adjustment {
           lower: 0;
@@ -677,6 +684,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       SpinButton peer_limit_spin {
+        value: bind settings.peer-limit bidirectional;
         digits: 0;
 
         adjustment: Adjustment {
@@ -695,11 +703,11 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       CheckButton sequential_download_check {
+        active: bind settings.sequential-download bidirectional;
         label: _("Download _sequentially");
         use-underline: true;
         hexpand: true;
         margin-start: 18;
-        toggled => $sequential_download_toggled_cb();
 
         layout {
           column: 0;
@@ -722,6 +730,8 @@ template $TrgTorrentPropsDialog: $TrgDialog {
       }
 
       SpinButton sequential_from_piece_spin {
+        value: bind settings.sequential-download-from-piece bidirectional;
+        sensitive: bind settings.sequential-download;
         digits: 0;
 
         adjustment: Adjustment {
@@ -750,7 +760,7 @@ template $TrgTorrentPropsDialog: $TrgDialog {
   Button {
     label: _("_Close");
     use-underline: true;
-    action-name: "dialog.close";
+    action-name: "dialog.cancel";
   }
 
   [action]
@@ -764,3 +774,6 @@ template $TrgTorrentPropsDialog: $TrgDialog {
     ]
   }
 }
+
+// The settings of the limits page, which its widgets show
+$TrgTorrentSettings settings {}

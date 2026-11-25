@@ -1,54 +1,44 @@
-//! The rather large main window, which glues everything together
-//! (trg-main-window.c).
+//! The main window, which glues everything together: it connects to the server,
+//! updates the torrents and the session periodically, and has the actions of
+//! the menus and the toolbar.
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cell::{Cell, OnceCell, RefCell};
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{CompositeTemplate, gdk, gio, glib};
 
-use crate::client::{Client, Response};
-use crate::dialog;
-use crate::dialogs;
-use crate::files::{FilesModel, FilesView};
+use crate::add_torrents::{self, AddOptions};
+use crate::client::Client;
+use crate::client::ConnectionState;
+use crate::details::Details;
+use crate::dialogs::{
+    self, preferences::PreferencesDialog, remote_prefs::RemotePrefsDialog, stats::StatsDialog,
+};
 use crate::i18n::{sprintf, tr};
-use crate::item::Item;
-use crate::menus::{ConnectionState, MenuBar, Toolbar};
-use crate::panels::{GeneralPanel, StatusBar};
-use crate::peers::{self, PeersModel};
-use crate::prefs;
-use crate::protocol::{self as p, Obj, get_bool, get_i64, get_str};
-use crate::state_selector::{FILTER_FLAG_DIR, FILTER_FLAG_TRACKER, StateSelector};
-use crate::torrent_model::{self as tm, TorrentItemExt, TorrentModel};
-use crate::torrent_view;
-use crate::trackers::{TrackersModel, TrackersView};
-use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
-use crate::upload::{self, Upload};
+use crate::menu_bar::MenuBar;
+use crate::prefs::{self, Prefs, Scope};
+use crate::protocol as p;
+use crate::state_selector::StateSelector;
+use crate::status_bar::StatusBar;
+use crate::toolbar::Toolbar;
+use crate::torrent_list::TorrentList;
+use crate::torrent_model::{TorrentModel, UpdateMode};
+use crate::torrent_object::TorrentObject;
 use crate::util;
 
-#[derive(Default)]
+/// The parts of the window that aren't in its template, made by construct()
 pub struct Parts {
-    pub client: Option<Client>,
-    pub torrent_model: Option<TorrentModel>,
-    pub torrent_tv: Option<TreeView>,
-    pub torrent_filter: Option<gtk::CustomFilter>,
-    pub toolbar: Option<Toolbar>,
-    pub menu_bar: Option<Rc<MenuBar>>,
-    pub state_selector: Option<StateSelector>,
-    pub trackers_model: Option<Rc<TrackersModel>>,
-    pub trackers_view: Option<Rc<TrackersView>>,
-    pub files_model: Option<Rc<FilesModel>>,
-    pub files_view: Option<Rc<FilesView>>,
-    pub peers_model: Option<Rc<PeersModel>>,
-    pub peers_tv: Option<TreeView>,
+    toolbar: Toolbar,
+    menu_bar: MenuBar,
+    state_selector: StateSelector,
 }
 
 mod imp {
     use super::*;
 
     #[derive(CompositeTemplate, Default)]
-    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/trg-main-window.ui")]
+    #[template(resource = "/io/github/TransmissionRemoteGtk/ui/main-window.ui")]
     pub struct MainWindow {
         #[template_child]
         pub menu_bar: TemplateChild<gtk::PopoverMenuBar>,
@@ -59,44 +49,18 @@ mod imp {
         #[template_child]
         pub vpaned: TemplateChild<gtk::Paned>,
         #[template_child]
-        pub notebook: TemplateChild<gtk::Notebook>,
+        pub torrent_list: TemplateChild<TorrentList>,
         #[template_child]
-        pub torrent_actions_menu: TemplateChild<gio::MenuModel>,
-        #[template_child]
-        pub torrent_queue_menu: TemplateChild<gio::MenuModel>,
-        #[template_child]
-        pub filter_entry: TemplateChild<gtk::SearchEntry>,
-        #[template_child]
-        pub torrent_overlay: TemplateChild<gtk::Overlay>,
-        #[template_child]
-        pub no_results: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub not_connected: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub not_connected_stack: TemplateChild<gtk::Stack>,
-        #[template_child]
-        pub connecting_box: TemplateChild<gtk::Box>,
-        #[template_child]
-        pub connecting_label: TemplateChild<gtk::Label>,
-        #[template_child]
-        pub gen_details: TemplateChild<GeneralPanel>,
+        pub details: TemplateChild<Details>,
         #[template_child]
         pub status_bar: TemplateChild<StatusBar>,
 
-        pub parts: RefCell<Parts>,
-        pub selected_torrent_id: Cell<i64>,
-
-        // what the torrent filter shows, from the state selector and the entry
-        pub filter_criteria: Cell<u32>,
-        pub filter_selected_text: RefCell<Option<String>>,
-        pub filter_text: RefCell<Option<String>>,
-
-        pub timer_id: RefCell<Option<glib::SourceId>>,
-        pub session_timer_id: RefCell<Option<glib::SourceId>>,
+        pub client: OnceCell<Client>,
+        pub parts: OnceCell<Parts>,
         pub queues_enabled: Cell<bool>,
-        // from connect_profile() until the connection succeeds or fails
-        pub connecting: Cell<bool>,
         pub state_saved: Cell<bool>,
+        // whether it has connected since the start
+        pub connected_once: Cell<bool>,
         // the sidebar's default width (0 until it's first shown), not saved
         pub states_default_pos: Cell<i32>,
         pub args: RefCell<Option<Vec<String>>>,
@@ -109,8 +73,9 @@ mod imp {
         type ParentType = gtk::ApplicationWindow;
 
         fn class_init(klass: &mut Self::Class) {
-            GeneralPanel::ensure_type();
+            Details::ensure_type();
             StatusBar::ensure_type();
+            TorrentList::ensure_type();
             klass.bind_template();
             klass.bind_template_instance_callbacks();
         }
@@ -133,10 +98,6 @@ glib::wrapper! {
             gtk::ConstraintTarget, gtk::Native, gtk::Root, gtk::ShortcutManager;
 }
 
-fn main_window_of(w: &gtk::Widget) -> Option<MainWindow> {
-    dialog::ancestor::<MainWindow>(w)
-}
-
 #[gtk::template_callbacks]
 impl MainWindow {
     #[template_callback]
@@ -153,48 +114,30 @@ impl MainWindow {
             app.quit();
         }
     }
-
-    #[template_callback]
-    fn entry_filter_changed_cb(entry: &gtk::SearchEntry) {
-        if let Some(win) = main_window_of(entry.upcast_ref()) {
-            win.refilter();
-        }
-    }
-
-    /// Typing elsewhere in the window started a search: the next keys go to
-    /// the entry, without replacing what was typed.
-    #[template_callback]
-    fn filter_search_started_cb(entry: &gtk::SearchEntry) {
-        if let Some(text) = entry.delegate().and_downcast::<gtk::Text>() {
-            text.grab_focus_without_selecting();
-        }
-    }
-
-    /// Escape clears the filter, and then goes back to the list.
-    #[template_callback]
-    fn filter_stop_search_cb(entry: &gtk::SearchEntry) {
-        if !entry.text().is_empty() {
-            entry.set_text("");
-        } else if let Some(win) = main_window_of(entry.upcast_ref()) {
-            win.torrent_tv().grab_focus();
-        }
-    }
 }
 
 impl MainWindow {
     pub fn new(app: &gtk::Application, client: &Client) -> Self {
         let win: Self = glib::Object::builder().property("application", app).build();
-        win.imp().parts.borrow_mut().client = Some(client.clone());
+        win.imp().client.set(client.clone()).expect("a new window has no client");
         win.construct();
         win
     }
 
     pub fn client(&self) -> Client {
-        self.imp().parts.borrow().client.clone().unwrap()
+        self.imp().client.get().expect("the client is set by new()").clone()
     }
 
-    fn torrent_tv(&self) -> TreeView {
-        self.imp().parts.borrow().torrent_tv.clone().unwrap()
+    fn parts(&self) -> &Parts {
+        self.imp().parts.get().expect("the parts are made by construct()")
+    }
+
+    fn torrent_list(&self) -> TorrentList {
+        self.imp().torrent_list.get()
+    }
+
+    fn details(&self) -> Details {
+        self.imp().details.get()
     }
 
     /// The window's own keys, before the focus widget and the app's
@@ -209,7 +152,7 @@ impl MainWindow {
         if state.contains(util::primary_modifier())
             && (keyval == gdk::Key::k || keyval == gdk::Key::f)
         {
-            self.imp().filter_entry.grab_focus();
+            self.torrent_list().focus_search();
             return true;
         }
 
@@ -229,121 +172,73 @@ impl MainWindow {
             || matches!(keyval, gdk::Key::Delete | gdk::Key::KP_Delete | gdk::Key::BackSpace)
     }
 
-    /// "No Results" over the torrent list, when there's filter text and no
-    /// torrent matches it
-    fn update_no_results(&self) {
-        let imp = self.imp();
-        let Some(tv) = imp.parts.borrow().torrent_tv.clone() else { return };
-        let none = !imp.filter_entry.text().is_empty()
-            && tv.selection().n_items() == 0
-            && self.client().is_connected();
-        imp.no_results.set_visible(none);
-    }
-
     /// Shows the connection in the menus, the server picker, and "Not
     /// Connected" over the empty torrent list. Its button connects to the
     /// current profile, or opens the profiles if it has no host yet.
     fn update_connection(&self) {
-        let imp = self.imp();
         let client = self.client();
         let prefs = client.prefs();
-        let (state, profile) = if client.is_connected() {
-            (ConnectionState::Connected, prefs::CONNECTION)
-        } else if imp.connecting.get() {
-            (ConnectionState::Connecting, prefs::CONNECTION)
-        } else {
-            (ConnectionState::Disconnected, prefs::PROFILE)
+        let state = client.connection_state();
+        let profile = match state {
+            ConnectionState::Disconnected => Scope::Profile,
+            _ => Scope::Connection,
         };
         let name = prefs.get_string(prefs::KEY_PROFILE_NAME, profile).unwrap_or_default();
         self.menu_bar().connection_change(state);
         self.toolbar().set_connection(state, &name);
-
-        let has_host =
-            prefs.get_string(prefs::KEY_HOSTNAME, prefs::PROFILE).is_some_and(|h| !h.is_empty());
-        let stack = &imp.not_connected_stack;
-        let page = match state {
-            ConnectionState::Connecting => "connecting",
-            _ if has_host => "connect",
-            _ => "edit",
-        };
-        if page == "connecting" && stack.visible_child_name().as_deref() != Some(page) {
-            util::restart_spinner(&imp.connecting_box);
-        }
-        stack.set_visible_child_name(page);
-        imp.connecting_label.set_label(&sprintf(&tr("Connecting to %s…"), &[&name]));
-        imp.not_connected.set_visible(state != ConnectionState::Connected);
-    }
-
-    /// Every path out of connecting ends it: success and disconnecting
-    /// (conn_changed()), failure (on_session_get()) and another profile
-    /// (connect_profile()).
-    fn set_connecting(&self, connecting: bool) {
-        self.imp().connecting.set(connecting);
-        self.update_connection();
+        self.torrent_list().set_connection(state, &name);
     }
 
     fn torrent_model(&self) -> TorrentModel {
-        self.imp().parts.borrow().torrent_model.clone().unwrap()
+        self.client().torrent_model()
     }
 
-    fn toolbar(&self) -> Toolbar {
-        self.imp().parts.borrow().toolbar.clone().unwrap()
+    fn toolbar(&self) -> &Toolbar {
+        &self.parts().toolbar
     }
 
-    fn menu_bar(&self) -> Rc<MenuBar> {
-        self.imp().parts.borrow().menu_bar.clone().unwrap()
+    fn menu_bar(&self) -> &MenuBar {
+        &self.parts().menu_bar
     }
 
-    pub fn state_selector(&self) -> StateSelector {
-        self.imp().parts.borrow().state_selector.clone().unwrap()
-    }
-
-    pub fn status_bar(&self) -> StatusBar {
-        self.imp().status_bar.get()
+    fn state_selector(&self) -> StateSelector {
+        self.parts().state_selector.clone()
     }
 
     pub fn selected_torrent_id(&self) -> i64 {
-        self.imp().selected_torrent_id.get()
+        self.torrent_list().selected_id()
     }
 
     pub fn menu_model(&self) -> gio::MenuModel {
         self.menu_bar().model()
     }
 
-    fn reset_connect_args(&self) {
-        self.imp().args.take();
+    /// The first selected torrent, as of the torrent list's last
+    /// selection-changed
+    fn selected_torrent(&self) -> Option<TorrentObject> {
+        let id = self.selected_torrent_id();
+        if id >= 0 { self.client().find_torrent(id) } else { None }
     }
 
-    fn update_selected_torrent_notebook(&self, mode: i32, id: i64) {
-        let client = self.client();
-        let serial = client.serial();
-        let data = if id >= 0 { client.torrent_data(id) } else { None };
-
-        match data {
-            Some((t, item)) => {
-                let parts = self.imp().parts.borrow();
-                self.menu_bar().torrent_actions_sensitive(true);
-                self.imp().gen_details.update(&t, &item);
-                parts.trackers_model.as_ref().unwrap().update(serial, &t, mode);
-                parts.files_model.as_ref().unwrap().update(&t, mode);
-                parts.peers_model.as_ref().unwrap().update(
-                    parts.peers_tv.as_ref().unwrap(),
-                    serial,
-                    &t,
-                    mode,
-                );
-            }
-            None => self.torrent_scrub(),
-        }
-
-        self.imp().selected_torrent_id.set(id);
+    /// Shows the selected torrent (selected, or updated as mode says) in the
+    /// details. The torrent actions are enabled while there's one.
+    fn show_selected_torrent(&self, mode: UpdateMode) {
+        let torrent = self.selected_torrent();
+        self.menu_bar().torrent_actions_sensitive(torrent.is_some());
+        self.details().set_torrent(torrent.as_ref(), mode);
     }
 
-    fn torrent_event_notification(&self, icon_name: &str, desc: &str, pref_key: &str, item: &Item) {
-        if !self.client().prefs().get_bool(pref_key, prefs::NOFLAGS) {
+    fn torrent_event_notification(
+        &self,
+        icon_name: &str,
+        desc: &str,
+        pref_key: &str,
+        torrent: &TorrentObject,
+    ) {
+        if !self.client().prefs().get_bool(pref_key, Scope::Global) {
             return;
         }
-        let name = item.string(tm::COL_NAME).unwrap_or_default();
+        let name = torrent.values().name.clone();
         let notification = gio::Notification::new(&name);
         notification.set_body(Some(desc));
         notification.set_icon(&gio::ThemedIcon::new(icon_name));
@@ -356,8 +251,8 @@ impl MainWindow {
     fn save_window_size(&self) {
         let prefs = self.client().prefs().clone();
         let (width, height) = self.default_size();
-        prefs.set_int(prefs::KEY_WINDOW_HEIGHT, height as i64, prefs::GLOBAL);
-        prefs.set_int(prefs::KEY_WINDOW_WIDTH, width as i64, prefs::GLOBAL);
+        prefs.set_int(prefs::KEY_WINDOW_HEIGHT, height as i64, Scope::Global);
+        prefs.set_int(prefs::KEY_WINDOW_WIDTH, width as i64, Scope::Global);
     }
 
     /// Persists the window and tree view layout. This has to happen before
@@ -370,23 +265,26 @@ impl MainWindow {
         }
         let prefs = self.client().prefs().clone();
 
+        // Closing the preferences dialog without OK restores the view
+        // settings it previews, so they aren't saved here
+        let windows = gtk::Window::toplevels();
+        let dialogs: Vec<PreferencesDialog> =
+            (0..windows.n_items()).filter_map(|i| windows.item(i).and_downcast()).collect();
+        for dialog in dialogs {
+            dialog.close();
+        }
+
         self.save_window_size();
-        prefs.set_int(prefs::KEY_NOTEBOOK_PANED_POS, imp.vpaned.position() as i64, prefs::GLOBAL);
+        prefs.set_int(prefs::KEY_NOTEBOOK_PANED_POS, imp.vpaned.position() as i64, Scope::Global);
         // Only a sidebar width that was chosen (by dragging), otherwise it
         // follows the width of its states. The default is a set position too.
         let pos = imp.hpaned.position();
         let dragged = imp.hpaned.is_position_set() && pos != imp.states_default_pos.get();
         let states_pos = if dragged { pos } else { 0 };
-        prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, prefs::GLOBAL);
+        prefs.set_int(prefs::KEY_STATES_PANED_POS, states_pos as i64, Scope::Global);
 
-        {
-            let parts = imp.parts.borrow();
-            let flags = PERSIST_SORT | PERSIST_LAYOUT;
-            parts.peers_tv.as_ref().unwrap().persist(flags);
-            parts.files_view.as_ref().unwrap().tv.persist(flags);
-            parts.torrent_tv.as_ref().unwrap().persist(flags);
-            parts.trackers_view.as_ref().unwrap().tv.persist(flags);
-        }
+        self.details().persist();
+        self.torrent_list().persist();
         prefs.save();
 
         imp.state_saved.set(true);
@@ -396,76 +294,18 @@ impl MainWindow {
         if self.selected_torrent_id() < 0 {
             return;
         }
-        dialogs::props::TorrentPropsDialog::new(self, &self.torrent_tv(), &self.client()).present();
+        dialogs::props::TorrentPropsDialog::new(self, self.selected_ids(), &self.client())
+            .present();
     }
 
     fn copy_magnet_link(&self) {
-        let id = self.selected_torrent_id();
-        if id < 0 {
-            return;
-        }
-        if let Some((t, _)) = self.client().torrent_data(id) {
-            self.clipboard().set_text(get_str(&t, p::FIELD_MAGNETLINK).unwrap_or(""));
+        if let Some(obj) = self.selected_torrent() {
+            self.clipboard().set_text(&obj.torrent().magnet_link);
         }
     }
 
     fn selected_ids(&self) -> Vec<i64> {
-        torrent_view::selected_ids(&self.torrent_tv())
-    }
-
-    /// Sends a request about torrents, and in the same batch, which the
-    /// server executes in order, gets them again (all of them if it's about
-    /// all of them, the recently active ones and removed IDs for a
-    /// removal). Shows its error.
-    pub fn dispatch_interactive(&self, req: p::Request) {
-        self.dispatch_interactive_with(req, |_| {});
-    }
-
-    /// dispatch_interactive(), after() gets the result of the request first
-    pub fn dispatch_interactive_with(
-        &self,
-        req: p::Request,
-        after: impl FnOnce(&Response) + 'static,
-    ) {
-        let refresh = if req.method == p::METHOD_TORRENT_REMOVE {
-            p::Torrents::RecentlyActive
-        } else {
-            p::Torrents::of(&req)
-        };
-        let weak = self.downgrade();
-        self.client().dispatch_batch(vec![req, p::torrent_get(&refresh)], move |mut results| {
-            let Some(win) = weak.upgrade() else { return };
-            let (Some(torrents), Some(result)) = (results.pop(), results.pop()) else { return };
-            after(&result);
-            if !win.client().is_connected() {
-                return;
-            }
-            win.dialog_error_handler(&result);
-            win.on_torrent_get(torrents, p::TORRENT_GET_MODE_INTERACTION);
-        });
-    }
-
-    /// Sends a session_set, and in the same batch gets the session again
-    pub fn dispatch_session_set(&self, req: p::Request) {
-        let weak = self.downgrade();
-        self.client().update_session_after(vec![req], move |results, session| {
-            let Some(win) = weak.upgrade() else { return };
-            if let Some(result) = results.first() {
-                win.dialog_error_handler(result);
-            }
-            win.on_session_get(session);
-        });
-    }
-
-    /// Gets torrents (after they changed outside of a batch, such as adding
-    /// them)
-    pub fn refresh_torrents(&self, torrents: &p::Torrents) {
-        let weak = self.downgrade();
-        self.client().dispatch(p::torrent_get(torrents), move |r| {
-            if let Some(win) = weak.upgrade() {
-                win.on_torrent_get(r, p::TORRENT_GET_MODE_INTERACTION);
-            }
-        });
+        self.torrent_list().selected_ids()
     }
 
     /// Adds torrents (files, URLs or magnet links), with the add dialog if
@@ -476,95 +316,48 @@ impl MainWindow {
             return;
         }
         let prefs = client.prefs();
-        if prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, prefs::GLOBAL) {
+        if prefs.get_bool(prefs::KEY_ADD_OPTIONS_DIALOG, Scope::Global) {
             dialogs::add::TorrentAddDialog::new_from_filenames(self, &client, uris).present();
         } else {
-            upload::do_upload(Upload::new(uris, &client, self, prefs.add_flags()));
+            add_torrents::add_torrents(self, &client, &uris, &AddOptions::from_prefs(prefs));
         }
     }
 
-    fn disconnect(&self) {
-        self.client().inc_connid();
-        self.conn_changed(false);
-        self.imp().status_bar.reset();
-    }
-
-    /// parameter is the index of the profile to connect to, or -1 for the
-    /// current one
+    /// Connects to the profile with index, or the current one for -1
     pub fn connect_profile(&self, index: i32) {
-        let client = self.client();
-        let prefs = client.prefs().clone();
-        let current = prefs.profile();
-        let profile =
-            (index >= 0 && (index as usize) < prefs.n_profiles()).then_some(index as usize);
-
-        if client.is_connected() {
-            self.disconnect();
-        }
-
-        match profile {
-            Some(p) if Some(p) != current => prefs.set_profile(Some(p)),
-            _ => prefs.emit_profile_changed(),
-        }
-
-        if let Err(msg) = client.parse_settings() {
-            self.reset_connect_args();
-            // drops the attempt to connect to another profile, if any
-            client.inc_connid();
-            self.set_connecting(false);
+        if let Err(e) = self.client().connect_to_profile(index) {
             // open the preferences once the (modal) error is dismissed
             let weak = self.downgrade();
             util::error_dialog_full(
                 Some(self),
-                &msg,
+                &e.to_string(),
                 Some(Box::new(move || {
                     if let Some(win) = weak.upgrade() {
                         win.open_local_prefs();
                     }
                 })),
             );
-            return;
         }
+    }
 
-        self.imp().status_bar.push_connection_msg(&tr("Connecting..."));
-        // a new connid drops the responses of an attempt in progress
-        client.inc_connid();
-        self.set_connecting(true);
-        let weak = self.downgrade();
-        // the session and the torrents in one go
-        client.dispatch_batch(
-            vec![p::session_get(), p::torrent_get(&p::Torrents::All)],
-            move |mut results| {
-                let Some(win) = weak.upgrade() else { return };
-                let (Some(torrents), Some(session)) = (results.pop(), results.pop()) else {
-                    return;
-                };
-                let was_connected = win.client().is_connected();
-                win.on_session_get(session);
-                if !was_connected && win.client().is_connected() {
-                    win.on_torrent_get(torrents, p::TORRENT_GET_MODE_FIRST);
-                    if let Some(args) = win.imp().args.take() {
-                        win.add_from_filenames(args);
-                    }
-                }
-            },
-        );
+    fn preferences_dialog(&self) -> PreferencesDialog {
+        dialogs::single(|| PreferencesDialog::new(self, &self.client()))
     }
 
     fn open_local_prefs(&self) {
-        dialogs::preferences::instance(self, &self.client()).present();
+        self.preferences_dialog().present();
     }
 
     /// The local preferences on the Connection tab, which has the profiles
     fn edit_profiles(&self) {
-        let prefs = dialogs::preferences::instance(self, &self.client());
+        let prefs = self.preferences_dialog();
         prefs.set_page(0);
         prefs.present();
     }
 
     fn open_remote_prefs(&self) {
         if self.client().is_connected() {
-            dialogs::remote_prefs::instance(self, &self.client()).present();
+            dialogs::single(|| RemotePrefsDialog::new(self, &self.client())).present();
         }
     }
 
@@ -580,11 +373,13 @@ impl MainWindow {
         ids: Vec<i64>,
         delete_data: bool,
     ) {
-        let tv = self.torrent_tv();
-        let count = tv.count_selected();
-
+        let count = ids.len();
         let markup = if count == 1 {
-            let name = tv.first_selected().and_then(|i| i.string(tm::COL_NAME)).unwrap_or_default();
+            let name = self
+                .torrent_list()
+                .first_selected()
+                .map(|t| t.values().name.clone())
+                .unwrap_or_default();
             sprintf(
                 &tr("<big><b>%s \"%s\"?</b></big>"),
                 &[&glib::markup_escape_text(action_name), &glib::markup_escape_text(&name)],
@@ -617,285 +412,33 @@ impl MainWindow {
             if result != Ok(1) {
                 return;
             }
-            let req = p::torrent_remove(&ids, delete_data);
-            let w = win.downgrade();
-            win.dispatch_interactive_with(req, move |r| {
+            let client = win.client();
+            let c = client.clone();
+            client.dispatch_interactive_with(p::torrent_remove(&ids, delete_data), move |r| {
                 // the free space changed
-                if let (true, Ok(_), Some(win)) = (delete_data, r, w.upgrade()) {
-                    let w = win.downgrade();
-                    win.client().update_session(move |r| {
-                        if let Some(win) = w.upgrade() {
-                            win.on_session_get(r);
-                        }
-                    });
+                if delete_data && r.is_ok() {
+                    c.refresh_session();
                 }
             });
         });
     }
 
-    fn notebook_fill(&self) {
-        let client = self.client();
-        let notebook = &self.imp().notebook;
-
-        let trackers_model = TrackersModel::new();
-        let trackers_view = TrackersView::new(&trackers_model, &client, self, None);
-        notebook.append_page(&trackers_view.tv, Some(&gtk::Label::new(Some(&tr("Trackers")))));
-
-        let files_model = FilesModel::new();
-        let files_view = FilesView::new(&files_model, self, &client, None);
-        notebook.append_page(&files_view.tv, Some(&gtk::Label::new(Some(&tr("Files")))));
-
-        let peers_model = PeersModel::new();
-        let peers_tv = peers::peers_tree_view_new(client.prefs(), &peers_model, None);
-        notebook.append_page(&peers_tv, Some(&gtk::Label::new(Some(&tr("Peers")))));
-
-        let mut parts = self.imp().parts.borrow_mut();
-        parts.trackers_model = Some(trackers_model);
-        parts.trackers_view = Some(trackers_view);
-        parts.files_model = Some(files_model);
-        parts.files_view = Some(files_view);
-        parts.peers_model = Some(peers_model);
-        parts.peers_tv = Some(peers_tv);
-    }
-
-    fn start_session_timer(&self) {
-        let prefs = self.client().prefs().clone();
-        let interval =
-            prefs.get_int(prefs::KEY_SESSION_UPDATE_INTERVAL, prefs::CONNECTION).max(1) as u32;
-        let weak = self.downgrade();
-        let id = glib::timeout_add_seconds_local_once(interval, move || {
-            if let Some(win) = weak.upgrade() {
-                // a one-shot timer, so the id is no longer valid
-                win.imp().session_timer_id.take();
-                let w = win.downgrade();
-                win.client().update_session(move |r| {
-                    if let Some(win) = w.upgrade() {
-                        win.on_session_get(r);
-                        win.start_session_timer();
-                    }
-                });
-            }
-        });
-        if let Some(old) = self.imp().session_timer_id.replace(Some(id)) {
-            old.remove();
-        }
-    }
-
-    fn start_torrents_timer(&self, interval: u32) {
-        let weak = self.downgrade();
-        let id = glib::timeout_add_seconds_local_once(interval, move || {
-            if let Some(win) = weak.upgrade() {
-                win.imp().timer_id.take();
-                win.update_torrents();
-            }
-        });
-        if let Some(old) = self.imp().timer_id.replace(Some(id)) {
-            old.remove();
-        }
-    }
-
-    fn update_torrents(&self) {
-        let client = self.client();
-        if !client.is_connected() {
-            return;
-        }
-        let prefs = client.prefs();
-        let every = prefs.get_int(prefs::ACTIVEONLY_FULLSYNC_EVERY, prefs::CONNECTION);
-        let active_only = prefs.get_bool(prefs::KEY_UPDATE_ACTIVE_ONLY, prefs::CONNECTION)
-            && (!prefs.get_bool(prefs::ACTIVEONLY_FULLSYNC_ENABLED, prefs::CONNECTION)
-                || (every != 0 && client.serial() % every != 0));
-        let (torrents, mode) = if active_only {
-            (p::Torrents::RecentlyActive, p::TORRENT_GET_MODE_ACTIVE)
-        } else {
-            (p::Torrents::All, p::TORRENT_GET_MODE_UPDATE)
-        };
-        let weak = self.downgrade();
-        client.dispatch(p::torrent_get(&torrents), move |r| {
-            if let Some(win) = weak.upgrade() {
-                win.on_torrent_get(r, mode);
-            }
-        });
-    }
-
-    fn on_session_get(&self, response: Response) {
-        let client = self.client();
-        let is_connected = client.is_connected();
-        let last_session = client.session_clone();
-        let new_session = response.as_ref().ok().cloned();
-
-        // servers older than 4.1 fail with Error::Unsupported
-        if !is_connected {
-            if self.dialog_error_handler(&response) {
-                self.reset_connect_args();
-                self.set_connecting(false);
-                return;
-            }
-            if let Some(s) = &new_session {
-                self.imp().status_bar.connect(s, &client);
-            }
-        }
-
-        if let Some(new_session) = new_session {
-            let reload_aliases = last_session.as_ref().is_some_and(|l| {
-                get_str(l, p::SGET_DOWNLOAD_DIR) != get_str(&new_session, p::SGET_DOWNLOAD_DIR)
-            });
-            let changed = |k| {
-                last_session.as_ref().is_some_and(|l| get_bool(l, k) != get_bool(&new_session, k))
-            };
-            let refresh_speed = changed(p::SGET_ALT_SPEED_ENABLED)
-                || changed(p::SGET_SPEED_LIMIT_DOWN_ENABLED)
-                || changed(p::SGET_SPEED_LIMIT_UP_ENABLED);
-
-            client.set_session(new_session);
-
-            if reload_aliases {
-                self.reload_dir_aliases();
-            }
-            if refresh_speed {
-                self.imp().status_bar.update_speed(&self.torrent_model().stats(), &client);
-            }
-        }
-
-        if !is_connected {
-            self.conn_changed(true);
-        }
-    }
-
-    /// The callback for a torrent_get response
-    fn on_torrent_get(&self, response: Response, mode: i32) {
-        let client = self.client();
-        let prefs = client.prefs().clone();
+    /// The client updated the torrents: the filter, the sorting, the details
+    /// and the status bar follow
+    fn torrents_updated(&self, mode: UpdateMode) {
         let imp = self.imp();
+        let client = self.client();
 
-        // Disconnected between request and response callback
-        if !client.is_connected() {
-            return;
-        }
+        self.torrent_list().refilter_and_resort();
 
-        let mut interval = prefs.get_int(prefs::KEY_UPDATE_INTERVAL, prefs::CONNECTION);
-        if interval < 1 {
-            interval = prefs::INTERVAL_DEFAULT;
-        }
-        let interval = interval as u32;
+        self.show_selected_torrent(mode);
+        imp.status_bar.update(&self.torrent_model().stats(), &client);
 
-        let obj = match response {
-            Ok(obj) => obj,
-            Err(error) => {
-                self.on_torrent_get_failed(&error, interval);
-                return;
-            }
-        };
-
-        client.reset_fail_count();
-        client.inc_serial();
-
-        let stats = self.torrent_model().update(&client, &obj, mode);
-
-        // The filter and sorter don't watch the items, so the values they
-        // look at may have changed.
-        if (imp.filter_criteria.get() != 0 || imp.filter_text.borrow().is_some())
-            && let Some(f) = imp.parts.borrow().torrent_filter.as_ref()
+        // files to add once connected
+        if mode == UpdateMode::First
+            && let Some(args) = imp.args.take()
         {
-            f.changed(gtk::FilterChange::Different);
-        }
-        self.torrent_tv().resort();
-
-        self.update_selected_torrent_notebook(mode, self.selected_torrent_id());
-        imp.status_bar.update(&stats, &client);
-
-        if mode != p::TORRENT_GET_MODE_INTERACTION {
-            self.start_torrents_timer(interval);
-        }
-    }
-
-    /// A failed torrent_get: retried with the next update, until there were
-    /// too many failures, which disconnects
-    fn on_torrent_get_failed(&self, error: &crate::client::Error, interval: u32) {
-        let client = self.client();
-        let prefs = client.prefs().clone();
-        let max_retries = prefs.get_int(prefs::KEY_RETRIES, prefs::CONNECTION);
-        if client.inc_fail_count() as i64 >= max_retries {
-            self.conn_changed(false);
-            self.show_error(&error.to_string());
-        } else {
-            let status_msg = sprintf(
-                &tr("Request %d/%d failed: %s"),
-                &[&client.fail_count(), &max_retries, &error.to_string()],
-            );
-            self.imp().status_bar.push_connection_msg(&status_msg);
-            self.start_torrents_timer(interval);
-        }
-    }
-
-    fn visible_func(&self, item: &Item) -> bool {
-        let imp = self.imp();
-        let criteria = imp.filter_criteria.get();
-
-        if criteria != 0 {
-            if criteria & FILTER_FLAG_TRACKER != 0 {
-                let Some(json) = item.torrent_json() else { return false };
-                let selector = self.state_selector();
-                if !p::torrent_has_tracker(
-                    &json,
-                    selector.host_regex(),
-                    imp.filter_selected_text.borrow().as_deref(),
-                ) {
-                    return false;
-                }
-            } else if criteria & FILTER_FLAG_DIR != 0 {
-                if imp.filter_selected_text.borrow().as_deref()
-                    != item.string(tm::COL_DOWNLOADDIR_SHORT).as_deref()
-                {
-                    return false;
-                }
-            } else if item.uint(tm::COL_FLAGS) & criteria == 0 {
-                return false;
-            }
-        }
-
-        if let Some(text) = imp.filter_text.borrow().as_ref()
-            && let Some(name) = item.string(tm::COL_NAME)
-        {
-            return glib::casefold(&name).contains(text.as_str());
-        }
-
-        true
-    }
-
-    /// The state selector or filter entry changed
-    fn refilter(&self) {
-        let imp = self.imp();
-        let Some(selector) = imp.parts.borrow().state_selector.clone() else { return };
-        let text = imp.filter_entry.text();
-
-        imp.filter_criteria.set(selector.flag());
-        *imp.filter_selected_text.borrow_mut() =
-            if selector.flag() & (FILTER_FLAG_TRACKER | FILTER_FLAG_DIR) != 0 {
-                selector.selected_text()
-            } else {
-                None
-            };
-        *imp.filter_text.borrow_mut() =
-            (!text.is_empty()).then(|| glib::casefold(&text).to_string());
-
-        if let Some(f) = imp.parts.borrow().torrent_filter.as_ref() {
-            f.changed(gtk::FilterChange::Different);
-        }
-        self.update_no_results();
-    }
-
-    pub fn reload_dir_aliases(&self) {
-        self.torrent_model().reload_dir_aliases(&self.client());
-    }
-
-    /// Shows the error of a failed request. Returns whether it failed.
-    fn dialog_error_handler(&self, response: &Response) -> bool {
-        match response {
-            Err(error) => {
-                self.show_error(&error.to_string());
-                true
-            }
-            Ok(_) => false,
+            self.add_from_filenames(args);
         }
     }
 
@@ -906,70 +449,71 @@ impl MainWindow {
         util::error_dialog(Some(self), msg);
     }
 
-    fn first_selected_id(&self) -> i64 {
-        self.torrent_tv().first_selected().map(|i| i.torrent_id()).unwrap_or(-1)
-    }
-
-    fn torrent_scrub(&self) {
-        let imp = self.imp();
-        {
-            let parts = imp.parts.borrow();
-            parts.files_model.as_ref().unwrap().clear();
-            let trackers = parts.trackers_model.as_ref().unwrap();
-            trackers.clear();
-            parts.peers_model.as_ref().unwrap().clear();
-            trackers.set_no_selection();
-        }
-        imp.gen_details.clear();
-        self.menu_bar().torrent_actions_sensitive(false);
-    }
-
-    fn conn_changed(&self, connected: bool) {
+    /// The client connected, disconnected, or started connecting
+    fn connection_changed(&self) {
         let imp = self.imp();
         let client = self.client();
+        let state = client.connection_state();
 
-        // connecting succeeded, or was stopped
-        imp.connecting.set(false);
+        // sensitive while connected, cleared once disconnected
+        self.details().set_connection(state);
 
-        {
-            let parts = imp.parts.borrow();
-            parts.torrent_tv.as_ref().unwrap().set_sensitive(connected);
-            parts.peers_tv.as_ref().unwrap().set_sensitive(connected);
-            parts.files_view.as_ref().unwrap().tv.set_sensitive(connected);
-            parts.trackers_view.as_ref().unwrap().tv.set_sensitive(connected);
-        }
-        imp.gen_details.set_sensitive(connected);
-
-        if connected {
-            self.start_session_timer();
-        } else {
-            self.torrent_scrub();
-            self.state_selector().disconnect();
-            self.torrent_model().remove_all();
-            if let Some(id) = imp.timer_id.take() {
-                id.remove();
+        let status_bar = &imp.status_bar;
+        match state {
+            ConnectionState::Connected => {
+                if let Some(session) = client.session_clone() {
+                    status_bar.connect(&session, &client);
+                }
             }
-            if let Some(id) = imp.session_timer_id.take() {
-                id.remove();
+            ConnectionState::Connecting => {
+                status_bar.reset();
+                status_bar.push_connection_msg(&tr("Connecting..."));
+            }
+            ConnectionState::Disconnected => {
+                // not added when connecting failed
+                imp.args.take();
+                self.menu_bar().torrent_actions_sensitive(false);
+                self.state_selector().disconnect();
+                status_bar.reset();
             }
         }
 
-        client.status_change(connected);
-        self.update_no_results();
         self.update_connection();
+        if state == ConnectionState::Connected {
+            self.focus_torrent_list();
+        }
+    }
+
+    /// Once connected (the list is insensitive until then), the torrent list
+    /// gets the focus, so the arrows move in it: at the start, GTK gave it
+    /// to the first widget that could take it, the toolbar's server picker;
+    /// later, unless another widget has it (the Connect button that had it
+    /// is hidden now). Not while a text field or a menu has it.
+    fn focus_torrent_list(&self) {
+        let first = !self.imp().connected_once.replace(true);
+        let focus = RootExt::focus(self).filter(|f| f.is_mapped() && f.is_sensitive());
+        let keep = focus.is_some_and(|f| {
+            !first || f.is::<gtk::Text>() || f.ancestor(gtk::Popover::static_type()).is_some()
+        });
+        if !keep {
+            self.torrent_list().grab_focus();
+        }
+    }
+
+    /// A "win." action without a parameter
+    fn add_window_action(&self, name: &str, f: impl Fn(&Self) + 'static) {
+        let action = gio::SimpleAction::new(name, None);
+        let weak = self.downgrade();
+        action.connect_activate(move |_, _| {
+            if let Some(win) = weak.upgrade() {
+                f(&win);
+            }
+        });
+        self.add_action(&action);
     }
 
     fn add_actions(&self) {
-        let action = |name: &str, f: fn(&MainWindow)| {
-            let a = gio::SimpleAction::new(name, None);
-            let weak = self.downgrade();
-            a.connect_activate(move |_, _| {
-                if let Some(win) = weak.upgrade() {
-                    f(&win);
-                }
-            });
-            self.add_action(&a);
-        };
+        let action = |name: &str, f: fn(&MainWindow)| self.add_window_action(name, f);
 
         // parameter: profile index, -1 for the current profile. state: the
         // current profile
@@ -986,7 +530,7 @@ impl MainWindow {
         });
         self.add_action(&connect);
 
-        action("disconnect", |w| w.disconnect());
+        action("disconnect", |w| w.client().disconnect());
         action("add", |w| {
             if w.client().is_connected() {
                 dialogs::add::add_dialog(w, &w.client());
@@ -995,29 +539,9 @@ impl MainWindow {
         action("add-url", |w| dialogs::add_url::TorrentAddUrlDialog::new(w, &w.client()).present());
         action("properties", |w| w.open_props());
         action("copy-magnet", |w| w.copy_magnet_link());
-        action("resume", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_start(Some(&w.selected_ids())));
-            }
-        });
-        action("pause", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_pause(Some(&w.selected_ids())));
-            }
-        });
-        action("verify", |w| {
-            if w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_verify(&w.selected_ids()));
-            }
-        });
-        action("reannounce", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_reannounce(&w.selected_ids()));
-            }
-        });
         action("move", |w| {
             if w.is_ready_for_torrent_action() {
-                dialogs::move_dialog::TorrentMoveDialog::new(w, &w.client(), &w.torrent_tv())
+                dialogs::move_dialog::TorrentMoveDialog::new(w, &w.client(), w.selected_ids())
                     .present();
             }
         });
@@ -1036,48 +560,13 @@ impl MainWindow {
                 );
             }
         });
-        action("start-now", |w| {
-            if w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_start_now(&w.selected_ids()));
-            }
-        });
-        action("up-queue", |w| {
-            if w.imp().queues_enabled.get() && w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_queue_move_up(&w.selected_ids()));
-            }
-        });
-        action("down-queue", |w| {
-            if w.imp().queues_enabled.get() && w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_queue_move_down(&w.selected_ids()));
-            }
-        });
-        action("bottom-queue", |w| {
-            if w.imp().queues_enabled.get() && w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_queue_move_bottom(&w.selected_ids()));
-            }
-        });
-        action("top-queue", |w| {
-            if w.imp().queues_enabled.get() && w.is_ready_for_torrent_action() {
-                w.dispatch_interactive(p::torrent_queue_move_top(&w.selected_ids()));
-            }
-        });
-        action("resume-all", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_start(None));
-            }
-        });
-        action("pause-all", |w| {
-            if w.client().is_connected() {
-                w.dispatch_interactive(p::torrent_pause(None));
-            }
-        });
         action("connect-current", |w| w.connect_profile(-1));
         action("local-prefs", |w| w.open_local_prefs());
         action("edit-profiles", |w| w.edit_profiles());
         action("remote-prefs", |w| w.open_remote_prefs());
         action("view-stats", |w| {
             if w.client().is_connected() {
-                dialogs::stats::instance(w, &w.client()).present();
+                dialogs::single(|| StatsDialog::new(w, &w.client())).present();
             }
         });
         action("about", |w| {
@@ -1086,242 +575,70 @@ impl MainWindow {
             about.set_hide_on_close(false);
             about.present();
         });
-    }
 
-    fn action_notify(&self, name: &str, f: fn(&MainWindow, bool, bool)) {
-        let Some(action) = self.lookup_action(name) else { return };
-        let weak = self.downgrade();
-        action.connect_notify_local(Some("state"), move |a, _| {
-            let Some(win) = weak.upgrade() else { return };
-            let a = a.downcast_ref::<gio::Action>().unwrap();
-            let state = a.state().and_then(|s| s.get::<bool>()).unwrap_or(false);
-            f(&win, a.is_enabled(), state);
-        });
-    }
-
-    fn menu_bar_new(&self) -> Rc<MenuBar> {
-        // Everything the menus and toolbar can do is a "win." action.
-        self.add_actions();
-
-        // This also adds the stateful view actions (check/radio items).
-        let mb = Rc::new(MenuBar::new(self, self.client().prefs(), &self.torrent_tv()));
-
-        self.action_notify("view-notebook", |w, _, active| w.imp().notebook.set_visible(active));
-        self.action_notify("filter-dirs", |w, enabled, active| {
-            if enabled {
-                w.state_selector().set_show_dirs(active);
-            }
-        });
-        self.action_notify("filter-trackers", |w, enabled, active| {
-            if enabled {
-                w.state_selector().set_show_trackers(active);
-            }
-        });
-        self.action_notify("directories-first", |w, enabled, active| {
-            if enabled {
-                w.state_selector().set_directories_first(active);
-            }
-        });
-        self.action_notify("view-states", |w, _, active| w.state_selector().set_visible(active));
-
-        mb
-    }
-
-    fn set_limit(
-        &self,
-        action: &gio::SimpleAction,
-        value: i32,
-        speed_key: &str,
-        enabled_key: &str,
-        ids: Option<&[i64]>,
-    ) {
-        action.set_state(&value.to_variant());
-        let mut req = match ids {
-            Some(ids) => p::torrent_set(ids),
-            None => p::session_set(),
-        };
-        if value >= 0 {
-            req.set(speed_key, value);
-        }
-        req.set(enabled_key, value >= 0);
-
-        if ids.is_some() {
-            self.dispatch_interactive(req);
-        } else {
-            self.dispatch_session_set(req);
-        }
-    }
-
-    fn priority_menu_new(&self, actions: &gio::SimpleActionGroup, ids: &[i64]) -> gio::MenuItem {
-        let selected = self
-            .client()
-            .torrent_data(self.selected_torrent_id())
-            .map(|(t, _)| get_i64(&t, p::FIELD_BANDWIDTH_PRIORITY))
-            .unwrap_or(p::TR_PRI_UNSET);
-
-        let action = gio::SimpleAction::new_stateful(
-            "priority",
-            Some(glib::VariantTy::INT32),
-            &(selected as i32).to_variant(),
-        );
-        let weak = self.downgrade();
-        let ids = ids.to_vec();
-        action.connect_change_state(move |action, value| {
-            let (Some(win), Some(v)) = (weak.upgrade(), value.and_then(|v| v.get::<i32>())) else {
-                return;
+        // Requests about the selected torrents (or all of them), sent when
+        // connected, and for some when a torrent is selected, or the queues
+        // are enabled
+        let connected: fn(&MainWindow) -> bool = |w| w.client().is_connected();
+        let selected: fn(&MainWindow) -> bool = MainWindow::is_ready_for_torrent_action;
+        let queued: fn(&MainWindow) -> bool =
+            |w| w.imp().queues_enabled.get() && w.is_ready_for_torrent_action();
+        let request =
+            |name: &str, guard: fn(&MainWindow) -> bool, req: fn(&[i64]) -> p::Request| {
+                self.add_window_action(name, move |w| {
+                    if guard(w) {
+                        w.client().dispatch_interactive(req(&w.selected_ids()));
+                    }
+                });
             };
-            action.set_state(&v.to_variant());
-            let mut req = p::torrent_set(&ids);
-            req.set(p::FIELD_BANDWIDTH_PRIORITY, v);
-            win.dispatch_interactive(req);
-        });
-        actions.add_action(&action);
-
-        let menu = gio::Menu::new();
-        for (label, value) in
-            [("High", p::TR_PRI_HIGH), ("Normal", p::TR_PRI_NORMAL), ("Low", p::TR_PRI_LOW)]
-        {
-            let item = gio::MenuItem::new(Some(&tr(label)), None);
-            item.set_action_and_target_value(
-                Some("torrent.priority"),
-                Some(&(value as i32).to_variant()),
-            );
-            menu.append_item(&item);
-        }
-
-        let top = gio::MenuItem::new_submenu(Some(&tr("Priority")), &menu);
-        top.set_icon(&gio::ThemedIcon::new("network-workgroup"));
-        top
+        request("resume", connected, |ids| p::torrent_start(Some(ids)));
+        request("pause", connected, |ids| p::torrent_pause(Some(ids)));
+        request("verify", selected, p::torrent_verify);
+        request("reannounce", connected, p::torrent_reannounce);
+        request("start-now", selected, p::torrent_start_now);
+        request("up-queue", queued, p::torrent_queue_move_up);
+        request("down-queue", queued, p::torrent_queue_move_down);
+        request("top-queue", queued, p::torrent_queue_move_top);
+        request("bottom-queue", queued, p::torrent_queue_move_bottom);
+        request("resume-all", connected, |_| p::torrent_start(None));
+        request("pause-all", connected, |_| p::torrent_pause(None));
     }
 
-    fn limit_menu_new(
-        &self,
-        actions: &gio::SimpleActionGroup,
-        name: &str,
-        title: &str,
-        enabled_key: &'static str,
-        speed_key: &'static str,
-        ids: Option<&[i64]>,
-    ) -> gio::MenuItem {
-        let client = self.client();
-        let current: Option<Obj> = match ids {
-            Some(_) => client.torrent_data(self.selected_torrent_id()).map(|(t, _)| (*t).clone()),
-            None => client.session_clone(),
+    /// Shows the sidebar and the details as the preferences say, and
+    /// follows them: the menu's view items and the preferences dialog set
+    /// them. (The sidebar follows its own options, the torrent view the
+    /// style.)
+    fn follow_view_prefs(&self, prefs: &Prefs) {
+        let show = |win: &Self, prefs: &Prefs| {
+            let shown = |key| prefs.get_bool(key, Scope::Global);
+            win.state_selector().set_visible(shown(prefs::KEY_SHOW_STATE_SELECTOR));
+            win.details().set_visible(shown(prefs::KEY_SHOW_NOTEBOOK));
         };
-        let limit = current
-            .as_ref()
-            .map(|c| if get_bool(c, enabled_key) { get_i64(c, speed_key) } else { -1 })
-            .unwrap_or(-1);
-
-        let action = gio::SimpleAction::new_stateful(
-            name,
-            Some(glib::VariantTy::INT32),
-            &(limit as i32).to_variant(),
-        );
+        show(self, prefs);
         let weak = self.downgrade();
-        let ids_owned = ids.map(<[i64]>::to_vec);
-        action.connect_change_state(move |action, value| {
-            if let (Some(win), Some(v)) = (weak.upgrade(), value.and_then(|v| v.get::<i32>())) {
-                win.set_limit(action, v, speed_key, enabled_key, ids_owned.as_deref());
+        prefs.connect_changed(move |prefs, key| {
+            if let (Some(win), Some(prefs::KEY_SHOW_STATE_SELECTOR | prefs::KEY_SHOW_NOTEBOOK)) =
+                (weak.upgrade(), key)
+            {
+                show(&win, prefs);
             }
         });
-        actions.add_action(&action);
-
-        let detailed = format!("torrent.{name}");
-        let menu = gio::Menu::new();
-        let section = gio::Menu::new();
-        let item = gio::MenuItem::new(Some(&tr("No Limit")), None);
-        item.set_action_and_target_value(Some(&detailed), Some(&(-1i32).to_variant()));
-        section.append_item(&item);
-
-        // bandwidth items: n = 5*2^(n-1)
-        let presets: Vec<i64> = (0..16).map(|i| 5i64 << i).collect();
-        if limit >= 0 && !presets.contains(&limit) {
-            // GTK 3 showed this checked but insensitive. A disabled action
-            // doesn't show its state in a GTK 4 menu, so this is a normal
-            // (checked) radio item, choosing it sets the same limit again.
-            let item = gio::MenuItem::new(Some(&util::format_speed_kbps(limit as f64)), None);
-            item.set_action_and_target_value(Some(&detailed), Some(&(limit as i32).to_variant()));
-            section.append_item(&item);
-        }
-        menu.append_section(None, &section);
-
-        let section = gio::Menu::new();
-        for v in presets {
-            let item = gio::MenuItem::new(Some(&util::format_speed_kbps(v as f64)), None);
-            item.set_action_and_target_value(Some(&detailed), Some(&(v as i32).to_variant()));
-            section.append_item(&item);
-        }
-        menu.append_section(None, &section);
-
-        let top = gio::MenuItem::new_submenu(Some(title), &menu);
-        top.set_icon(&gio::ThemedIcon::new("network-workgroup"));
-        top
-    }
-
-    fn torrent_tv_view_menu(&self, tv: &TreeView, x: f64, y: f64) {
-        let imp = self.imp();
-        let actions = gio::SimpleActionGroup::new();
-        let menu = gio::Menu::new();
-        let ids = torrent_view::selected_ids(tv);
-
-        menu.append_section(None, &imp.torrent_actions_menu.get());
-        if imp.queues_enabled.get() {
-            menu.append_section(None, &imp.torrent_queue_menu.get());
-        }
-
-        let section = gio::Menu::new();
-        section.append_item(&self.limit_menu_new(
-            &actions,
-            "down-limit",
-            &tr("Down Limit"),
-            p::FIELD_DOWNLOAD_LIMITED,
-            p::FIELD_DOWNLOAD_LIMIT,
-            Some(&ids),
-        ));
-        section.append_item(&self.limit_menu_new(
-            &actions,
-            "up-limit",
-            &tr("Up Limit"),
-            p::FIELD_UPLOAD_LIMITED,
-            p::FIELD_UPLOAD_LIMIT,
-            Some(&ids),
-        ));
-        section.append_item(&self.priority_menu_new(&actions, &ids));
-        menu.append_section(None, &section);
-
-        util::popover_menu_popup(tv, &menu, x, y, "torrent", Some(&actions));
-    }
-
-    fn torrent_tv_context_menu(&self, tv: &TreeView, x: f64, y: f64) -> bool {
-        // from the keyboard
-        if x < 0.0 {
-            self.torrent_tv_view_menu(tv, x, y);
-            return true;
-        }
-        // the column headers have their own menu
-        if tv.point_in_header(x, y) {
-            return false;
-        }
-        if tv.select_at(x, y) {
-            self.torrent_tv_view_menu(tv, x, y);
-            return true;
-        }
-        false
     }
 
     fn session_updated(&self) {
         let imp = self.imp();
-        let Some(session) = self.client().session_clone() else { return };
+        let client = self.client();
+        let Some(session) = client.session_clone() else { return };
         imp.status_bar.session_update(&session);
+        // the speed limits may have changed
+        imp.status_bar.update_speed(&self.torrent_model().stats(), &client);
 
-        let queues_enabled = session.contains_key(p::SGET_DOWNLOAD_QUEUE_ENABLED)
-            && (get_bool(&session, p::SGET_DOWNLOAD_QUEUE_ENABLED)
-                || get_bool(&session, p::SGET_SEED_QUEUE_ENABLED));
+        let queues_enabled = session.queues_enabled();
 
         if imp.queues_enabled.get() != queues_enabled {
             self.menu_bar().set_supports_queues(queues_enabled);
             self.state_selector().set_queues_enabled(queues_enabled);
+            self.torrent_list().set_queues_enabled(queues_enabled);
         }
         imp.queues_enabled.set(queues_enabled);
     }
@@ -1332,115 +649,78 @@ impl MainWindow {
         let prefs = client.prefs().clone();
 
         imp.queues_enabled.set(true);
-        imp.selected_torrent_id.set(-1);
 
         gtk::Window::set_default_icon_name(env!("TRG_PACKAGE_NAME"));
 
-        let model = TorrentModel::new();
-        client.set_torrent_model(&model);
+        let model = client.torrent_model();
 
         let weak = self.downgrade();
-        model.connect_torrent_completed(move |item| {
+        model.connect_torrent_completed(move |torrent| {
             if let Some(win) = weak.upgrade() {
                 win.torrent_event_notification(
                     "trg-gtk-apply",
                     &tr("This torrent has completed."),
                     prefs::KEY_COMPLETE_NOTIFY,
-                    item,
+                    torrent,
                 );
             }
         });
         let weak = self.downgrade();
-        model.connect_torrent_added(move |item| {
+        model.connect_torrent_added(move |torrent| {
             if let Some(win) = weak.upgrade() {
                 win.torrent_event_notification(
                     "list-add",
                     &tr("This torrent has been added."),
                     prefs::KEY_ADD_NOTIFY,
-                    item,
+                    torrent,
                 );
             }
         });
 
-        // the torrents shown, filtered by the state selector and the entry
-        let weak = self.downgrade();
-        let filter = gtk::CustomFilter::new(move |obj| {
-            let (Some(win), Some(item)) = (weak.upgrade(), obj.downcast_ref::<Item>()) else {
-                return true;
-            };
-            win.visible_func(item)
-        });
-        let filtered = gtk::FilterListModel::new(Some(model.store()), Some(filter.clone()));
+        let list = self.torrent_list();
+        list.set_client(&client);
+        let tv = list.tree_view();
+        let selector = StateSelector::new(&client, &model);
+        self.details().set_client(&client);
 
-        let tv = torrent_view::torrent_tree_view_new(&client, &filtered);
-        {
-            let mut parts = imp.parts.borrow_mut();
-            parts.torrent_model = Some(model.clone());
-            parts.torrent_filter = Some(filter);
-            parts.torrent_tv = Some(tv.clone());
+        // Everything the menus and toolbar can do is a "win." action. The menu
+        // bar adds the stateful view actions (check and radio items).
+        self.add_actions();
+        let menu_bar = MenuBar::new(self, &prefs, &tv);
+        let toolbar = Toolbar::new(&prefs);
+
+        let parts = Parts { toolbar: toolbar.clone(), menu_bar, state_selector: selector.clone() };
+        if imp.parts.set(parts).is_err() {
+            unreachable!("a window is constructed once");
         }
 
-        let selection = tv.selection();
         let weak = self.downgrade();
-        selection.connect_selection_changed(move |_, _, _| {
+        list.connect_selection_changed(move |_| {
             if let Some(win) = weak.upgrade() {
-                win.update_selected_torrent_notebook(
-                    p::TORRENT_GET_MODE_FIRST,
-                    win.first_selected_id(),
-                );
-            }
-        });
-        // Torrents were added, removed, filtered or sorted. When the selected
-        // torrent is gone, so is the selection, without a selection-changed.
-        let weak = self.downgrade();
-        selection.connect_items_changed(move |_, _, _, _| {
-            if let Some(win) = weak.upgrade() {
-                let id = win.first_selected_id();
-                if id != win.selected_torrent_id() {
-                    win.update_selected_torrent_notebook(p::TORRENT_GET_MODE_FIRST, id);
-                }
-                win.update_no_results();
+                win.show_selected_torrent(UpdateMode::First);
             }
         });
         let weak = self.downgrade();
-        util::add_context_menu(&tv, move |w, x, y| {
-            let (Some(win), Some(tv)) = (weak.upgrade(), w.downcast_ref::<TreeView>()) else {
-                return false;
-            };
-            win.torrent_tv_context_menu(tv, x, y)
-        });
-        let weak = self.downgrade();
-        tv.connect_row_activated(move |_, _| {
+        list.connect_row_activated(move |_| {
             if let Some(win) = weak.upgrade() {
                 win.open_props();
             }
         });
 
-        // The parts the menu bar's actions need
-        let selector = StateSelector::new(&client, &model);
-        imp.parts.borrow_mut().state_selector = Some(selector.clone());
-        self.notebook_fill();
-
         // The menu is a GMenuModel, shown here with a GtkPopoverMenuBar, or in
         // the macOS menu bar (see app.rs).
-        let mb = self.menu_bar_new();
         if util::is_macos() {
             imp.menu_bar.set_visible(false);
         } else {
-            imp.menu_bar.set_menu_model(Some(&mb.model()));
+            imp.menu_bar.set_menu_model(Some(&self.menu_bar().model()));
         }
-        imp.parts.borrow_mut().menu_bar = Some(mb);
 
-        let toolbar = Toolbar::new(&prefs);
         toolbar.set_hexpand(true);
-        imp.toolbar_box.prepend(&toolbar);
-        imp.parts.borrow_mut().toolbar = Some(toolbar);
+        imp.toolbar_box.append(&toolbar);
+        let search = list.search_entry();
+        imp.toolbar_box.append(&search);
 
         imp.hpaned.set_start_child(Some(&selector));
-        imp.torrent_overlay.set_child(Some(&tv));
-        // Not wider than the list, when it's narrow
-        imp.torrent_overlay.set_clip_overlay(&*imp.no_results, true);
-        imp.torrent_overlay.set_clip_overlay(&*imp.not_connected, true);
         // the current profile (None) and its name and host
         let weak = self.downgrade();
         prefs.connect_changed(move |_, key| {
@@ -1456,7 +736,7 @@ impl MainWindow {
         // focus widget takes the keys: a text field, or a list with its own
         // type ahead (the sidebar, the details' lists). So the torrent list
         // has none.
-        imp.filter_entry.set_key_capture_widget(Some(self));
+        search.set_key_capture_widget(Some(self));
         // The app's shortcuts are handled in the window's capture phase by a
         // controller added with the application. This one is added after
         // it, so it comes first.
@@ -1469,37 +749,50 @@ impl MainWindow {
         });
         self.add_controller(keys);
 
-        let weak = self.downgrade();
-        selector.connect_state_changed(move |_, _| {
-            if let Some(win) = weak.upgrade() {
-                win.refilter();
+        let weak = list.downgrade();
+        selector.connect_filter_changed(move |selector| {
+            if let Some(list) = weak.upgrade() {
+                list.set_filter(selector.filter());
             }
         });
         // the restored filter
-        self.refilter();
+        list.set_filter(selector.filter());
 
-        // the lists are enabled once connected (conn_changed)
-        {
-            let parts = imp.parts.borrow();
-            tv.set_sensitive(false);
-            parts.peers_tv.as_ref().unwrap().set_sensitive(false);
-            parts.files_view.as_ref().unwrap().tv.set_sensitive(false);
-            parts.trackers_view.as_ref().unwrap().tv.set_sensitive(false);
-        }
-
-        // There's no system tray in GTK 4
-
-        imp.status_bar.set_client(self, &client);
+        imp.status_bar.set_client(&client);
         let weak = self.downgrade();
         client.connect_session_updated(move |_| {
             if let Some(win) = weak.upgrade() {
                 win.session_updated();
             }
         });
+        let weak = self.downgrade();
+        client.connect_connection_changed(move |_| {
+            if let Some(win) = weak.upgrade() {
+                win.connection_changed();
+            }
+        });
+        let weak = self.downgrade();
+        client.connect_torrents_updated(move |_, mode| {
+            if let Some(win) = weak.upgrade() {
+                win.torrents_updated(mode);
+            }
+        });
+        let weak = self.downgrade();
+        client.connect_request_failed(move |_, msg| {
+            if let Some(win) = weak.upgrade() {
+                win.show_error(msg);
+            }
+        });
+        let weak = self.downgrade();
+        client.connect_status_message(move |_, msg| {
+            if let Some(win) = weak.upgrade() {
+                win.imp().status_bar.push_connection_msg(msg);
+            }
+        });
 
-        let width = prefs.get_int(prefs::KEY_WINDOW_WIDTH, prefs::GLOBAL);
-        let height = prefs.get_int(prefs::KEY_WINDOW_HEIGHT, prefs::GLOBAL);
-        let pos = prefs.get_int(prefs::KEY_NOTEBOOK_PANED_POS, prefs::GLOBAL);
+        let width = prefs.get_int(prefs::KEY_WINDOW_WIDTH, Scope::Global);
+        let height = prefs.get_int(prefs::KEY_WINDOW_HEIGHT, Scope::Global);
+        let pos = prefs.get_int(prefs::KEY_NOTEBOOK_PANED_POS, Scope::Global);
 
         if width > 0 && height > 0 {
             self.set_default_size(width as i32, height as i32);
@@ -1510,12 +803,11 @@ impl MainWindow {
             imp.vpaned.set_position(pos as i32);
         }
 
-        selector.set_visible(prefs.get_bool(prefs::KEY_SHOW_STATE_SELECTOR, prefs::GLOBAL));
-        imp.notebook.set_visible(prefs.get_bool(prefs::KEY_SHOW_NOTEBOOK, prefs::GLOBAL));
+        self.follow_view_prefs(&prefs);
 
         // A saved position wider than a third of the window is ignored, like
         // those saved when long directory names widened the sidebar.
-        let pos = prefs.get_int(prefs::KEY_STATES_PANED_POS, prefs::GLOBAL);
+        let pos = prefs.get_int(prefs::KEY_STATES_PANED_POS, Scope::Global);
         let window_width = if width > 0 { width } else { self.default_width() as i64 };
         if pos > 0 && pos <= window_width / 3 {
             imp.hpaned.set_position(pos as i32);
@@ -1579,15 +871,9 @@ impl MainWindow {
 
     pub fn auto_connect_if_required(&self) {
         let prefs = self.client().prefs().clone();
-        let host = prefs.get_string(prefs::KEY_HOSTNAME, prefs::PROFILE).unwrap_or_default();
-        if !host.is_empty() && prefs.get_bool(prefs::KEY_AUTO_CONNECT, prefs::PROFILE) {
+        let host = prefs.get_string(prefs::KEY_HOSTNAME, Scope::Profile).unwrap_or_default();
+        if !host.is_empty() && prefs.get_bool(prefs::KEY_AUTO_CONNECT, Scope::Profile) {
             self.connect_profile(-1);
         }
-    }
-}
-
-impl MainWindow {
-    pub fn notebook_set_visible(&self, visible: bool) {
-        self.imp().notebook.set_visible(visible);
     }
 }
