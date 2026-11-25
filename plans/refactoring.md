@@ -90,7 +90,9 @@ is left to do, in the recommended order. Work happens on the
   state selector's `build()`, `torrent_view.rs` for the style).
 - `src/details.rs` — the trackers/files/peers lists of a torrent, shared by
   the window and the properties dialog.
-- `src/dialogs/` — dialogs; `dialog.rs` is a GtkDialog-like base class.
+- `src/dialogs/` — dialogs; `dialog.rs` is a GtkDialog-like base class
+  (the layout, Escape, and the `dialog.ok`/`dialog.cancel` actions, which
+  respond with `Response::Ok`/`Response::Cancel`).
 - `src/ui/*.blp` — Blueprint UI files; `data/style.css` — the CSS.
 
 ## Steps
@@ -297,20 +299,49 @@ template `src/ui/torrent-list.blp`), a template child of the main window
   the client's model (and the sidebar following it) can still change:
   `refilter` and `update_no_results` return when the entry is gone.
 
-### Smaller items
+### Smaller items — done or decided
 
-- **CI** — the workflow is `.github/workflows/c-cpp.yml`; rename it, and add
-  `cargo test` and `cargo clippy --all-targets -- -D warnings`.
-- **The `Dialog` base class** (`dialogs/dialog.rs`) reproduces GtkDialog's
-  response IDs. Most dialogs only need OK/Cancel buttons calling closures;
-  consider plain `gtk::Window`s with buttons.
-- **Typed errors** — `Client::parse_settings` and adding torrents return
-  `String` errors; small error enums would do.
-- **gettext** — `i18n.rs` calls gettext through hand-written FFI;
-  `gettext-rs` could replace it. Its C-style `sprintf` has to stay for the
-  existing translations.
-- **The About dialog** doesn't close with Escape on macOS (seen in UI
-  testing on the base commit too).
+- **CI** — the workflow is `.github/workflows/build.yml` (was `c-cpp.yml`;
+  still named "CI"). The Linux and macOS jobs run `meson test` (which runs
+  `cargo test` with meson's environment, so blueprint-compiler can be
+  meson's git fallback, as on Ubuntu) and
+  `meson devenv -C build cargo clippy ... --all-targets -- -D warnings`.
+  Not on Windows, where the tests have never run (the translation test
+  sets a locale that may not exist there). `formatting.yml` needed no
+  change. The translation test failed under meson (and `meson dist`, which
+  runs the tests): it looked in `TRG_LOCALEDIR`, the install prefix. build.rs
+  now always compiles the translations into `OUT_DIR/locale`, which the test
+  uses.
+- **The `Dialog` base class — kept**, simplified: it gives eight dialogs
+  their layout (the content area, the row of buttons from `[action]`
+  children), Escape, closing as a response, and actions whose enabling
+  makes the buttons insensitive. Plain `gtk::Window`s would repeat all that
+  in each template and class. What went: GtkDialog's five response IDs;
+  every dialog only told a confirmation from anything else, so there are
+  `Response::Ok` (`dialog.ok`: OK, Add, Move, Rename) and `Response::Cancel`
+  (`dialog.cancel`: Cancel, Close, closing the window).
+- **Typed errors** — `client::SettingsError` (`NoHostname`, now "No
+  hostname set" instead of the untranslated "Bad hostname.", and `BadUrl`)
+  and `add_torrents::AddError` (`Read`: names the file, with the C
+  version's "Unable to open torrent file: %s", also in the add dialog).
+  They implement `Display` by hand: **xgettext doesn't extract strings in
+  attributes**, so `#[error("{}", tr("..."))]` doesn't work; rpc::Error's
+  translated messages moved into functions for that reason.
+- **gettext — left as hand-written FFI.** `gettext-rs` (gettext-sys 0.27)
+  uses the system's gettext only with glibc/musl, MinGW and FreeBSD; on
+  macOS it builds GNU gettext from source unless `GETTEXT_DIR` (or the
+  `GETTEXT_*_DIR` variables) are set, which the meson and plain cargo builds
+  would then have to set. build.rs already links GLib's libintl, so the FFI
+  (five functions) stays.
+- **The About dialog's Escape on macOS — not fixed, cause unclear.**
+  GtkAboutDialog binds Escape to `window.close` itself (GTK 4.20
+  `gtkaboutdialog.c`), the same binding `TrgDialog` has, and Escape closes
+  those on macOS. The difference: the About dialog is modal, which the GTK
+  macOS backend makes a child window at `NSModalPanelWindowLevel`, so the
+  key may not reach it (not the key window). Worth trying in a UI pass:
+  whether it closes with Escape after a click into it, and without
+  `set_modal(true)` in `main_window.rs`; a shortcut controller wouldn't
+  help if the key never reaches the dialog.
 
 ## UI verification
 
@@ -405,25 +436,44 @@ check:
   the dialog, that closes the dialog) while the dialog is open with an
   unconfirmed change: after a restart the old value shows.
 
-Open observations from that pass, not investigated:
+Observations from that pass, investigated after step 7:
 
 - `Gdk-CRITICAL: gdk_surface_thaw_updates: assertion
-  'surface->update_freeze_count > 0' failed`, a few times while opening and
-  closing the Remote Preferences and Statistics dialogs (Escape, the close
-  button). It didn't reproduce in a dedicated run on the base commit
-  (13fdfd0) or on 936a848, so it's intermittent, likely in GTK's macOS
-  backend, and maybe older than this branch.
-- The add dialog's file tree of a multi-file torrent starts below the
-  torrent's own folder (`bencode.rs` and `FilesModel::set_tree`), while the
-  server's file list includes it.
-- The properties dialog's "Running time" shows the date the torrent was
-  added, and "Remaining time" is empty for a complete torrent (check the
-  labels against what `info_page_update` sets).
-- After adding or deleting a tracker, the remaining tracker's Last
-  Announce and Last Result are blank until the next update (the server
-  gives the trackers new IDs).
-- The Delete key alone didn't remove a torrent in the test (Cmd+Backspace
-  did); possibly only the test tool's key mapping.
+  'surface->update_freeze_count > 0' failed` while opening and closing the
+  Remote Preferences and Statistics dialogs: the app never freezes or thaws
+  surfaces; the macOS backend does (`gdkmacossurface.c`: a freeze per
+  requested frame, thawed when it's presented if the surface is mapped, or
+  when the frame is cancelled, and a thaw on the first show), so a window
+  hidden or destroyed while it awaits a frame can unbalance it. The
+  dialogs are destroyed from their response handler (Escape: from
+  `close-request`), as GtkDialog applications did. Left as GTK's.
+- The add dialog's file tree of a multi-file torrent started below the
+  torrent's folder: fixed, the files are under the folder (the torrent's
+  name) as in the server's list (6d826dd); the file indexes are unchanged.
+- The properties' "Running time" showed the date added (as in the C
+  version): it's labelled "Added" now; "Remaining time" shows "N/A"
+  without an ETA, like the general panel; "Last activity" says "Active
+  now" while the torrent transfers, otherwise the activity date (128f0f9).
+- After adding or deleting a tracker, Last Announce/Last Result were
+  blank: that's the server. Wire-checked with Transmission 4.1.4: after a
+  torrent_set of `tracker_list`, every tracker (also the unchanged one)
+  has a new ID, `has_announced: false`, `last_announce_time: 0` and an
+  empty `last_announce_result`, still a few seconds later, until it
+  announces again.
+- Delete didn't remove a torrent: the test tool's `key delete` sends key
+  code 51, the Mac's Delete key, which is BackSpace in GTK; `win.remove` is
+  Delete (forward delete, `key forwarddelete`) and Cmd+BackSpace on macOS,
+  like Finder. Not a bug.
+- From the task list: the old header kept its sort arrow after sorting from
+  View > Sort: `gtk_column_view_sort_by_column()` replaces the sort
+  columns but notifies only the new column's header; the tree view clears
+  the sort first now (2da02b9).
+- From the task list: the sidebar's Active counted every downloading
+  torrent. Transmission's clients (GTK `Torrent.cc`, web `torrent.js`)
+  count a torrent active while peers send to it or get from it (web: also
+  web seeds) or while it's checked; the flag does that now (2e4efbe,
+  behaviour change). The hidden Peers T/I/E/H/X/L/R column shows the peer
+  sources while a torrent is downloading or seeding.
 
 After step 7 (commits 49a14ad to 8f59a41), not clicked through yet;
 check:
@@ -450,3 +500,29 @@ check:
 - the list insensitive while disconnected and connecting, sensitive once
   connected; the torrent list's columns, widths and sorting surviving a
   restart; the View > Sort menu.
+
+After the smaller items and the observations (commits dcc13e2 to 2e4efbe),
+not clicked through yet; check:
+
+- every dialog's buttons: OK/Add/Move/Rename apply, Cancel/Close and the
+  window's close button and Escape don't; Add, Move and Rename insensitive
+  while their entry is empty; the preferences dialog's view settings
+  restored on Cancel/Close (TrgDialog's responses were reduced to OK and
+  Cancel);
+- connecting to a profile without a host: "No hostname set", then the
+  preferences open;
+- adding a .torrent file that can't be read (e.g. `chmod 000`), with and
+  without the add dialog: the message names the file;
+- the add dialog with a multi-file torrent: the tree starts with the
+  torrent's folder, expanded; unchecking files and setting priorities, then
+  adding: the server's files have those (by index), also in subfolders;
+  a single-file torrent as before;
+- the properties' info page: "Added" with the date, "Remaining time" with
+  the ETA while downloading and "N/A" otherwise, "Last activity": "Active
+  now" while transferring, a date when idle;
+- sorting by a header, then by another column from View > Sort: only the
+  new header has an arrow (also ascending/descending, and back to a
+  header click); restored sorting after a restart shows one arrow;
+- the sidebar's Active count and filter: a downloading torrent without
+  peers isn't active, one receiving or sending is, a checking one is;
+- the About dialog and Escape on macOS (see "Smaller items").
