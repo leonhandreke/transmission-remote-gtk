@@ -319,7 +319,9 @@ impl TorrentList {
     /// The filter or the search text changed
     fn refilter(&self) {
         let imp = self.imp();
-        let text = imp.search_entry.text();
+        // see update_no_results()
+        let Some(entry) = imp.search_entry.try_get() else { return };
+        let text = entry.text();
         *imp.filter_text.borrow_mut() =
             (!text.is_empty()).then(|| glib::casefold(&text).to_string());
 
