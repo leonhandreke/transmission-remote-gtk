@@ -1,6 +1,6 @@
 //! The context menu of the torrent list: the torrent actions (sections of
-//! the main window's template), and the speed limits and bandwidth priority
-//! of the selected torrents, as radio items.
+//! the list's template), and the speed limits and bandwidth priority of the
+//! selected torrents, as radio items.
 
 use gtk::prelude::*;
 use gtk::{gio, glib};
@@ -8,18 +8,24 @@ use gtk::{gio, glib};
 use crate::client::Client;
 use crate::format;
 use crate::i18n::tr;
-use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::torrent_view;
 use crate::tree_view::TreeView;
 use crate::util;
 
-/// Pops up the menu for the selected torrents at x, y (-1 for the whole list)
-pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::MenuModel]) {
+/// Pops up the menu for the selected torrents at x, y (-1 for the whole list).
+/// The radio items show the values of the torrent current_id, the first
+/// selected one.
+pub fn popup(
+    client: &Client,
+    tv: &TreeView,
+    current_id: i64,
+    x: f64,
+    y: f64,
+    sections: &[gio::MenuModel],
+) {
     let ids = torrent_view::selected_ids(tv);
-    // The radio items show the values of the first selected torrent
-    let client = win.client();
-    let current = client.find_torrent(win.selected_torrent_id()).map(|t| t.torrent());
+    let current = client.find_torrent(current_id).map(|t| t.torrent());
     let current = current.as_deref();
     let actions = gio::SimpleActionGroup::new();
 
@@ -31,7 +37,7 @@ pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::M
     // the current limit (-1 for none), and the keys of the torrent_set
     let limit = |name, title: &str, limit: Option<(bool, i64)>, enabled_key, speed_key| {
         let limit = limit.filter(|(limited, _)| *limited).map_or(-1, |(_, l)| l as i32);
-        torrent_set_action(&client, &actions, &ids, name, limit, move |req, v| {
+        torrent_set_action(client, &actions, &ids, name, limit, move |req, v| {
             if v >= 0 {
                 req.set(speed_key, v);
             }
@@ -54,7 +60,7 @@ pub fn popup(win: &MainWindow, tv: &TreeView, x: f64, y: f64, sections: &[gio::M
         p::FIELD_UPLOAD_LIMIT,
     ));
     let priority = current.map_or(p::TR_PRI_UNSET, |t| t.bandwidth_priority);
-    torrent_set_action(&client, &actions, &ids, "priority", priority as i32, |req, v| {
+    torrent_set_action(client, &actions, &ids, "priority", priority as i32, |req, v| {
         req.set(p::FIELD_BANDWIDTH_PRIORITY, v);
     });
     section.append_item(&priority_menu());

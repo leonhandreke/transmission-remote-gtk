@@ -24,10 +24,8 @@ use crate::state_selector::StateSelector;
 use crate::status_bar::StatusBar;
 use crate::toolbar::Toolbar;
 use crate::torrent_list::TorrentList;
-use crate::torrent_menu;
 use crate::torrent_model::{TorrentModel, UpdateMode};
 use crate::torrent_object::TorrentObject;
-use crate::tree_view::TreeView;
 use crate::util;
 
 /// The parts of the window that aren't in its template, made by construct()
@@ -54,10 +52,6 @@ mod imp {
         pub vpaned: TemplateChild<gtk::Paned>,
         #[template_child]
         pub notebook: TemplateChild<gtk::Notebook>,
-        #[template_child]
-        pub torrent_actions_menu: TemplateChild<gio::MenuModel>,
-        #[template_child]
-        pub torrent_queue_menu: TemplateChild<gio::MenuModel>,
         #[template_child]
         pub torrent_list: TemplateChild<TorrentList>,
         #[template_child]
@@ -624,19 +618,6 @@ impl MainWindow {
         });
     }
 
-    fn torrent_tv_context_menu(&self, tv: &TreeView, x: f64, y: f64) -> bool {
-        if !tv.context_menu_for_rows(x, y) {
-            return false;
-        }
-        let imp = self.imp();
-        let mut sections = vec![imp.torrent_actions_menu.get()];
-        if imp.queues_enabled.get() {
-            sections.push(imp.torrent_queue_menu.get());
-        }
-        torrent_menu::popup(self, tv, x, y, &sections);
-        true
-    }
-
     fn session_updated(&self) {
         let imp = self.imp();
         let client = self.client();
@@ -650,6 +631,7 @@ impl MainWindow {
         if imp.queues_enabled.get() != queues_enabled {
             self.menu_bar().set_supports_queues(queues_enabled);
             self.state_selector().set_queues_enabled(queues_enabled);
+            self.torrent_list().set_queues_enabled(queues_enabled);
         }
         imp.queues_enabled.set(queues_enabled);
     }
@@ -714,13 +696,6 @@ impl MainWindow {
             if let Some(win) = weak.upgrade() {
                 win.update_selected_torrent_notebook(UpdateMode::First, list.selected_id());
             }
-        });
-        let weak = self.downgrade();
-        util::add_context_menu(&tv, move |w, x, y| {
-            let (Some(win), Some(tv)) = (weak.upgrade(), w.downcast_ref::<TreeView>()) else {
-                return false;
-            };
-            win.torrent_tv_context_menu(tv, x, y)
         });
         let weak = self.downgrade();
         list.connect_row_activated(move |_| {

@@ -1,19 +1,20 @@
 //! The torrent list: the client's torrents that the sidebar's filter and the
-//! search text show, "Not Connected" over it while not connected, and "No
-//! Results" when nothing matches the search. The search entry is the list's,
-//! the main window shows it in its toolbar.
+//! search text show, "Not Connected" over it while not connected, "No
+//! Results" when nothing matches the search, and the torrents' context menu.
+//! The search entry is the list's, the main window shows it in its toolbar.
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::sync::OnceLock;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{CompositeTemplate, glib};
+use gtk::{CompositeTemplate, gio, glib};
 
 use crate::client::{Client, ConnectionState};
 use crate::i18n::{sprintf, tr};
 use crate::prefs::{self, Scope};
 use crate::state_selector::Filter;
+use crate::torrent_menu;
 use crate::torrent_object::TorrentObject;
 use crate::torrent_view;
 use crate::tree_view::{PERSIST_LAYOUT, PERSIST_SORT, TreeView};
@@ -39,6 +40,10 @@ mod imp {
         pub connecting_label: TemplateChild<gtk::Label>,
         #[template_child]
         pub search_entry: TemplateChild<gtk::SearchEntry>,
+        #[template_child]
+        pub torrent_actions_menu: TemplateChild<gio::MenuModel>,
+        #[template_child]
+        pub torrent_queue_menu: TemplateChild<gio::MenuModel>,
 
         pub client: OnceCell<Client>,
         pub tv: OnceCell<TreeView>,
@@ -50,6 +55,8 @@ mod imp {
         pub filter_text: RefCell<Option<String>>,
         // the first selected torrent (-1 for none), as last signalled
         pub selected_id: Cell<i64>,
+        // whether the context menu has the queue's items
+        pub queues_enabled: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -82,6 +89,7 @@ mod imp {
         fn constructed(&self) {
             self.parent_constructed();
             self.selected_id.set(-1);
+            self.queues_enabled.set(true);
             // Not wider than the list, when it's narrow
             self.overlay.set_clip_overlay(&*self.no_results, true);
             self.overlay.set_clip_overlay(&*self.not_connected, true);
@@ -148,6 +156,10 @@ impl TorrentList {
             }
         });
         let weak = self.downgrade();
+        util::add_context_menu(&tv, move |_, x, y| {
+            weak.upgrade().is_some_and(|list| list.context_menu(x, y))
+        });
+        let weak = self.downgrade();
         tv.connect_row_activated(move |_, _| {
             if let Some(list) = weak.upgrade() {
                 list.emit_by_name::<()>("row-activated", &[]);
@@ -200,6 +212,25 @@ impl TorrentList {
                 list.tree_view().grab_focus();
             }
         });
+    }
+
+    /// Whether the server has queues, the context menu then has their items
+    pub fn set_queues_enabled(&self, enabled: bool) {
+        self.imp().queues_enabled.set(enabled);
+    }
+
+    fn context_menu(&self, x: f64, y: f64) -> bool {
+        let tv = self.tree_view();
+        if !tv.context_menu_for_rows(x, y) {
+            return false;
+        }
+        let imp = self.imp();
+        let mut sections = vec![imp.torrent_actions_menu.get()];
+        if imp.queues_enabled.get() {
+            sections.push(imp.torrent_queue_menu.get());
+        }
+        torrent_menu::popup(&self.client(), &tv, self.selected_id(), x, y, &sections);
+        true
     }
 
     /// Persists the columns and the sorting
