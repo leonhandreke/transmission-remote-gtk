@@ -88,8 +88,11 @@ is left to do, in the recommended order. Work happens on the
   (`menu_bar.rs`) and the preferences dialog only set them, and the widgets
   follow `Prefs::connect_changed` (`MainWindow::follow_view_prefs`, the
   state selector's `build()`, `torrent_view.rs` for the style).
-- `src/details.rs` — the trackers/files/peers lists of a torrent, shared by
-  the window and the properties dialog.
+- `src/details.rs` — `Details` (`TrgDetails`, `src/ui/details.blp`), the
+  notebook below the torrent list showing the selected torrent: the General
+  page (`GeneralPanel`, `general_panel.rs`) and the lists; and
+  `DetailLists`, the trackers/files/peers lists of a torrent, which the
+  properties dialog shows too.
 - `src/dialogs/` — dialogs; `dialog.rs` is a GtkDialog-like base class
   (the layout, Escape, and the `dialog.ok`/`dialog.cancel` actions, which
   respond with `Response::Ok`/`Response::Cancel`).
@@ -299,14 +302,14 @@ template `src/ui/torrent-list.blp`), a template child of the main window
   the client's model (and the sidebar following it) can still change:
   `refilter` and `update_no_results` return when the entry is gone.
 
-### 8. A `Details` widget
+### 8. A `Details` widget — done
 
-The details notebook below the torrent list (the General page,
-`GeneralPanel`, and the trackers/files/peers pages, `DetailLists`) is part
-of the main window's template, and the window fills and clears it: it
-shows the selected torrent (`update_selected_torrent_notebook`), clears it
-(`torrent_scrub`), sets its sensitivity on connecting and disconnecting,
-appends the lists' pages in `construct()` and persists their layouts in
+The goal: the details notebook below the torrent list (the General page,
+`GeneralPanel`, and the trackers/files/peers pages, `DetailLists`) was part
+of the main window's template, and the window filled and cleared it: it
+showed the selected torrent (`update_selected_torrent_notebook`), cleared
+it (`torrent_scrub`), set its sensitivity on connecting and disconnecting,
+appended the lists' pages in `construct()` and persisted their layouts in
 `save_window_state()`. Make it one composite widget, like `TorrentList` in
 step 7, with its own Blueprint template, that fills and clears itself: the
 window only gives it the client, the selected torrent with the update mode,
@@ -318,6 +321,37 @@ Keep the behaviour: which page shows, the notebook following the "torrent
 details" view preference, the vpaned's position saved and restored, the
 lists' columns and sorting (config ids unchanged), the files tree built in
 a thread for big torrents, keyboard focus and the lists' context menus.
+
+What was done (`main_window.rs` went from 879 to 858 lines):
+
+- `Details` (`src/details.rs`, template `src/ui/details.blp`) is a template
+  child of the main window, the vpaned's end child. Its template has the
+  notebook with the General page; `set_client()` makes the lists (config
+  ids "TrgTrackersTreeView", "TrgFilesTreeView", "TrgPeersTreeView", as
+  before), appends their pages after it and makes them insensitive until
+  connected. The API: `set_client(client)`, `set_torrent(Option<&TorrentObject>,
+  mode)` (`None` clears it), `set_connection(state)` (sensitive while
+  connected, cleared once disconnected) and `persist()`.
+- The window's `show_selected_torrent(mode)` (on the list's
+  `selection-changed` with `First`, after each update with its mode) looks
+  up the selected torrent (`selected_torrent()`, which `copy_magnet_link`
+  uses too), enables the torrent actions while there's one and passes it to
+  the details; on disconnecting it disables them. The vpaned (its position
+  saved and restored) and the details following `KEY_SHOW_NOTEBOOK`
+  (`follow_view_prefs`, now hiding the `Details` widget rather than the
+  notebook) stay the window's.
+- `DetailLists` stays a type of its own: the properties dialog shows its
+  pages around its own info page, in another order (files, peers,
+  trackers), with the config suffix "-dialog", and updates them from the
+  model itself. Its fields and `clear()` are private now.
+- The files view no longer keeps the main window: the rename dialog's
+  parent is the view's window, or the window that one is transient for
+  (`FilesView::dialog_parent`), so the main window both from the details
+  and from the properties dialog, as before; `FileRenameDialog::new` takes
+  a `gtk::Window`.
+- Like the torrent list, the details dispose their template; the General
+  page is then gone, and `set_torrent` and `set_connection` skip it
+  (`Details::general()`), should the torrents change after that.
 
 ### Smaller items — done or decided
 
@@ -546,3 +580,28 @@ not clicked through yet; check:
 - the sidebar's Active count and filter: a downloading torrent without
   peers isn't active, one receiving or sending is, a checking one is;
 - the About dialog and Escape on macOS (see "Smaller items").
+
+After step 8 (commits 67518a7 to 9bf8e76), not clicked through yet; check:
+
+- the details look as before below the torrent list: General first (also
+  after a restart), then Trackers, Files, Peers; F5 / View > Torrent Details
+  and the preferences' check box hide and show them, the torrent list then
+  taking the height; the divider's position surviving a restart (and
+  hiding/showing the details);
+- the details following the selection (the General page and each list),
+  updating with the periodic updates, cleared when nothing is selected,
+  the selected torrent is filtered out or removed, and on disconnecting;
+  insensitive while disconnected and connecting (the lists from startup),
+  sensitive once connected;
+- the torrent actions (menu bar and toolbar: Properties, Move, Remove,
+  Verify, ...) enabled only while a torrent is selected, disabled after
+  disconnecting; Copy Magnet Link;
+- the lists' column layouts and sorting surviving a restart (main window
+  and properties dialog separately); a torrent with many files (over 600)
+  showing its tree;
+- the lists' context menus (trackers: add/edit/delete; files: priorities,
+  wanted, expand/collapse, Rename) with the pointer and the keyboard; the
+  rename dialog from the details and from the properties dialog, both on
+  top and renaming;
+- the keyboard: Tab into the notebook's tabs and the lists, the lists'
+  type-ahead, and that typing elsewhere still starts a search.
