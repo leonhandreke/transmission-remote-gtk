@@ -16,7 +16,6 @@ use gtk::{gio, glib};
 
 use crate::client::Client;
 use crate::i18n::tr;
-use crate::main_window::MainWindow;
 use crate::prefs::Prefs;
 use crate::protocol::{self as p, TR_PRI_HIGH, TR_PRI_LOW, TR_PRI_MIXED, TR_PRI_NORMAL, Torrent};
 use crate::torrent_model::UpdateMode;
@@ -487,7 +486,6 @@ pub struct FilesView {
     pub tv: TreeView,
     pub model: Rc<FilesModel>,
     client: Option<Client>,
-    win: Option<glib::WeakRef<MainWindow>>,
 }
 
 impl FilesView {
@@ -497,7 +495,6 @@ impl FilesView {
         config_id: &str,
         progress: bool,
         client: Option<&Client>,
-        win: Option<&MainWindow>,
     ) -> Rc<Self> {
         let tv = TreeView::new(prefs, config_id);
 
@@ -511,12 +508,7 @@ impl FilesView {
         let wanted = reg(ColType::Wanted, 4, "wanted", &tr("Download"), "wanted");
         let priority = reg(ColType::Prio, 5, "priority", &tr("Priority"), "priority");
 
-        let view = Rc::new(Self {
-            tv: tv.clone(),
-            model: model.clone(),
-            client: client.cloned(),
-            win: win.map(|w| w.downgrade()),
-        });
+        let view = Rc::new(Self { tv: tv.clone(), model: model.clone(), client: client.cloned() });
 
         // A click on the Download check box toggles it
         let weak = Rc::downgrade(&view);
@@ -575,24 +567,25 @@ impl FilesView {
         view
     }
 
-    pub fn new(
-        model: &Rc<FilesModel>,
-        win: &MainWindow,
-        client: &Client,
-        config_id: Option<&str>,
-    ) -> Rc<Self> {
+    pub fn new(model: &Rc<FilesModel>, client: &Client, config_id: Option<&str>) -> Rc<Self> {
         Self::create(
             model,
             Some(client.prefs()),
             config_id.unwrap_or("TrgFilesTreeView"),
             true,
             Some(client),
-            Some(win),
         )
     }
 
     pub fn new_local(model: &Rc<FilesModel>, prefs: Option<&Prefs>, config_id: &str) -> Rc<Self> {
-        Self::create(model, prefs, config_id, false, None, None)
+        Self::create(model, prefs, config_id, false, None)
+    }
+
+    /// The window the rename dialog belongs to: the main window, also from
+    /// the properties dialog, which is transient for it
+    fn dialog_parent(&self) -> Option<gtk::Window> {
+        let root = self.tv.root().and_downcast::<gtk::Window>()?;
+        Some(root.transient_for().unwrap_or(root))
     }
 
     /// Sends a request changing the files, which then get updated. Updates
@@ -664,9 +657,7 @@ impl FilesView {
         add(
             "rename",
             Box::new(|v| {
-                if let (Some(win), Some(client)) =
-                    (v.win.as_ref().and_then(|w| w.upgrade()), &v.client)
-                {
+                if let (Some(win), Some(client)) = (v.dialog_parent(), &v.client) {
                     crate::dialogs::file_rename::FileRenameDialog::new(&win, client, v).present();
                 }
             }),

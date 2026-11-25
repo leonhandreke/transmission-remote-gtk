@@ -9,7 +9,6 @@ use gtk::prelude::*;
 use crate::client::Client;
 use crate::files::{FilesModel, FilesView};
 use crate::i18n::tr;
-use crate::main_window::MainWindow;
 use crate::peers::{self, PeersModel};
 use crate::protocol::Torrent;
 use crate::torrent_model::UpdateMode;
@@ -28,7 +27,7 @@ pub struct DetailLists {
 impl DetailLists {
     /// The lists, whose settings are saved under their names followed by
     /// config_suffix
-    pub fn new(win: &MainWindow, client: &Client, config_suffix: &str) -> Self {
+    pub fn new(client: &Client, config_suffix: &str) -> Self {
         let trackers_model = TrackersModel::new();
         let trackers_view = TrackersView::new(
             &trackers_model,
@@ -36,12 +35,8 @@ impl DetailLists {
             Some(&format!("TrgTrackersTreeView{config_suffix}")),
         );
         let files_model = FilesModel::new();
-        let files_view = FilesView::new(
-            &files_model,
-            win,
-            client,
-            Some(&format!("TrgFilesTreeView{config_suffix}")),
-        );
+        let files_view =
+            FilesView::new(&files_model, client, Some(&format!("TrgFilesTreeView{config_suffix}")));
         let peers_model = PeersModel::new();
         let peers_tv = peers::peers_tree_view_new(
             client.prefs(),

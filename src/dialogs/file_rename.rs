@@ -11,7 +11,6 @@ use crate::client::Client;
 use crate::dialogs::dialog::{Dialog, DialogImpl, Response, TrgDialogExt};
 use crate::files::{FileObject, FilesView};
 use crate::i18n::{sprintf, tr};
-use crate::main_window::MainWindow;
 use crate::protocol as p;
 use crate::util;
 
@@ -67,7 +66,7 @@ impl FileRenameDialog {
         }
     }
 
-    pub fn new(win: &MainWindow, client: &Client, view: &Rc<FilesView>) -> Self {
+    pub fn new(win: &gtk::Window, client: &Client, view: &Rc<FilesView>) -> Self {
         let d: Self = glib::Object::new();
         let imp = d.imp();
         let tv = &view.tv;

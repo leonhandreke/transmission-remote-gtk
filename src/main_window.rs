@@ -674,7 +674,7 @@ impl MainWindow {
         list.set_client(&client);
         let tv = list.tree_view();
         let selector = StateSelector::new(&client, &model);
-        let details = DetailLists::new(self, &client, "");
+        let details = DetailLists::new(&client, "");
         for (tv, title) in details.pages() {
             imp.notebook.append_page(tv, Some(&gtk::Label::new(Some(&title))));
         }

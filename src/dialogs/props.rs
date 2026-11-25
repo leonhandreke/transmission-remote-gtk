@@ -199,7 +199,7 @@ impl TorrentPropsDialog {
             }
 
             // after the information page
-            let lists = DetailLists::new(win, client, "-dialog");
+            let lists = DetailLists::new(client, "-dialog");
             lists.update(&torrent, serial, UpdateMode::First);
             let [trackers, files, peers] = lists.pages();
             for (position, (tv, title)) in [files, peers, trackers].into_iter().enumerate() {
